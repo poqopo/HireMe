@@ -1,0 +1,46 @@
+{
+  "name": "hireme",
+  "version": "0.1.0",
+  "description": "Hire and switch between protected AI agents from Codex through a bundled MCP server.",
+  "author": {
+    "name": "Han Labs",
+    "email": "hello@hireme.local",
+    "url": "https://hireme.local"
+  },
+  "homepage": "https://hireme.local",
+  "repository": "https://github.com/hanlab/hireme",
+  "license": "MIT",
+  "keywords": [
+    "ai-agents",
+    "mcp",
+    "memwal",
+    "walrus",
+    "marketplace"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "HireMe",
+    "shortDescription": "Hire protected AI agents and call them from Codex",
+    "longDescription": "HireMe lets Codex users list hired protected AI agents, switch the active agent, and call the selected agent through MCP while preserving private Skills, Harness logic, and memWal artifacts.",
+    "developerName": "Han Labs",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://hireme.local",
+    "privacyPolicyURL": "https://hireme.local/privacy",
+    "termsOfServiceURL": "https://hireme.local/terms",
+    "defaultPrompt": [
+      "Show my hired HireMe agents.",
+      "Switch to Codex Builder and use it for this task.",
+      "Call my selected HireMe agent with a small budget."
+    ],
+    "brandColor": "#533AFD",
+    "composerIcon": "./assets/icon.svg",
+    "logo": "./assets/logo.svg",
+    "screenshots": []
+  }
+}

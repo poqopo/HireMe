@@ -1,0 +1,673 @@
+#!/usr/bin/env node
+
+const agents = [
+  {
+    id: "walrus-researcher",
+    name: "Walrus Researcher",
+    handle: "@memwal/researcher",
+    creator: "Han Labs",
+    category: "Research",
+    status: "Available",
+    headline: "Finds protocol evidence, cites sources, and keeps private notes sealed.",
+    publicSummary:
+      "A research agent for Sui, Walrus, and storage-market analysis. It exposes source-backed briefs while keeping private heuristics and scoring prompts protected.",
+    harnessSummary: "retrieval + citation verifier + confidence scorer",
+    memwalPolicy: "Protected notes, source ranking weights, and scoring rubric",
+    skills: ["Protocol research", "Citation audit", "Market mapping"],
+    protectedAssets: ["ranking prompt", "source scoring harness", "private memory"],
+    pricePerCallUsd: 0.018,
+    freeCalls: 25,
+    rating: 4.9,
+    calls: 18420,
+    latencyMs: 920,
+  },
+  {
+    id: "codex-builder",
+    name: "Codex Builder",
+    handle: "@agents/codex-builder",
+    creator: "Build Guild",
+    category: "Code",
+    status: "Available",
+    headline: "Turns product specs into scoped PR-ready React and Supabase changes.",
+    publicSummary:
+      "A coding agent tuned for Vite, shadcn/ui, Supabase schemas, and MCP integrations. Buyers see the output, not the hidden harness.",
+    harnessSummary: "repo scanner + patch planner + regression checklist",
+    memwalPolicy: "Protected implementation recipes and repo-specific playbooks",
+    skills: ["React Vite", "Supabase", "MCP scaffolding"],
+    protectedAssets: ["patch templates", "review heuristics", "tool routing"],
+    pricePerCallUsd: 0.032,
+    freeCalls: 10,
+    rating: 4.8,
+    calls: 12290,
+    latencyMs: 1100,
+  },
+  {
+    id: "agent-evaluator",
+    name: "Agent Evaluator",
+    handle: "@evals/sentinel",
+    creator: "Eval Works",
+    category: "Security",
+    status: "Private Beta",
+    headline: "Runs red-team evals against hired agents before production use.",
+    publicSummary:
+      "A safety evaluator that stress-tests tools, output policies, and leakage boundaries before an Agent is added to a production MCP client.",
+    harnessSummary: "attack corpus + leakage grader + policy diff",
+    memwalPolicy: "Protected attack prompts, scoring thresholds, and audit traces",
+    skills: ["Prompt leakage", "Tool abuse", "Policy checks"],
+    protectedAssets: ["red-team set", "grader rubric", "blocked examples"],
+    pricePerCallUsd: 0.041,
+    freeCalls: 5,
+    rating: 4.7,
+    calls: 8740,
+    latencyMs: 1280,
+  },
+  {
+    id: "data-ledger",
+    name: "Data Ledger",
+    handle: "@metrics/data-ledger",
+    creator: "Metric House",
+    category: "Data",
+    status: "Available",
+    headline: "Builds usage ledgers, billing events, and creator payout exports.",
+    publicSummary:
+      "A data agent for call metering, pricing tiers, ledger normalization, and payout-ready analytics.",
+    harnessSummary: "event normalizer + anomaly detector + payout exporter",
+    memwalPolicy: "Protected pricing heuristics and fraud scoring rules",
+    skills: ["Usage ledger", "Pricing tiers", "Payout analytics"],
+    protectedAssets: ["fraud rules", "tier optimizer", "SQL templates"],
+    pricePerCallUsd: 0.015,
+    freeCalls: 50,
+    rating: 4.6,
+    calls: 20450,
+    latencyMs: 760,
+  },
+  {
+    id: "launch-operator",
+    name: "Launch Operator",
+    handle: "@growth/launch-operator",
+    creator: "Go To Market AI",
+    category: "Growth",
+    status: "Busy",
+    headline: "Drafts launch assets from private positioning memory and public docs.",
+    publicSummary:
+      "A growth agent that turns docs, changelogs, and market notes into release plans without leaking the creator's positioning library.",
+    harnessSummary: "positioning memory + asset planner + channel formatter",
+    memwalPolicy: "Protected positioning library and channel performance memory",
+    skills: ["Launch copy", "Channel plan", "Audience mapping"],
+    protectedAssets: ["positioning vault", "channel memory", "copy variants"],
+    pricePerCallUsd: 0.022,
+    freeCalls: 20,
+    rating: 4.5,
+    calls: 9390,
+    latencyMs: 880,
+  },
+  {
+    id: "ops-router",
+    name: "Ops Router",
+    handle: "@ops/router",
+    creator: "Backoffice Labs",
+    category: "Ops",
+    status: "Available",
+    headline: "Routes operational requests to the right tools with spend limits.",
+    publicSummary:
+      "An operations agent that coordinates MCP tools, budget limits, and approval gates for repetitive backoffice workflows.",
+    harnessSummary: "policy router + approval gate + tool budgeter",
+    memwalPolicy: "Protected routing rules and customer-specific operation memory",
+    skills: ["Tool routing", "Approvals", "Spend control"],
+    protectedAssets: ["routing graph", "approval matrix", "budget heuristics"],
+    pricePerCallUsd: 0.012,
+    freeCalls: 100,
+    rating: 4.7,
+    calls: 31700,
+    latencyMs: 690,
+  },
+];
+
+let activeAgentId = "walrus-researcher";
+const sealedHarnessRegistry = [
+  {
+    agentId: "walrus-researcher",
+    network: "walrus-testnet",
+    sealPolicyId: "seal:testnet:walrus-researcher-policy",
+    walrusBlobId: "walrus_researcher_encrypted_bundle",
+    suiObjectId: "0x9f1d4c739f6f3c9b72c8d2c64ad93f459081dfe2aa49c881d2df0672b591021a",
+    ciphertextDigest:
+      "sha256:2b5a8d1f84d83a9a8d33270c0a7fdc3d5d48f7d72f184a35a18f2453ff4fb01d",
+    registeredAt: "2026-06-10T00:00:00.000Z",
+  },
+];
+
+const gatewayUrl =
+  process.env.HIREME_MCP_GATEWAY_URL || "http://localhost:8787";
+const gatewayApiKey = process.env.HIREME_GATEWAY_API_KEY || "";
+const codexInstallationId =
+  process.env.HIREME_CODEX_INSTALLATION_ID || "local-codex";
+
+const inputSchemas = {
+  hireme_list_hired_agents: {
+    type: "object",
+    properties: {
+      category: {
+        type: "string",
+        enum: ["Research", "Code", "Data", "Security", "Growth", "Ops"],
+      },
+      query: { type: "string" },
+    },
+  },
+  hireme_get_agent: {
+    type: "object",
+    properties: {
+      agent_id: {
+        type: "string",
+        description: "Agent id, for example codex-builder",
+      },
+    },
+    required: ["agent_id"],
+  },
+  hireme_select_agent: {
+    type: "object",
+    properties: {
+      agent_id: {
+        type: "string",
+        description: "Agent id to make active for this Codex MCP session",
+      },
+    },
+    required: ["agent_id"],
+  },
+  hireme_current_agent: {
+    type: "object",
+    properties: {},
+  },
+  hireme_call_agent: {
+    type: "object",
+    properties: {
+      agent_id: {
+        type: "string",
+        description: "Optional explicit agent id. Uses active agent when omitted.",
+      },
+      task: {
+        type: "string",
+        minLength: 1,
+        description: "The task to send to the hired agent",
+      },
+      budget_calls: {
+        type: "integer",
+        minimum: 1,
+        maximum: 100,
+        description: "Maximum billable MCP calls for this request",
+      },
+    },
+    required: ["task"],
+  },
+  hireme_prepare_sealed_harness_upload: {
+    type: "object",
+    properties: {
+      agent_id: {
+        type: "string",
+        description: "Draft agent id for the sealed Harness registration",
+      },
+      epochs: {
+        type: "integer",
+        minimum: 1,
+        maximum: 53,
+        description: "Walrus storage duration in epochs",
+      },
+    },
+  },
+  hireme_register_sealed_harness: {
+    type: "object",
+    properties: {
+      agent_id: { type: "string" },
+      seal_policy_id: { type: "string" },
+      walrus_blob_id: { type: "string" },
+      sui_object_id: { type: "string" },
+      ciphertext_digest: { type: "string" },
+      price_per_call_usd: { type: "number", minimum: 0 },
+    },
+    required: [
+      "agent_id",
+      "seal_policy_id",
+      "walrus_blob_id",
+      "sui_object_id",
+      "ciphertext_digest",
+      "price_per_call_usd",
+    ],
+  },
+  hireme_connection_help: {
+    type: "object",
+    properties: {},
+  },
+};
+
+const tools = [
+  {
+    name: "hireme_list_hired_agents",
+    title: "List hired HireMe agents",
+    description:
+      "List the current user's hired protected agents with public skills, pricing, and memWal protection summaries.",
+    inputSchema: inputSchemas.hireme_list_hired_agents,
+  },
+  {
+    name: "hireme_get_agent",
+    title: "Get HireMe agent profile",
+    description:
+      "Inspect one hired agent's public profile, pricing, public skills, and protection policy.",
+    inputSchema: inputSchemas.hireme_get_agent,
+  },
+  {
+    name: "hireme_select_agent",
+    title: "Select active HireMe agent",
+    description:
+      "Set the active agent for this Codex MCP session so later calls can omit agent_id.",
+    inputSchema: inputSchemas.hireme_select_agent,
+  },
+  {
+    name: "hireme_current_agent",
+    title: "Get active HireMe agent",
+    description: "Return the session-local active HireMe agent.",
+    inputSchema: inputSchemas.hireme_current_agent,
+  },
+  {
+    name: "hireme_call_agent",
+    title: "Call a hired HireMe agent",
+    description:
+      "Call an explicitly selected or session-active protected agent. Returns mock output and a ledger event in this demo.",
+    inputSchema: inputSchemas.hireme_call_agent,
+  },
+  {
+    name: "hireme_prepare_sealed_harness_upload",
+    title: "Prepare sealed Harness upload",
+    description:
+      "Return the local Seal + Walrus upload boundary for a creator Harness bundle. Does not accept or expose plaintext Harness content.",
+    inputSchema: inputSchemas.hireme_prepare_sealed_harness_upload,
+  },
+  {
+    name: "hireme_register_sealed_harness",
+    title: "Register sealed Harness metadata",
+    description:
+      "Register only public metadata for an encrypted Harness already protected with Seal and stored on Walrus.",
+    inputSchema: inputSchemas.hireme_register_sealed_harness,
+  },
+  {
+    name: "hireme_connection_help",
+    title: "Show HireMe plugin help",
+    description: "Return plugin install, selection, and verification hints.",
+    inputSchema: inputSchemas.hireme_connection_help,
+  },
+];
+
+function sealedHarnessFor(agentId) {
+  return (
+    sealedHarnessRegistry.find((item) => item.agentId === agentId) || {
+      agentId,
+      network: "walrus-testnet",
+      sealPolicyId: `seal:testnet:${agentId}-policy`,
+      walrusBlobId: `walrus_${agentId}_encrypted_bundle`,
+      suiObjectId: "pending",
+      ciphertextDigest: "pending",
+      registeredAt: null,
+    }
+  );
+}
+
+function publicAgent(agent) {
+  return {
+    id: agent.id,
+    name: agent.name,
+    handle: agent.handle,
+    creator: agent.creator,
+    category: agent.category,
+    status: agent.status,
+    headline: agent.headline,
+    publicSummary: agent.publicSummary,
+    publicSkills: agent.skills,
+    publicContract: agent.harnessSummary,
+    memwalPolicy: agent.memwalPolicy,
+    hiddenAssetClasses: agent.protectedAssets,
+    sealedHarness: sealedHarnessFor(agent.id),
+    pricePerCallUsd: agent.pricePerCallUsd,
+    freeCalls: agent.freeCalls,
+    rating: agent.rating,
+    historicalCalls: agent.calls,
+    medianLatencyMs: agent.latencyMs,
+    hired: true,
+  };
+}
+
+function findAgent(agentId) {
+  const agent = agents.find((item) => item.id === agentId);
+  if (!agent) {
+    throw new Error(`Unknown or not hired agent_id: ${agentId}`);
+  }
+  return agent;
+}
+
+function textResult(value) {
+  return {
+    content: [
+      {
+        type: "text",
+        text: typeof value === "string" ? value : JSON.stringify(value, null, 2),
+      },
+    ],
+  };
+}
+
+async function callGateway(path, body = {}) {
+  if (process.env.HIREME_MCP_GATEWAY_DISABLED === "1") return null;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 450);
+
+  try {
+    const headers = {
+      "content-type": "application/json",
+    };
+
+    if (gatewayApiKey) {
+      headers.authorization = `Bearer ${gatewayApiKey}`;
+      headers["x-hireme-gateway-key"] = gatewayApiKey;
+    }
+
+    const response = await fetch(`${gatewayUrl}${path}`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        codex_installation_id: codexInstallationId,
+        ...body,
+      }),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.text();
+      throw new Error(`Gateway ${response.status}: ${errorBody}`);
+    }
+
+    return await response.json();
+  } catch (err) {
+    if (process.env.HIREME_MCP_GATEWAY_REQUIRED === "1") {
+      throw err;
+    }
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function listAgents(args = {}) {
+  const query = args.query?.trim().toLowerCase();
+  const filtered = agents
+    .filter((agent) => !args.category || agent.category === args.category)
+    .filter((agent) => {
+      if (!query) return true;
+      return [
+        agent.id,
+        agent.name,
+        agent.handle,
+        agent.creator,
+        agent.category,
+        agent.headline,
+        agent.publicSummary,
+        ...agent.skills,
+      ]
+        .join(" ")
+        .toLowerCase()
+        .includes(query);
+    })
+    .map((agent) => ({
+      id: agent.id,
+      name: agent.name,
+      category: agent.category,
+      status: agent.status,
+      headline: agent.headline,
+      pricePerCallUsd: agent.pricePerCallUsd,
+      publicSkills: agent.skills,
+      memwalPolicy: agent.memwalPolicy,
+      sealedHarness: sealedHarnessFor(agent.id),
+      active: agent.id === activeAgentId,
+    }));
+
+  return textResult({
+    count: filtered.length,
+    activeAgentId,
+    hiredAgents: filtered,
+  });
+}
+
+async function callTool(name, args = {}) {
+  switch (name) {
+    case "hireme_list_hired_agents": {
+      const gateway = await callGateway("/v1/agents/list", args);
+      if (gateway) return textResult(gateway);
+      return listAgents(args);
+    }
+    case "hireme_get_agent": {
+      const gateway = await callGateway("/v1/agents/get", args);
+      if (gateway) return textResult(gateway.agent || gateway);
+      return textResult(publicAgent(findAgent(args.agent_id)));
+    }
+    case "hireme_select_agent": {
+      const gateway = await callGateway("/v1/sessions/select", args);
+      if (gateway) {
+        activeAgentId = gateway.activeAgentId || args.agent_id;
+        return textResult(gateway);
+      }
+      const agent = findAgent(args.agent_id);
+      activeAgentId = agent.id;
+      return textResult({
+        activeAgentId,
+        activeAgent: publicAgent(agent),
+        note: "Active agent updated for this MCP server process. Production should persist this per user and Codex installation.",
+      });
+    }
+    case "hireme_current_agent": {
+      const gateway = await callGateway("/v1/sessions/current", args);
+      if (gateway) {
+        activeAgentId = gateway.activeAgentId || activeAgentId;
+        return textResult(gateway);
+      }
+      return textResult({
+        activeAgentId,
+        activeAgent: publicAgent(findAgent(activeAgentId)),
+      });
+    }
+    case "hireme_call_agent": {
+      const gateway = await callGateway("/v1/agent-call", {
+        agent_id: args.agent_id || activeAgentId,
+        ...args,
+      });
+      if (gateway) {
+        activeAgentId = gateway.activeAgentId || args.agent_id || activeAgentId;
+        return textResult(gateway);
+      }
+      const agent = findAgent(args.agent_id || activeAgentId);
+      const callId = `call_${Date.now().toString(36)}`;
+      const budgetCalls = args.budget_calls || 1;
+      return textResult({
+        callId,
+        activeAgentId,
+        agent: {
+          id: agent.id,
+          name: agent.name,
+          pricePerCallUsd: agent.pricePerCallUsd,
+        },
+        request: {
+          task: args.task,
+          budgetCalls,
+        },
+        protection: {
+          codexPluginContainsCreatorSecrets: false,
+          memwalPolicy: agent.memwalPolicy,
+          sealPolicyId: sealedHarnessFor(agent.id).sealPolicyId,
+          walrusBlobId: sealedHarnessFor(agent.id).walrusBlobId,
+          exposedSkills: false,
+          exposedPluginCode: false,
+          exposedHarnessInternals: false,
+          protectedAssetsReturned: false,
+        },
+        result:
+          "Demo response: the selected protected agent accepted the task. Production will execute the sealed Agent folder inside the MCP gateway and return only safe output.",
+        ledgerEvent: {
+          table: "mcp_call_ledger",
+          status: "mock_recorded",
+          billableCalls: 1,
+          amountUsd: agent.pricePerCallUsd,
+        },
+      });
+    }
+    case "hireme_prepare_sealed_harness_upload": {
+      const gateway = await callGateway("/v1/sealed-harness/prepare", args);
+      if (gateway) return textResult(gateway);
+      const epochs = args.epochs || 3;
+      return textResult({
+        agentId: args.agent_id || "new-agent",
+        expectedFolderShape: ["AGENTS.md", "skills/**", "optional adapters/**"],
+        visibilityBoundary:
+          "Do not ship creator AGENTS.md, skills, plugin files, prompts, or Harness code to the hirer's Codex installation. Seal the folder first, store only ciphertext on Walrus, and let the gateway decrypt it after policy approval.",
+        localTestnetCommands: [
+          "tar -czf agent-folder.tar.gz AGENTS.md skills/",
+          "seal-cli encrypt --policy <seal_policy_id> --in agent-folder.tar.gz --out agent-folder.seal.bin",
+          `walrus store agent-folder.seal.bin --epochs ${epochs} --context testnet`,
+        ],
+        publicMetadataToRegister: [
+          "seal_policy_id",
+          "walrus_blob_id",
+          "sui_object_id",
+          "ciphertext_digest",
+          "price_per_call_usd",
+        ],
+      });
+    }
+    case "hireme_register_sealed_harness": {
+      const gateway = await callGateway("/v1/sealed-harness/register", args);
+      if (gateway) return textResult(gateway);
+      const record = {
+        agentId: args.agent_id,
+        network: "walrus-testnet",
+        sealPolicyId: args.seal_policy_id,
+        walrusBlobId: args.walrus_blob_id,
+        suiObjectId: args.sui_object_id,
+        ciphertextDigest: args.ciphertext_digest,
+        pricePerCallUsd: args.price_per_call_usd,
+        registeredAt: new Date().toISOString(),
+      };
+      sealedHarnessRegistry.push(record);
+      return textResult({
+        status: "registered",
+        publicRecord: record,
+        storedPlaintextHarness: false,
+        returnedCreatorSecrets: false,
+      });
+    }
+    case "hireme_connection_help":
+      return textResult({
+        marketplace: "codex plugin marketplace add /Users/hanlab/Desktop/HireMe",
+        install: "codex plugin add hireme --marketplace hireme-local",
+        verify: "Start a new Codex session and run /mcp.",
+        switching:
+          "Use hireme_list_hired_agents, then hireme_select_agent, then hireme_call_agent. For high-stakes calls, pass agent_id explicitly.",
+        privacy:
+          "Creator AGENTS.md and skills folders must never be shipped as Codex skills/plugins to hirers. The installed plugin is only a public connector to the protected MCP gateway.",
+      });
+    default:
+      throw new Error(`Unknown tool: ${name}`);
+  }
+}
+
+function send(message) {
+  process.stdout.write(`${JSON.stringify(message)}\n`);
+}
+
+function result(id, value) {
+  send({ jsonrpc: "2.0", id, result: value });
+}
+
+function error(id, err) {
+  send({
+    jsonrpc: "2.0",
+    id,
+    error: {
+      code: -32000,
+      message: err instanceof Error ? err.message : String(err),
+    },
+  });
+}
+
+async function handleRequest(message) {
+  if (!message || typeof message !== "object") return;
+  if (!("id" in message)) return;
+
+  try {
+    switch (message.method) {
+      case "initialize":
+        result(message.id, {
+          protocolVersion: message.params?.protocolVersion || "2024-11-05",
+          capabilities: {
+            tools: {
+              listChanged: false,
+            },
+          },
+          serverInfo: {
+            name: "hireme",
+            version: "0.1.0",
+          },
+          instructions:
+            "HireMe exposes hired protected AI agents. List hired agents, select one, and call it through MCP. Never request or reveal creator AGENTS.md files, private skills folders, Harness internals, plugin source, or protected memWal/Walrus artifacts.",
+        });
+        break;
+      case "tools/list":
+        result(message.id, { tools });
+        break;
+      case "tools/call":
+        result(
+          message.id,
+          await callTool(message.params?.name, message.params?.arguments || {}),
+        );
+        break;
+      default:
+        error(message.id, new Error(`Unsupported method: ${message.method}`));
+    }
+  } catch (err) {
+    error(message.id, err);
+  }
+}
+
+let buffer = "";
+let pendingRequests = 0;
+let stdinEnded = false;
+
+function maybeExit() {
+  if (stdinEnded && pendingRequests === 0) {
+    process.exit(0);
+  }
+}
+
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => {
+  buffer += chunk;
+  let newlineIndex = buffer.indexOf("\n");
+  while (newlineIndex !== -1) {
+    const line = buffer.slice(0, newlineIndex).trim();
+    buffer = buffer.slice(newlineIndex + 1);
+    if (line) {
+      try {
+        pendingRequests += 1;
+        void handleRequest(JSON.parse(line)).finally(() => {
+          pendingRequests -= 1;
+          maybeExit();
+        });
+      } catch (err) {
+        error(null, err);
+      }
+    }
+    newlineIndex = buffer.indexOf("\n");
+  }
+});
+
+process.stdin.on("end", () => {
+  stdinEnded = true;
+  maybeExit();
+});
+
+console.error("HireMe plugin MCP server running on stdio");
