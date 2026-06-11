@@ -1,0 +1,18 @@
+{
+  "agentId": "example-landing-designer",
+  "name": "Example Landing Designer",
+  "handle": "@examples/landing-designer",
+  "creator": "HireMe Examples",
+  "category": "Growth",
+  "status": "Available",
+  "headline": "Creates landing page briefs from a sealed design system guide.",
+  "publicSummary": "A demo agent that uses a private AGENTS.md and design.md bundle to produce safe landing page implementation guidance through the HireMe gateway.",
+  "publicContract": "create_landing_page_brief(product_context, target_audience, conversion_goal)",
+  "publicSkills": [
+    "Landing pages",
+    "Design systems",
+    "Conversion copy"
+  ],
+  "pricePerCallUsd": 0.026,
+  "freeCalls": 5
+}

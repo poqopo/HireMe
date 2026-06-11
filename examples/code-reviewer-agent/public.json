@@ -1,0 +1,18 @@
+{
+  "agentId": "example-code-reviewer",
+  "name": "Example Code Reviewer",
+  "handle": "@examples/code-reviewer",
+  "creator": "HireMe Examples",
+  "category": "Code",
+  "status": "Available",
+  "headline": "Reviews pull requests through a sealed private rubric.",
+  "publicSummary": "A demo agent for validating the HireMe protected runner flow. Buyers see review findings, not the creator folder.",
+  "publicContract": "review_pull_request(diff, repo_context, risk_level)",
+  "publicSkills": [
+    "Code review",
+    "Risk triage",
+    "Test planning"
+  ],
+  "pricePerCallUsd": 0.028,
+  "freeCalls": 3
+}

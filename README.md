@@ -36,10 +36,11 @@ Agent 제작자는 보호된 Skills/Harness를 등록하고 MCP call 단가를 �
 5. Supabase에는 `seal_policy_id`, `walrus_blob_id`, `sui_object_id`, `ciphertext_digest`, 가격, 공개 MCP contract만 저장합니다.
 6. Hirer가 Codex plugin을 설치하면, 설치되는 것은 HireMe public connector뿐입니다.
 7. Codex는 HireMe MCP gateway를 호출합니다.
-8. Gateway가 hire 권한, budget, Seal policy를 검증한 뒤 서버 측에서만 sealed folder를 복호화하고 Harness를 실행합니다.
-9. Hirer에게는 최종 결과, 공개 로그, 과금 ledger만 반환합니다.
+8. Gateway/router가 hire 권한과 budget을 검증한 뒤 attested runner job을 만듭니다.
+9. Attested runner가 TEE 안에서 Seal policy와 attestation 검증을 통과한 뒤에만 sealed folder를 복호화하고 Harness를 실행합니다.
+10. Hirer에게는 최종 결과, 공개 로그, 과금 ledger, runner proof만 반환합니다.
 
-즉, “등록된 폴더의 Harness를 바탕으로 일한다”는 요구는 gateway에서 충족하고, “MCP 사용자가 Harness 원문을 못 보게 한다”는 요구는 원문 폴더가 사용자 머신으로 내려가지 않게 해서 충족합니다.
+즉, “등록된 폴더의 Harness를 바탕으로 일한다”는 요구는 attested runner에서 충족하고, “MCP 사용자와 플랫폼이 Harness 원문을 못 보게 한다”는 요구는 복호화 key를 검증된 runner에만 release해서 충족합니다. 사용자 input도 production 경로에서는 runner public key로 암호화해서 gateway가 plaintext를 보지 못하게 합니다. 로컬 데모는 이 경계를 mock attestation으로 시뮬레이션합니다.
 
 ## 정보 구조
 
@@ -171,9 +172,11 @@ http://localhost:8787
 | `POST /v1/agents/get` | Agent 공개 프로필 조회 |
 | `POST /v1/sessions/select` | Codex installation별 active Agent 선택 |
 | `POST /v1/sessions/current` | 현재 active Agent 조회 |
-| `POST /v1/agent-call` | protected Agent folder runner mock 실행 |
+| `POST /v1/agent-call` | protected Agent 호출. sealed example agent는 attested runner mock을 사용 |
+| `POST /v1/tee-runner/execute` | TEE attested runner protocol mock 실행 |
 | `POST /v1/sealed-harness/prepare` | `AGENTS.md + skills/` sealed upload 준비 |
 | `POST /v1/sealed-harness/register` | Seal/Walrus public metadata 등록 |
+| `POST /v1/sealed-harness/validate` | paid receipt가 있을 때 gateway runner가 sealed artifact를 복호화 검증 |
 
 Codex plugin MCP 서버는 `HIREME_MCP_GATEWAY_URL`로 이 gateway를 먼저 호출합니다. gateway가 꺼져 있으면 로컬 demo fallback을 사용하고, 반드시 gateway를 거치게 만들고 싶으면 `HIREME_MCP_GATEWAY_REQUIRED=1`을 설정합니다.
 
@@ -184,11 +187,128 @@ npm run gateway:smoke
 npm run plugin:smoke
 ```
 
+## 예시 Protected Agent Folder
+
+`examples/code-reviewer-agent/`는 creator가 올리는 원본 Agent folder 예시입니다.
+
+```txt
+examples/code-reviewer-agent/
+  AGENTS.md
+  public.json
+  skills/risk-review/SKILL.md
+  harness/policy.json
+```
+
+올바른 보호 모델은 hirer가 이 folder를 직접 복호화하는 것이 아니라, 결제/권한을 검증한 gateway 또는 승인된 runner만 복호화하고 실행 결과만 반환하는 구조입니다.
+
+로컬에서 이 흐름을 검증하는 명령:
+
+```bash
+npm run example:validate
+npm run example:seal
+npm run example:run
+npm run example:smoke
+```
+
+각 단계의 의미:
+
+| Command | Purpose |
+| --- | --- |
+| `example:validate` | 원본 folder에 `AGENTS.md`, `public.json`, `skills/**/SKILL.md`가 있는지 검증 |
+| `example:seal` | 원본 folder를 로컬 Seal mock으로 암호화하고 `.hireme/local-walrus/*.seal.json`에 ciphertext 저장 |
+| `example:run` | paid hire receipt mock이 있을 때만 gateway runner가 decrypt 검증을 수행하고 safe summary만 반환 |
+| `example:smoke` | seal부터 gateway validation, unpaid receipt 거절까지 end-to-end 검증 |
+
+생성되는 `.hireme/` 폴더는 로컬 artifact cache이며 git에 커밋하지 않습니다. Production에서는 이 local cache가 Walrus blob으로 바뀌고, `.hireme/artifacts/*.public-record.json`에 해당하는 metadata만 Supabase `protected_artifacts`에 저장됩니다.
+
+Production 매핑:
+
+| Local example | Production equivalent |
+| --- | --- |
+| `.hireme/local-walrus/*.seal.json` | Walrus encrypted blob |
+| `.hireme/artifacts/*.public-record.json` | Supabase `protected_artifacts` row |
+| `hire_receipt_local_paid_demo` | Sui `HireReceipt` or execution-ticket object |
+| local AES-GCM Seal mock | `@mysten/seal` threshold encryption and key server approval |
+| `/v1/sealed-harness/validate` | Legacy gateway validation mock |
+| `/v1/tee-runner/execute` | TEE runner decrypt + manifest verification + signed JSON output |
+
+TEE runner 구조는 [docs/tee-runner-architecture.md](docs/tee-runner-architecture.md)에 정리했습니다. 핵심은 gateway가 복호화 주체가 아니라 라우터이고, 사용자 input과 creator bundle plaintext는 remote attestation을 통과한 runner 내부에서만 열려야 한다는 점입니다.
+
+`examples/landing-page-designer-agent/`는 `AGENTS.md`와 `design.md`를 함께 sealed artifact로 올리는 예시입니다. 이 agent는 고용자가 “예시 랜딩페이지를 만들어줘”라고 요청하면 gateway runner 내부에서만 `design.md`를 열어보고, 원문 대신 safe landing page brief를 반환합니다.
+
+```txt
+examples/landing-page-designer-agent/
+  AGENTS.md
+  design.md
+  public.json
+  skills/landing-page-design/SKILL.md
+  harness/policy.json
+```
+
+로컬 검증:
+
+```bash
+npm run example:seal:landing
+npm run example:run:landing
+npm run example:smoke:landing
+```
+
+Codex MCP 사용 예:
+
+```txt
+example-landing-designer에게 핸드폰 상세 랜딩페이지 하나 만들어달라고 해
+```
+
+Codex는 `hireme_request`를 호출하고, MCP 서버가 `example-landing-designer`, demo hire receipt, task를 자동으로 채웁니다. 반환되는 결과는 `landing_page_brief`이며, `privateReferencesApplied.designMd: true`로 sealed `design.md`가 적용됐음을 표시합니다. `design.md` 원문과 `AGENTS.md` 원문은 반환하지 않습니다.
+
 현재 gateway의 `POST /v1/agent-call`은 다음을 보장하는 mock 결과를 반환합니다.
 
 - private Agent folder를 gateway runner가 사용했다고 표시합니다.
 - `AGENTS.md`, `skills/`, plugin source, Harness internals는 반환하지 않습니다.
 - ledger에는 raw prompt/response 대신 digest와 과금 metadata만 남깁니다.
+
+## Walrus Folder Registry Demo
+
+`examples/wal_test1/`은 실제 Walrus blob read/write와 Supabase registry를 검증하는 plaintext 데모입니다. Walrus는 폴더를 직접 저장하지 않으므로 folder를 tar.gz로 묶어 하나의 blob으로 올리고, Supabase `walrus_agent_artifacts`에 blob id와 archive checksum을 저장합니다. 이 데모는 내부 LLM을 호출하지 않고 deterministic JSON output만 반환합니다.
+
+```txt
+examples/wal_test1/
+  AGENTS.md
+```
+
+현재 등록된 테스트 blob:
+
+```txt
+agent_id: wal-test1
+walrus_blob_id: TfoPiFNeinTkiE3dO4dAkS99EUn_-yudfxiDJOacG_g
+sui_object_id: 0x2cf6f6cc0180c379b634bcef8a56932744f81c77ca72aabcf4d23be155139bb3
+archive_digest: sha256:cf379b5a3a2631aefd4e743a1e499850f0daf5e1448b336f42edb6f366bd3773
+```
+
+업로드/검증:
+
+```bash
+npm run walrus:publish:test1
+npm run walrus:read:test1
+```
+
+Gateway endpoint:
+
+```txt
+POST /v1/walrus-agent/read
+{
+  "agent_id": "wal-test1",
+  "task": "Describe this Walrus Agent folder"
+}
+```
+
+Codex MCP 사용:
+
+```txt
+hireme_call_walrus_agent({ "agent_id": "wal-test1", "task": "wal_test1 폴더 구조를 설명해줘" })
+```
+
+이 데모는 일부러 plaintext로 둔 storage-path 검증입니다. production protected agent는 같은 registry/read 경계를 쓰되 Walrus에 Seal ciphertext를 저장하고 gateway runner만 복호화해야 합니다. 내부 LLM runner를 붙이기 전까지는 `runner.internalLlmCalled: false`, `jsonOutput.schema: hireme.walrus_agent_folder_json_output.v1` 형태의 구조화 결과만 반환합니다.
 
 ## Seal + Walrus 등록 흐름
 
@@ -246,26 +366,44 @@ codex plugin add hireme --marketplace hireme-local
 
 | Tool | Purpose |
 | --- | --- |
+| `hireme_request` | 자연어 요청을 agent/task/receipt로 라우팅해서 protected gateway 호출 |
 | `hireme_list_hired_agents` | 현재 사용자가 고용한 Agent 목록, 가격, memWal 보호 요약 조회 |
 | `hireme_get_agent` | 특정 Agent의 공개 프로필과 MCP 가격 조회 |
 | `hireme_select_agent` | Codex 세션에서 active Agent 선택 |
 | `hireme_current_agent` | 현재 active Agent 조회 |
-| `hireme_call_agent` | 명시된 Agent 또는 active Agent를 mock 호출하고 ledger 이벤트 반환 |
+| `hireme_call_agent` | 명시된 Agent 또는 active Agent를 호출하고 ledger 이벤트 반환. sealed example agent는 attested runner mock 사용 |
+| `hireme_call_attested_agent` | sealed example agent를 TEE attested runner mock으로 실행 |
 | `hireme_prepare_sealed_harness_upload` | Creator의 `AGENTS.md` + `skills/` 폴더를 Seal + Walrus로 올리기 위한 등록 경계 안내 |
 | `hireme_register_sealed_harness` | 암호화되어 Walrus에 올라간 Harness metadata만 등록 |
+| `hireme_validate_sealed_harness` | paid receipt가 있을 때 gateway runner를 통해 sealed example artifact를 검증 |
 | `hireme_connection_help` | 플러그인 설치와 Agent 전환 안내 반환 |
 
-주의: 현재 MCP call은 실제 Seal/Walrus/Supabase를 호출하지 않는 mock입니다. 실제 제품에서는 `hireme_call_agent` 내부가 hire 권한 확인, budget 검증, Seal policy approval, Walrus ciphertext read/decrypt, protected Harness 실행, Supabase `mcp_call_ledger` 기록으로 대체됩니다.
+주의: 현재 MCP call은 실제 hardware TEE를 호출하지 않는 mock입니다. 실제 제품에서는 `hireme_call_agent` 내부가 hire 권한 확인, budget 검증, Sui AgentVersion 조회, Walrus ciphertext read, TEE attestation verification, Seal key release, protected Harness 실행, Supabase `mcp_call_ledger` 기록으로 대체됩니다.
 
 Agent 전환 방식:
 
 ```txt
+hireme_request(request: "example-landing-designer에게 핸드폰 상세 랜딩페이지 하나 만들어달라고 해")
 hireme_list_hired_agents()
 hireme_select_agent(agent_id: "codex-builder")
 hireme_current_agent()
 hireme_call_agent(task: "Implement billing ledger schema", budget_calls: 3)
 hireme_call_agent(agent_id: "walrus-researcher", task: "Research Walrus storage pricing")
 ```
+
+예시 sealed Agent folder를 Codex MCP에서 검증하는 방식:
+
+```txt
+# repo에서 먼저 local ciphertext/public record 생성
+npm run example:seal
+npm run gateway:dev
+
+# Codex MCP tool call
+example-code-reviewer에게 이 migration diff 리뷰해달라고 해
+example-landing-designer에게 핸드폰 상세 랜딩페이지 하나 만들어달라고 해
+```
+
+이 경로에서 MCP plugin은 복호화하지 않습니다. Plugin은 gateway로 요청을 전달하고, gateway runner만 `.hireme/local-walrus/*.seal.json`을 복호화 검증한 뒤 safe summary와 ledger metadata만 반환합니다.
 
 중요한 호출에는 `agent_id`를 명시하는 방식을 권장합니다. `hireme_select_agent`는 편의를 위한 세션-local 상태이며, production에서는 `agent_sessions(user_id, codex_installation_id, active_agent_id)` 같은 서버-side 상태로 저장해야 합니다.
 

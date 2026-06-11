@@ -1,0 +1,104 @@
+import { spawn } from "node:child_process";
+import { once } from "node:events";
+import { sealAgentFolder } from "../server/gateway/localSealedArtifact.mjs";
+
+const port = 18788;
+const gatewayUrl = `http://localhost:${port}`;
+const gatewayKey = "protected-artifact-smoke-key";
+
+const sealed = await sealAgentFolder({
+  folderPath: "examples/code-reviewer-agent",
+  agentId: "example-code-reviewer",
+  pricePerCallUsd: 0.028,
+  epochs: 3,
+});
+
+const gateway = spawn("node", ["server/gateway/index.mjs"], {
+  env: {
+    ...process.env,
+    HIREME_GATEWAY_PORT: String(port),
+    HIREME_GATEWAY_API_KEY: gatewayKey,
+  },
+  stdio: ["ignore", "pipe", "inherit"],
+});
+
+try {
+  await waitForGateway(gatewayUrl);
+
+  const valid = await postJson(`${gatewayUrl}/v1/sealed-harness/validate`, {
+    record_path: sealed.recordPath,
+    hire_receipt_object_id: "hire_receipt_local_paid_demo",
+  });
+
+  const serialized = JSON.stringify(valid);
+  if (!valid.gatewayOnlyDecrypt || !valid.runner?.decryptedInRunnerOnly) {
+    throw new Error("Gateway did not validate through the protected runner boundary");
+  }
+  if (valid.runner.privateFolderReturnedToHirer !== false) {
+    throw new Error("Gateway response claims the private folder was returned");
+  }
+  if (
+    serialized.includes("Private Operating Notes") ||
+    serialized.includes("Hidden Scoring Criteria") ||
+    serialized.includes("contentBase64")
+  ) {
+    throw new Error("Gateway validation leaked protected folder plaintext");
+  }
+
+  const invalid = await postJson(
+    `${gatewayUrl}/v1/sealed-harness/validate`,
+    {
+      record_path: sealed.recordPath,
+      hire_receipt_object_id: "unpaid",
+    },
+    { expectOk: false },
+  );
+
+  if (invalid.status !== 400 || !invalid.body.includes("paid hire receipt")) {
+    throw new Error("Gateway did not reject validation without a paid receipt");
+  }
+
+  console.log("HireMe protected artifact smoke test passed.");
+} finally {
+  gateway.kill("SIGTERM");
+  await once(gateway, "exit").catch(() => {});
+}
+
+async function waitForGateway(url) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < 5000) {
+    try {
+      const response = await fetch(`${url}/health`);
+      if (response.ok) return;
+    } catch {
+      await sleep(100);
+    }
+  }
+  throw new Error("Gateway did not become ready");
+}
+
+async function postJson(url, body, options = {}) {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${gatewayKey}`,
+    },
+    body: JSON.stringify(body),
+  });
+
+  const text = await response.text();
+  if (options.expectOk === false) {
+    return { status: response.status, body: text };
+  }
+
+  if (!response.ok) {
+    throw new Error(`Gateway request failed: ${response.status} ${text}`);
+  }
+
+  return JSON.parse(text);
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}

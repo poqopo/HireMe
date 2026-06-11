@@ -1,4 +1,10 @@
-import { useMemo, useState, type ChangeEvent, type ReactNode } from "react";
+import {
+  useEffect,
+  useMemo,
+  useState,
+  type ChangeEvent,
+  type ReactNode,
+} from "react";
 import { BrowserRouter, Link, Navigate, Route, Routes } from "react-router-dom";
 import {
   AlertTriangle,
@@ -23,7 +29,11 @@ import {
   UploadCloud,
   WalletCards,
 } from "lucide-react";
-import { agents, categories } from "@/lib/agents";
+import { agents as fallbackAgents, categories } from "@/lib/agents";
+import {
+  loadMarketplaceAgents,
+  type AgentDataSource,
+} from "@/lib/agentRepository";
 import {
   createLocalSealedHarnessRecord,
   type SealedHarnessRecord,
@@ -221,19 +231,46 @@ function LandingPage() {
 function ExploreAgentsPage() {
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<(typeof categories)[number]>("All");
-  const [selectedAgentId, setSelectedAgentId] = useState(agents[0].id);
+  const [marketplaceAgents, setMarketplaceAgents] =
+    useState<Agent[]>(fallbackAgents);
+  const [dataSource, setDataSource] = useState<{
+    source: AgentDataSource;
+    message?: string;
+  }>({ source: "mock", message: "Loading Supabase marketplace..." });
+  const [selectedAgentId, setSelectedAgentId] = useState(fallbackAgents[0].id);
+
+  useEffect(() => {
+    let isCurrent = true;
+
+    void loadMarketplaceAgents().then((result) => {
+      if (!isCurrent) return;
+      setMarketplaceAgents(result.agents);
+      setDataSource({ source: result.source, message: result.message });
+      setSelectedAgentId((current) =>
+        result.agents.some((agent) => agent.id === current)
+          ? current
+          : result.agents[0]?.id ?? fallbackAgents[0].id,
+      );
+    });
+
+    return () => {
+      isCurrent = false;
+    };
+  }, []);
 
   const filteredAgents = useMemo(() => {
-    return agents.filter((agent) => {
+    return marketplaceAgents.filter((agent) => {
       const matchesCategory = category === "All" || agent.category === category;
       const text = `${agent.name} ${agent.handle} ${agent.headline} ${agent.skills.join(" ")}`.toLowerCase();
       const matchesQuery = text.includes(query.toLowerCase());
       return matchesCategory && matchesQuery;
     });
-  }, [category, query]);
+  }, [category, marketplaceAgents, query]);
 
   const selectedAgent =
-    agents.find((agent) => agent.id === selectedAgentId) ?? agents[0];
+    marketplaceAgents.find((agent) => agent.id === selectedAgentId) ??
+    marketplaceAgents[0] ??
+    fallbackAgents[0];
 
   return (
     <main className="min-h-screen bg-[#f6f9fc]">
@@ -248,6 +285,20 @@ function ExploreAgentsPage() {
                 Character-style discovery for production agents: profile first,
                 public capability second, protected implementation never.
               </p>
+              <div className="mt-4 flex flex-wrap items-center gap-2">
+                <Badge
+                  variant={dataSource.source === "supabase" ? "default" : "outline"}
+                >
+                  {dataSource.source === "supabase"
+                    ? "Supabase live"
+                    : "Local demo data"}
+                </Badge>
+                {dataSource.message ? (
+                  <span className="text-xs leading-5 text-muted-foreground">
+                    {dataSource.message}
+                  </span>
+                ) : null}
+              </div>
             </div>
             <div className="relative w-full lg:max-w-md">
               <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
@@ -278,14 +329,20 @@ function ExploreAgentsPage() {
       <section className="px-4 py-8 md:px-8">
         <div className="mx-auto grid max-w-7xl gap-6 xl:grid-cols-[1fr_360px]">
           <div className="grid gap-4 md:grid-cols-2">
-            {filteredAgents.map((agent) => (
+            {filteredAgents.length ? (
+              filteredAgents.map((agent) => (
               <AgentCard
                 agent={agent}
                 key={agent.id}
                 onSelect={() => setSelectedAgentId(agent.id)}
                 selected={selectedAgentId === agent.id}
               />
-            ))}
+              ))
+            ) : (
+              <div className="rounded-xl border border-border bg-white p-6 text-sm text-muted-foreground app-shadow md:col-span-2">
+                No agents match the current filters.
+              </div>
+            )}
           </div>
 
           <AgentDetail agent={selectedAgent} />

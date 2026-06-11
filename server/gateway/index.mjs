@@ -4,6 +4,11 @@ import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import {
+  validateSealedArtifact,
+} from "./localSealedArtifact.mjs";
+import { runAttestedAgentTask } from "./attestedRunner.mjs";
+import { readWalrusAgentArtifact } from "./walrusAgentArtifact.mjs";
 
 loadEnvFile(".env");
 loadEnvFile(".env.local");
@@ -134,24 +139,105 @@ const agents = [
     calls: 31700,
     latencyMs: 690,
   },
+  {
+    id: "example-code-reviewer",
+    name: "Example Code Reviewer",
+    handle: "@examples/code-reviewer",
+    creator: "HireMe Examples",
+    category: "Code",
+    status: "Available",
+    headline: "Reviews pull requests through a sealed private rubric.",
+    publicSummary:
+      "A demo agent for validating the HireMe protected runner flow. Buyers see review findings, not the creator folder.",
+    publicContract: "review_pull_request(diff, repo_context, risk_level)",
+    memwalPolicy:
+      "Example AGENTS.md, private risk checklist, and harness policy decrypt only inside the gateway runner.",
+    skills: ["Code review", "Risk triage", "Test planning"],
+    hiddenAssetClasses: ["AGENTS.md", "skills/**", "harness/**", "private rubric"],
+    pricePerCallUsd: 0.028,
+    freeCalls: 3,
+    rating: 4.8,
+    calls: 12,
+    latencyMs: 840,
+  },
+  {
+    id: "example-landing-designer",
+    name: "Example Landing Designer",
+    handle: "@examples/landing-designer",
+    creator: "HireMe Examples",
+    category: "Growth",
+    status: "Available",
+    headline: "Creates landing page briefs from a sealed design system guide.",
+    publicSummary:
+      "A demo agent that uses protected AGENTS.md and design.md instructions to produce safe landing page implementation guidance.",
+    publicContract:
+      "create_landing_page_brief(product_context, target_audience, conversion_goal)",
+    memwalPolicy:
+      "Private AGENTS.md and design.md decrypt only inside the gateway runner.",
+    skills: ["Landing pages", "Design systems", "Conversion copy"],
+    hiddenAssetClasses: ["AGENTS.md", "design.md", "skills/**", "harness/**"],
+    pricePerCallUsd: 0.026,
+    freeCalls: 5,
+    rating: 4.9,
+    calls: 8,
+    latencyMs: 790,
+  },
+  {
+    id: "wal-test1",
+    name: "Walrus Test One",
+    handle: "@examples/wal-test1",
+    creator: "HireMe Examples",
+    category: "Research",
+    status: "Available",
+    headline: "Reads an Agent folder from a real Walrus blob through the gateway.",
+    publicSummary:
+      "A plaintext storage-path demo that proves a creator folder can be bundled, uploaded to Walrus, registered in Supabase, and inspected by the MCP gateway.",
+    publicContract: "inspect_walrus_agent_folder(blob_id, task)",
+    memwalPolicy:
+      "Plaintext Walrus test only. Production protected agents should store Seal ciphertext and decrypt only inside the gateway runner.",
+    skills: ["Walrus read", "Supabase registry", "Folder manifest inspection"],
+    hiddenAssetClasses: ["AGENTS.md"],
+    pricePerCallUsd: 0.001,
+    freeCalls: 100,
+    rating: 5.0,
+    calls: 1,
+    latencyMs: 1600,
+  },
 ];
 
 const protectedArtifacts = new Map();
 const sessions = new Map([[defaultInstallationId, "walrus-researcher"]]);
 const ledger = [];
+const localSealedExampleRecords = {
+  "example-code-reviewer":
+    ".hireme/artifacts/example-code-reviewer.public-record.json",
+  "example-landing-designer":
+    ".hireme/artifacts/example-landing-designer.public-record.json",
+};
 
 for (const agent of agents) {
   protectedArtifacts.set(agent.id, {
     agentId: agent.id,
     network: process.env.WALRUS_NETWORK === "mainnet" ? "walrus-mainnet" : "walrus-testnet",
-    sealPolicyId: `seal:${process.env.SUI_NETWORK || "testnet"}:${agent.id}-policy`,
-    sealEncryptionId: `hireme::agent-folder::${agent.id}`,
-    walrusBlobId: `walrus_${agent.id.replaceAll("-", "_")}_encrypted_folder`,
+    sealPolicyId:
+      agent.id === "wal-test1"
+        ? "none:plaintext-walrus-demo"
+        : `seal:${process.env.SUI_NETWORK || "testnet"}:${agent.id}-policy`,
+    sealEncryptionId:
+      agent.id === "wal-test1"
+        ? null
+        : `hireme::agent-folder::${agent.id}`,
+    walrusBlobId:
+      agent.id === "wal-test1"
+        ? "supabase:walrus_agent_artifacts/latest"
+        : `walrus_${agent.id.replaceAll("-", "_")}_encrypted_folder`,
     suiObjectId: `0x${sha256Hex(`${agent.id}:sui-object`).slice(0, 64)}`,
     ciphertextDigest: `sha256:${sha256Hex(`${agent.id}:ciphertext`)}`,
     folderManifestDigest: `sha256:${sha256Hex(`${agent.id}:AGENTS.md:skills`)}`,
     visibility:
-      "The hirer's Codex receives only public metadata and safe results. The gateway runner is the only component that can load the decrypted folder.",
+      agent.id === "wal-test1"
+        ? "Plaintext Walrus demo. The gateway reads the blob and returns only a folder summary; production should switch this path to Seal ciphertext."
+        : "The hirer's Codex receives only public metadata and safe results. The gateway runner is the only component that can load the decrypted folder.",
     registeredAt: new Date("2026-06-10T00:00:00.000Z").toISOString(),
   });
 }
@@ -171,7 +257,10 @@ const server = createServer(async (req, res) => {
         service: "hireme-gateway",
         mode: "local-memory",
         authRequired: Boolean(apiKey),
-        supabaseConfigured: Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY),
+        supabaseConfigured: Boolean(
+          (process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL) &&
+            process.env.SUPABASE_SERVICE_ROLE_KEY,
+        ),
         walrusNetwork: process.env.WALRUS_NETWORK || "testnet",
         suiNetwork: process.env.SUI_NETWORK || "testnet",
       });
@@ -219,7 +308,12 @@ const server = createServer(async (req, res) => {
     }
 
     if (req.method === "POST" && url.pathname === "/v1/agent-call") {
-      sendJson(res, 200, runProtectedAgent(body));
+      sendJson(res, 200, await runProtectedAgent(body));
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/v1/tee-runner/execute") {
+      sendJson(res, 200, await runAttestedRunnerRequest(body));
       return;
     }
 
@@ -230,6 +324,28 @@ const server = createServer(async (req, res) => {
 
     if (req.method === "POST" && url.pathname === "/v1/sealed-harness/register") {
       sendJson(res, 200, registerSealedHarness(body));
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/v1/sealed-harness/validate") {
+      const result = await validateSealedArtifact({
+        recordPath: body.record_path || body.recordPath,
+        walrusPath: body.walrus_path || body.walrusPath,
+        hireReceiptObjectId:
+          body.hire_receipt_object_id || body.hireReceiptObjectId,
+        runnerIdentity: body.runner_identity || body.runnerIdentity,
+      });
+      sendJson(res, 200, result);
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/v1/walrus-agent/read") {
+      const result = await readWalrusAgentArtifact({
+        blob_id: body.blob_id || body.blobId,
+        agent_id: body.agent_id || body.agentId,
+        task: body.task,
+      });
+      sendJson(res, 200, result);
       return;
     }
 
@@ -324,19 +440,32 @@ function publicAgent(agent) {
   };
 }
 
-function runProtectedAgent(args = {}) {
+async function runProtectedAgent(args = {}) {
   const installationId = args.codex_installation_id || defaultInstallationId;
   const agentId = args.agent_id || sessions.get(installationId) || "walrus-researcher";
   const agent = findAgent(agentId);
   const artifact = protectedArtifacts.get(agent.id);
   const budgetCalls = args.budget_calls || 1;
+  const attestedTaskResult = localSealedExampleRecords[agent.id]
+    ? await runAttestedAgentTask({
+        agentId: agent.id,
+        recordPath: args.record_path || localSealedExampleRecords[agent.id],
+        walrusPath: args.walrus_path,
+        hireReceiptObjectId:
+          args.hire_receipt_object_id || "hire_receipt_local_paid_demo",
+        attestationQuote: args.attestation_quote || args.attestationQuote,
+        runnerIdentity: args.runner_identity,
+        task: args.task || "",
+      })
+    : null;
   const callId = `call_${Date.now().toString(36)}_${sha256Hex(`${agent.id}:${args.task || ""}`).slice(0, 8)}`;
   const requestDigest = `sha256:${sha256Hex(JSON.stringify({
     agentId: agent.id,
     task: args.task,
     budgetCalls,
   }))}`;
-  const safeResult = buildSafeResult(agent, args.task || "");
+  const safeResult =
+    attestedTaskResult?.agentResult || buildSafeResult(agent, args.task || "");
   const responseDigest = `sha256:${sha256Hex(JSON.stringify(safeResult))}`;
   const ledgerEvent = {
     callId,
@@ -377,7 +506,8 @@ function runProtectedAgent(args = {}) {
       hireVerified: true,
       budgetApproved: budgetCalls <= 100,
       sealPolicyApproved: true,
-      mode: "local-mock",
+      attestedRunnerApproved: Boolean(attestedTaskResult),
+      mode: attestedTaskResult ? "attested-runner-local-mock" : "local-mock",
     },
     sealedArtifact: {
       network: artifact.network,
@@ -386,16 +516,65 @@ function runProtectedAgent(args = {}) {
       ciphertextDigest: artifact.ciphertextDigest,
     },
     runner: {
-      executionMode: "sealed-folder-runner-mock",
-      privateAgentFolderLoaded: true,
+      executionMode: attestedTaskResult
+        ? "attested-tee-runner-local-mock"
+        : "sealed-folder-runner-mock",
+      teeRequired: Boolean(attestedTaskResult),
+      attestationVerified: attestedTaskResult?.attestation?.verified || false,
+      privateAgentFolderLoaded: Boolean(attestedTaskResult),
       privateHarnessApplied: true,
       privateFolderReturnedToCodex: false,
+      gatewayPlaintextAccess: attestedTaskResult ? false : null,
       exposedSkills: false,
       exposedPluginCode: false,
       exposedHarnessInternals: false,
     },
     result: safeResult,
+    jsonOutput: attestedTaskResult?.jsonOutput || null,
+    attestedExecution: attestedTaskResult,
+    sealedValidation: attestedTaskResult?.sealedValidation || null,
     ledgerEvent,
+  };
+}
+
+async function runAttestedRunnerRequest(args = {}) {
+  const agentId = args.agent_id || args.agentId || "example-code-reviewer";
+  const agent = findAgent(agentId);
+  const recordPath =
+    args.record_path ||
+    args.recordPath ||
+    localSealedExampleRecords[agent.id];
+
+  if (!recordPath) {
+    throw Object.assign(
+      new Error(`No sealed local artifact is registered for attested agent: ${agent.id}`),
+      {
+        statusCode: 404,
+        code: "attested_artifact_not_found",
+      },
+    );
+  }
+
+  const result = await runAttestedAgentTask({
+    agentId: agent.id,
+    recordPath,
+    walrusPath: args.walrus_path || args.walrusPath,
+    hireReceiptObjectId:
+      args.hire_receipt_object_id ||
+      args.hireReceiptObjectId ||
+      "hire_receipt_local_paid_demo",
+    attestationQuote: args.attestation_quote || args.attestationQuote,
+    runnerIdentity: args.runner_identity || args.runnerIdentity,
+    task: args.task || "",
+  });
+
+  return {
+    ...result,
+    agent: {
+      id: agent.id,
+      name: agent.name,
+      pricePerCallUsd: agent.pricePerCallUsd,
+    },
   };
 }
 

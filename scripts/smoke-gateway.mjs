@@ -1,9 +1,23 @@
 import { spawn } from "node:child_process";
 import { once } from "node:events";
+import { sealAgentFolder } from "../server/gateway/localSealedArtifact.mjs";
 
 const port = 18787;
 const gatewayUrl = `http://localhost:${port}`;
 const gatewayKey = "smoke-test-key";
+
+await sealAgentFolder({
+  folderPath: "examples/code-reviewer-agent",
+  agentId: "example-code-reviewer",
+  pricePerCallUsd: 0.028,
+  epochs: 3,
+});
+await sealAgentFolder({
+  folderPath: "examples/landing-page-designer-agent",
+  agentId: "example-landing-designer",
+  pricePerCallUsd: 0.026,
+  epochs: 3,
+});
 
 const gateway = spawn("node", ["server/gateway/index.mjs"], {
   env: {
@@ -27,6 +41,40 @@ try {
     throw new Error("Gateway direct call did not run through protected runner");
   }
 
+  const exampleCall = await postJson(`${gatewayUrl}/v1/agent-call`, gatewayKey, {
+    agent_id: "example-code-reviewer",
+    task: "Review a migration diff",
+    budget_calls: 1,
+    hire_receipt_object_id: "hire_receipt_local_paid_demo",
+  });
+
+  if (!exampleCall.sealedValidation?.gatewayOnlyDecrypt) {
+    throw new Error("Gateway example agent call did not validate the sealed artifact");
+  }
+
+  if (!exampleCall.attestedExecution?.attestation?.verified) {
+    throw new Error("Gateway example agent call did not use the attested runner mock");
+  }
+
+  if (exampleCall.runner?.gatewayPlaintextAccess !== false) {
+    throw new Error("Gateway example agent call did not preserve the TEE plaintext boundary");
+  }
+
+  const teeCall = await postJson(`${gatewayUrl}/v1/tee-runner/execute`, gatewayKey, {
+    agent_id: "example-code-reviewer",
+    task: "Review this migration diff through TEE",
+    hire_receipt_object_id: "hire_receipt_local_paid_demo",
+  });
+
+  if (
+    teeCall.protocol !== "hireme.attested-runner.v1" ||
+    !teeCall.attestation?.verified ||
+    teeCall.runner?.gatewayPlaintextAccess !== false ||
+    !teeCall.jsonOutput?.proof?.runnerSignature
+  ) {
+    throw new Error("TEE runner endpoint did not return the expected proof boundary");
+  }
+
   const pluginOutput = await runPluginThroughGateway(gatewayUrl, gatewayKey);
   const responses = pluginOutput
     .trim()
@@ -35,7 +83,13 @@ try {
     .map((line) => JSON.parse(line));
 
   const callResult = responses.find((response) => response.id === 4);
+  const validateResult = responses.find((response) => response.id === 5);
+  const naturalResult = responses.find((response) => response.id === 6);
+  const attestedResult = responses.find((response) => response.id === 7);
   const text = callResult?.result?.content?.[0]?.text || "";
+  const validateText = validateResult?.result?.content?.[0]?.text || "";
+  const naturalText = naturalResult?.result?.content?.[0]?.text || "";
+  const attestedText = attestedResult?.result?.content?.[0]?.text || "";
 
   if (!text.includes('"gatewayCall": true')) {
     throw new Error("Plugin MCP call did not route through the gateway");
@@ -43,6 +97,24 @@ try {
 
   if (!text.includes('"privateFolderReturnedToCodex": false')) {
     throw new Error("Gateway response did not preserve private folder boundary");
+  }
+
+  if (!validateText.includes('"gatewayOnlyDecrypt": true')) {
+    throw new Error("Plugin MCP sealed validation did not route through the gateway");
+  }
+
+  if (
+    !naturalText.includes('"inferredAgentId": "example-landing-designer"') ||
+    !naturalText.includes('"type": "landing_page_brief"')
+  ) {
+    throw new Error("Plugin MCP natural request did not route to the landing designer");
+  }
+
+  if (
+    !attestedText.includes('"protocol": "hireme.attested-runner.v1"') ||
+    !attestedText.includes('"gatewayPlaintextAccess": false')
+  ) {
+    throw new Error("Plugin MCP attested runner call did not route through the gateway");
   }
 
   console.log("HireMe gateway smoke test passed.");
@@ -132,6 +204,42 @@ async function runPluginThroughGateway(gatewayUrl, gatewayKey) {
         arguments: {
           task: "Create a billing ledger schema",
           budget_calls: 3,
+        },
+      },
+    },
+    {
+      jsonrpc: "2.0",
+      id: 5,
+      method: "tools/call",
+      params: {
+        name: "hireme_validate_sealed_harness",
+        arguments: {
+          hire_receipt_object_id: "hire_receipt_local_paid_demo",
+        },
+      },
+    },
+    {
+      jsonrpc: "2.0",
+      id: 6,
+      method: "tools/call",
+      params: {
+        name: "hireme_request",
+        arguments: {
+          request:
+            "example-landing-designer에게 핸드폰 상세 랜딩페이지 하나 만들어달라고 해",
+        },
+      },
+    },
+    {
+      jsonrpc: "2.0",
+      id: 7,
+      method: "tools/call",
+      params: {
+        name: "hireme_call_attested_agent",
+        arguments: {
+          agent_id: "example-code-reviewer",
+          task: "Review this migration diff through TEE",
+          hire_receipt_object_id: "hire_receipt_local_paid_demo",
         },
       },
     },

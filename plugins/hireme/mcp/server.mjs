@@ -121,6 +121,70 @@ const agents = [
     calls: 31700,
     latencyMs: 690,
   },
+  {
+    id: "example-code-reviewer",
+    name: "Example Code Reviewer",
+    handle: "@examples/code-reviewer",
+    creator: "HireMe Examples",
+    category: "Code",
+    status: "Available",
+    headline: "Reviews pull requests through a sealed private rubric.",
+    publicSummary:
+      "A demo agent for validating the HireMe protected runner flow. Buyers see review findings, not the creator folder.",
+    harnessSummary: "private rubric + risk-review skill + redacted finding formatter",
+    memwalPolicy:
+      "Example AGENTS.md, private risk checklist, and harness policy decrypt only inside the gateway runner.",
+    skills: ["Code review", "Risk triage", "Test planning"],
+    protectedAssets: ["AGENTS.md", "skills/**", "harness/**", "private rubric"],
+    pricePerCallUsd: 0.028,
+    freeCalls: 3,
+    rating: 4.8,
+    calls: 12,
+    latencyMs: 840,
+  },
+  {
+    id: "example-landing-designer",
+    name: "Example Landing Designer",
+    handle: "@examples/landing-designer",
+    creator: "HireMe Examples",
+    category: "Growth",
+    status: "Available",
+    headline: "Creates landing page briefs from a sealed design system guide.",
+    publicSummary:
+      "A demo agent that uses protected AGENTS.md and design.md instructions to produce safe landing page implementation guidance.",
+    harnessSummary:
+      "private AGENTS.md + design.md guide + landing page brief formatter",
+    memwalPolicy:
+      "Private AGENTS.md and design.md decrypt only inside the gateway runner.",
+    skills: ["Landing pages", "Design systems", "Conversion copy"],
+    protectedAssets: ["AGENTS.md", "design.md", "skills/**", "harness/**"],
+    pricePerCallUsd: 0.026,
+    freeCalls: 5,
+    rating: 4.9,
+    calls: 8,
+    latencyMs: 790,
+  },
+  {
+    id: "wal-test1",
+    name: "Walrus Test One",
+    handle: "@examples/wal-test1",
+    creator: "HireMe Examples",
+    category: "Research",
+    status: "Available",
+    headline: "Reads an Agent folder from a real Walrus blob through the gateway.",
+    publicSummary:
+      "A plaintext storage-path demo that proves a creator folder can be bundled, uploaded to Walrus, registered in Supabase, and inspected by the MCP gateway.",
+    harnessSummary: "Supabase blob registry + Walrus archive reader + folder manifest summarizer",
+    memwalPolicy:
+      "Plaintext Walrus test only. Production protected agents should store Seal ciphertext and decrypt only inside the gateway runner.",
+    skills: ["Walrus read", "Supabase registry", "Folder manifest inspection"],
+    protectedAssets: ["AGENTS.md"],
+    pricePerCallUsd: 0.001,
+    freeCalls: 100,
+    rating: 5.0,
+    calls: 1,
+    latencyMs: 1600,
+  },
 ];
 
 let activeAgentId = "walrus-researcher";
@@ -135,6 +199,15 @@ const sealedHarnessRegistry = [
       "sha256:2b5a8d1f84d83a9a8d33270c0a7fdc3d5d48f7d72f184a35a18f2453ff4fb01d",
     registeredAt: "2026-06-10T00:00:00.000Z",
   },
+  {
+    agentId: "wal-test1",
+    network: "walrus-testnet",
+    sealPolicyId: "none:plaintext-walrus-demo",
+    walrusBlobId: "supabase:walrus_agent_artifacts/latest",
+    suiObjectId: "registered-after-upload",
+    ciphertextDigest: "not-applicable-plaintext-demo",
+    registeredAt: "2026-06-11T00:00:00.000Z",
+  },
 ];
 
 const gatewayUrl =
@@ -144,6 +217,34 @@ const codexInstallationId =
   process.env.HIREME_CODEX_INSTALLATION_ID || "local-codex";
 
 const inputSchemas = {
+  hireme_request: {
+    type: "object",
+    properties: {
+      request: {
+        type: "string",
+        minLength: 1,
+        description:
+          "Plain-language user request, for example: example-landing-designer에게 핸드폰 상세 랜딩페이지 하나 만들어달라고 해.",
+      },
+      agent_id: {
+        type: "string",
+        description:
+          "Optional explicit agent id. If omitted, HireMe infers one from the request.",
+      },
+      budget_calls: {
+        type: "integer",
+        minimum: 1,
+        maximum: 100,
+        description: "Optional maximum billable MCP calls.",
+      },
+      hire_receipt_object_id: {
+        type: "string",
+        description:
+          "Optional paid hire receipt. Local sealed example agents default to hire_receipt_local_paid_demo.",
+      },
+    },
+    required: ["request"],
+  },
   hireme_list_hired_agents: {
     type: "object",
     properties: {
@@ -196,8 +297,64 @@ const inputSchemas = {
         maximum: 100,
         description: "Maximum billable MCP calls for this request",
       },
+      record_path: {
+        type: "string",
+        description:
+          "Optional public artifact record path for sealed example agents.",
+      },
+      hire_receipt_object_id: {
+        type: "string",
+        description:
+          "Optional paid hire receipt object id for sealed example agents.",
+      },
     },
     required: ["task"],
+  },
+  hireme_call_attested_agent: {
+    type: "object",
+    properties: {
+      agent_id: {
+        type: "string",
+        description:
+          "Sealed example agent id to execute through the attested runner mock.",
+      },
+      task: {
+        type: "string",
+        minLength: 1,
+        description: "The task to send to the attested runner.",
+      },
+      hire_receipt_object_id: {
+        type: "string",
+        description:
+          "Optional paid hire receipt object id. Local demo defaults to hire_receipt_local_paid_demo.",
+      },
+      record_path: {
+        type: "string",
+        description:
+          "Optional public artifact record path for sealed example agents.",
+      },
+    },
+    required: ["task"],
+  },
+  hireme_call_walrus_agent: {
+    type: "object",
+    properties: {
+      blob_id: {
+        type: "string",
+        description:
+          "Optional Walrus blob id. If omitted, pass agent_id so the gateway can look up the latest blob in Supabase.",
+      },
+      agent_id: {
+        type: "string",
+        description:
+          "Optional registry agent id, for example wal-test1. Used to look up the latest Walrus blob id in Supabase.",
+      },
+      task: {
+        type: "string",
+        description:
+          "Task-specific question to answer after the gateway reads the Walrus Agent folder.",
+      },
+    },
   },
   hireme_prepare_sealed_harness_upload: {
     type: "object",
@@ -233,6 +390,31 @@ const inputSchemas = {
       "price_per_call_usd",
     ],
   },
+  hireme_validate_sealed_harness: {
+    type: "object",
+    properties: {
+      agent_id: {
+        type: "string",
+        description:
+          "Optional sealed example agent id. Use example-landing-designer for the design.md landing page demo.",
+      },
+      record_path: {
+        type: "string",
+        description:
+          "Path to the public artifact record. Defaults to the example code reviewer record.",
+      },
+      walrus_path: {
+        type: "string",
+        description:
+          "Optional local Walrus ciphertext path. Usually inferred from the public record.",
+      },
+      hire_receipt_object_id: {
+        type: "string",
+        description:
+          "Paid hire receipt or execution-ticket object id. Local demo accepts hire_receipt_* values.",
+      },
+    },
+  },
   hireme_connection_help: {
     type: "object",
     properties: {},
@@ -240,6 +422,13 @@ const inputSchemas = {
 };
 
 const tools = [
+  {
+    name: "hireme_request",
+    title: "Route a plain-language HireMe request",
+    description:
+      "Use this for natural requests like 'example-landing-designer에게 핸드폰 상세 랜딩페이지 하나 만들어달라고 해'. It infers the agent, default demo hire receipt, and calls the protected gateway.",
+    inputSchema: inputSchemas.hireme_request,
+  },
   {
     name: "hireme_list_hired_agents",
     title: "List hired HireMe agents",
@@ -275,6 +464,20 @@ const tools = [
     inputSchema: inputSchemas.hireme_call_agent,
   },
   {
+    name: "hireme_call_attested_agent",
+    title: "Call an attested HireMe runner",
+    description:
+      "Execute a sealed example agent through the local TEE attestation mock. The gateway routes the job, and only the attested runner boundary may decrypt.",
+    inputSchema: inputSchemas.hireme_call_attested_agent,
+  },
+  {
+    name: "hireme_call_walrus_agent",
+    title: "Read a Walrus Agent folder",
+    description:
+      "Ask the gateway to read a Walrus-stored Agent folder by blob_id or Supabase agent_id, inspect its structure, and return a safe summary.",
+    inputSchema: inputSchemas.hireme_call_walrus_agent,
+  },
+  {
     name: "hireme_prepare_sealed_harness_upload",
     title: "Prepare sealed Harness upload",
     description:
@@ -289,12 +492,26 @@ const tools = [
     inputSchema: inputSchemas.hireme_register_sealed_harness,
   },
   {
+    name: "hireme_validate_sealed_harness",
+    title: "Validate sealed Harness through gateway",
+    description:
+      "Validate a sealed Agent folder through the protected gateway runner. Requires a paid hire receipt and returns only safe metadata, never AGENTS.md or skills content.",
+    inputSchema: inputSchemas.hireme_validate_sealed_harness,
+  },
+  {
     name: "hireme_connection_help",
     title: "Show HireMe plugin help",
     description: "Return plugin install, selection, and verification hints.",
     inputSchema: inputSchemas.hireme_connection_help,
   },
 ];
+
+const localSealedExampleRecords = {
+  "example-code-reviewer":
+    ".hireme/artifacts/example-code-reviewer.public-record.json",
+  "example-landing-designer":
+    ".hireme/artifacts/example-landing-designer.public-record.json",
+};
 
 function sealedHarnessFor(agentId) {
   return (
@@ -353,11 +570,14 @@ function textResult(value) {
   };
 }
 
-async function callGateway(path, body = {}) {
+async function callGateway(path, body = {}, options = {}) {
   if (process.env.HIREME_MCP_GATEWAY_DISABLED === "1") return null;
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 450);
+  const timeout = setTimeout(
+    () => controller.abort(),
+    options.timeoutMs || 450,
+  );
 
   try {
     const headers = {
@@ -437,6 +657,64 @@ function listAgents(args = {}) {
 
 async function callTool(name, args = {}) {
   switch (name) {
+    case "hireme_request": {
+      const walrusRequest = routeWalrusNaturalRequest(
+        args.request,
+        args.agent_id,
+      );
+      if (walrusRequest) {
+        const gateway = await callGateway("/v1/walrus-agent/read", walrusRequest, {
+          timeoutMs: Number(process.env.HIREME_MCP_WALRUS_TIMEOUT_MS || 60_000),
+        });
+        if (gateway) {
+          return textResult({
+            routedBy: "hireme_request",
+            naturalRequest: args.request,
+            inferredAgentId: walrusRequest.agent_id || null,
+            walrusBlobId: walrusRequest.blob_id || null,
+            ...gateway,
+          });
+        }
+        return textResult({
+          status: "gateway_required",
+          routedBy: "hireme_request",
+          reason:
+            "Walrus Agent folder reads require the protected gateway so Codex does not fetch creator folders directly.",
+          runGateway: "npm run gateway:dev",
+          retryTool: "hireme_call_walrus_agent",
+          payload: walrusRequest,
+        });
+      }
+      const routed = routeNaturalRequest(args.request, args.agent_id);
+      const callArgs = {
+        agent_id: routed.agentId,
+        task: routed.task,
+        budget_calls: args.budget_calls || 1,
+        hire_receipt_object_id:
+          args.hire_receipt_object_id || defaultHireReceiptFor(routed.agentId),
+      };
+      const gateway = await callGateway("/v1/agent-call", callArgs);
+      if (gateway) {
+        activeAgentId = gateway.activeAgentId || routed.agentId;
+        return textResult({
+          routedBy: "hireme_request",
+          naturalRequest: args.request,
+          inferredAgentId: routed.agentId,
+          task: routed.task,
+          ...gateway,
+        });
+      }
+      return textResult({
+        status: "gateway_required",
+        routedBy: "hireme_request",
+        inferredAgentId: routed.agentId,
+        task: routed.task,
+        reason:
+          "Natural HireMe requests for sealed agents require the protected gateway.",
+        runGateway: "npm run gateway:dev",
+        retryTool: "hireme_request",
+      });
+    }
     case "hireme_list_hired_agents": {
       const gateway = await callGateway("/v1/agents/list", args);
       if (gateway) return textResult(gateway);
@@ -516,6 +794,51 @@ async function callTool(name, args = {}) {
         },
       });
     }
+    case "hireme_call_attested_agent": {
+      const payload = {
+        agent_id: args.agent_id || args.agentId || activeAgentId,
+        task: args.task,
+        hire_receipt_object_id:
+          args.hire_receipt_object_id ||
+          args.hireReceiptObjectId ||
+          "hire_receipt_local_paid_demo",
+        record_path: args.record_path || args.recordPath,
+      };
+      const gateway = await callGateway("/v1/tee-runner/execute", payload, {
+        timeoutMs: Number(process.env.HIREME_MCP_TEE_TIMEOUT_MS || 60_000),
+      });
+      if (gateway) {
+        activeAgentId = gateway.agentId || payload.agent_id || activeAgentId;
+        return textResult(gateway);
+      }
+      return textResult({
+        status: "gateway_required",
+        reason:
+          "Attested runner execution requires the gateway because the MCP plugin must not decrypt or inspect creator folders.",
+        runGateway: "npm run gateway:dev",
+        retryTool: "hireme_call_attested_agent",
+        payload,
+      });
+    }
+    case "hireme_call_walrus_agent": {
+      const payload = {
+        blob_id: args.blob_id || args.blobId,
+        agent_id: args.agent_id || args.agentId,
+        task: args.task || "Describe this Walrus Agent folder.",
+      };
+      const gateway = await callGateway("/v1/walrus-agent/read", payload, {
+        timeoutMs: Number(process.env.HIREME_MCP_WALRUS_TIMEOUT_MS || 60_000),
+      });
+      if (gateway) return textResult(gateway);
+      return textResult({
+        status: "gateway_required",
+        reason:
+          "Walrus Agent folder reads require the protected gateway. The Codex plugin should not download or inspect creator folders directly.",
+        runGateway: "npm run gateway:dev",
+        retryTool: "hireme_call_walrus_agent",
+        payload,
+      });
+    }
     case "hireme_prepare_sealed_harness_upload": {
       const gateway = await callGateway("/v1/sealed-harness/prepare", args);
       if (gateway) return textResult(gateway);
@@ -560,19 +883,142 @@ async function callTool(name, args = {}) {
         returnedCreatorSecrets: false,
       });
     }
+    case "hireme_validate_sealed_harness": {
+      const agentId = args.agent_id || "example-code-reviewer";
+      const payload = {
+        record_path:
+          args.record_path ||
+          localSealedExampleRecords[agentId] ||
+          localSealedExampleRecords["example-code-reviewer"],
+        walrus_path: args.walrus_path,
+        hire_receipt_object_id:
+          args.hire_receipt_object_id || "hire_receipt_local_paid_demo",
+      };
+      const gateway = await callGateway("/v1/sealed-harness/validate", payload);
+      if (gateway) return textResult(gateway);
+      return textResult({
+        status: "gateway_required",
+        reason:
+          "Sealed Harness validation requires the protected gateway because the MCP server must not decrypt or inspect creator folders locally.",
+        runGateway: "npm run gateway:dev",
+        retryTool: "hireme_validate_sealed_harness",
+        payload,
+      });
+    }
     case "hireme_connection_help":
       return textResult({
         marketplace: "codex plugin marketplace add /Users/hanlab/Desktop/HireMe",
         install: "codex plugin add hireme --marketplace hireme-local",
         verify: "Start a new Codex session and run /mcp.",
+        naturalRequests:
+          "For plain user wording, call hireme_request. Example: request='example-landing-designer에게 핸드폰 상세 랜딩페이지 하나 만들어달라고 해'.",
+        walrusAgent:
+          "For the plaintext Walrus storage demo, call hireme_call_walrus_agent with agent_id='wal-test1' or a direct blob_id. The gateway reads Supabase and Walrus; Codex does not download the creator folder.",
+        teeRunner:
+          "For protected execution, call hireme_call_attested_agent with agent_id='example-code-reviewer' or 'example-landing-designer'. The local demo uses a mock attestation quote; production must verify hardware attestation before Seal key release.",
         switching:
           "Use hireme_list_hired_agents, then hireme_select_agent, then hireme_call_agent. For high-stakes calls, pass agent_id explicitly.",
+        sealedExample:
+          "Run npm run example:seal, start npm run gateway:dev, then call hireme_validate_sealed_harness with hire_receipt_object_id='hire_receipt_local_paid_demo'.",
         privacy:
           "Creator AGENTS.md and skills folders must never be shipped as Codex skills/plugins to hirers. The installed plugin is only a public connector to the protected MCP gateway.",
       });
     default:
       throw new Error(`Unknown tool: ${name}`);
   }
+}
+
+function routeNaturalRequest(request, explicitAgentId) {
+  const text = String(request || "").trim();
+  if (!text) {
+    throw new Error("request is required");
+  }
+
+  const agentId = explicitAgentId || inferAgentId(text);
+
+  return {
+    agentId,
+    task: stripDelegationPrefix(text, agentId),
+  };
+}
+
+function routeWalrusNaturalRequest(request, explicitAgentId) {
+  const text = String(request || "").trim();
+  const normalized = text.toLowerCase();
+  const mentionsWalrusAgent =
+    explicitAgentId === "wal-test1" ||
+    /wal[_-]?test1|blob\s*id|blobid|walrus[_\s-]?blob/.test(normalized);
+
+  if (!mentionsWalrusAgent) return null;
+
+  const blobIdMatch =
+    /(?:blob[_\s-]?id|walrus[_\s-]?blob[_\s-]?id)\s*(?:는|은|:|=|is)?\s*([A-Za-z0-9_-]{20,})/i.exec(
+      text,
+    );
+
+  return {
+    blob_id: blobIdMatch?.[1],
+    agent_id: explicitAgentId || (/wal[_-]?test1/.test(normalized) ? "wal-test1" : undefined),
+    task: text
+      .replace(/hireme_request/gi, "")
+      .replace(/wal[_-]?test1/gi, "")
+      .replace(/blob[_\s-]?id\s*(?:는|은|:|=|is)?\s*[A-Za-z0-9_-]{20,}/gi, "")
+      .replace(/\s+/g, " ")
+      .trim() || "Describe this Walrus Agent folder.",
+  };
+}
+
+function inferAgentId(request) {
+  const normalized = request.toLowerCase();
+  const directMatch = agents.find((agent) => {
+    const aliases = [
+      agent.id,
+      agent.name,
+      agent.handle,
+      agent.handle.replace(/^@/, ""),
+    ].map((value) => value.toLowerCase());
+    return aliases.some((alias) => normalized.includes(alias));
+  });
+  if (directMatch) return directMatch.id;
+
+  if (
+    /랜딩|landing|상세\s*페이지|상세\s*랜딩|페이지\s*만들|홈페이지|hero|cta|핸드폰|휴대폰|phone|mobile/.test(
+      normalized,
+    )
+  ) {
+    return "example-landing-designer";
+  }
+
+  if (/리뷰|review|pull request|pr\b|diff|migration|코드/.test(normalized)) {
+    return "example-code-reviewer";
+  }
+
+  if (/wal[_-]?test1|blob\s*id|blobid|walrus[_\s-]?blob/.test(normalized)) {
+    return "wal-test1";
+  }
+
+  return activeAgentId;
+}
+
+function stripDelegationPrefix(request, agentId) {
+  const agent = agents.find((item) => item.id === agentId);
+  if (!agent) return request;
+
+  return request
+    .replace(new RegExp(escapeRegExp(agent.id), "ig"), "")
+    .replace(new RegExp(escapeRegExp(agent.name), "ig"), "")
+    .replace(new RegExp(escapeRegExp(agent.handle), "ig"), "")
+    .replace(/에게|한테|으로|로|한\s*번|좀|부탁해|해줘|라고\s*해|만들어달라고\s*해/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim() || request;
+}
+
+function defaultHireReceiptFor(agentId) {
+  return localSealedExampleRecords[agentId] ? "hire_receipt_local_paid_demo" : undefined;
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function send(message) {
@@ -613,7 +1059,7 @@ async function handleRequest(message) {
             version: "0.1.0",
           },
           instructions:
-            "HireMe exposes hired protected AI agents. List hired agents, select one, and call it through MCP. Never request or reveal creator AGENTS.md files, private skills folders, Harness internals, plugin source, or protected memWal/Walrus artifacts.",
+            "HireMe exposes hired protected AI agents. For plain-language delegation such as 'example-landing-designer에게 핸드폰 상세 랜딩페이지 하나 만들어달라고 해', call hireme_request with the user's sentence as request. Use hireme_call_agent only when you already have structured agent_id/task arguments. Never request or reveal creator AGENTS.md files, private skills folders, design.md, Harness internals, plugin source, or protected memWal/Walrus artifacts.",
         });
         break;
       case "tools/list":

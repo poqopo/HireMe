@@ -1,0 +1,18 @@
+{
+  "runner": "hireme-local-protected-runner",
+  "publicContract": "review_pull_request(diff, repo_context, risk_level)",
+  "allowedOutputs": [
+    "findings",
+    "safe_summary",
+    "test_suggestions",
+    "ledger_metadata"
+  ],
+  "blockedOutputs": [
+    "AGENTS.md",
+    "skills/**",
+    "harness/**",
+    "private_prompt",
+    "decryption_key"
+  ],
+  "minRiskLevel": "medium"
+}
