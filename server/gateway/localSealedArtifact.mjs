@@ -373,7 +373,8 @@ function buildLandingPageBrief({ bundle, task }) {
       rawDesignReturned: false,
     },
     request: {
-      task,
+      taskDigest: `sha256:${sha256Hex(task)}`,
+      rawTaskReturned: false,
     },
     pageSections: [
       {
@@ -435,7 +436,8 @@ function buildGenericSealedTaskResult({ publicRecord, task }) {
   return {
     type: "sealed_agent_result",
     agentId: publicRecord.agentId,
-    task,
+    taskDigest: `sha256:${sha256Hex(task)}`,
+    rawTaskReturned: false,
     summary:
       "The protected runner validated the sealed folder and returned safe guidance without exposing private files.",
   };

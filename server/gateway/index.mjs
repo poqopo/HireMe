@@ -5,9 +5,9 @@ import { createServer } from "node:http";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
+  runSealedArtifactTask,
   validateSealedArtifact,
 } from "./localSealedArtifact.mjs";
-import { runAttestedAgentTask } from "./attestedRunner.mjs";
 import { readWalrusAgentArtifact } from "./walrusAgentArtifact.mjs";
 
 loadEnvFile(".env");
@@ -312,11 +312,6 @@ const server = createServer(async (req, res) => {
       return;
     }
 
-    if (req.method === "POST" && url.pathname === "/v1/tee-runner/execute") {
-      sendJson(res, 200, await runAttestedRunnerRequest(body));
-      return;
-    }
-
     if (req.method === "POST" && url.pathname === "/v1/sealed-harness/prepare") {
       sendJson(res, 200, prepareSealedHarnessUpload(body));
       return;
@@ -446,14 +441,12 @@ async function runProtectedAgent(args = {}) {
   const agent = findAgent(agentId);
   const artifact = protectedArtifacts.get(agent.id);
   const budgetCalls = args.budget_calls || 1;
-  const attestedTaskResult = localSealedExampleRecords[agent.id]
-    ? await runAttestedAgentTask({
-        agentId: agent.id,
+  const sealedTaskResult = localSealedExampleRecords[agent.id]
+    ? await runSealedArtifactTask({
         recordPath: args.record_path || localSealedExampleRecords[agent.id],
         walrusPath: args.walrus_path,
         hireReceiptObjectId:
           args.hire_receipt_object_id || "hire_receipt_local_paid_demo",
-        attestationQuote: args.attestation_quote || args.attestationQuote,
         runnerIdentity: args.runner_identity,
         task: args.task || "",
       })
@@ -465,7 +458,7 @@ async function runProtectedAgent(args = {}) {
     budgetCalls,
   }))}`;
   const safeResult =
-    attestedTaskResult?.agentResult || buildSafeResult(agent, args.task || "");
+    sealedTaskResult?.result || buildSafeResult(agent, args.task || "");
   const responseDigest = `sha256:${sha256Hex(JSON.stringify(safeResult))}`;
   const ledgerEvent = {
     callId,
@@ -506,8 +499,8 @@ async function runProtectedAgent(args = {}) {
       hireVerified: true,
       budgetApproved: budgetCalls <= 100,
       sealPolicyApproved: true,
-      attestedRunnerApproved: Boolean(attestedTaskResult),
-      mode: attestedTaskResult ? "attested-runner-local-mock" : "local-mock",
+      gatewayTrustedExecutor: true,
+      mode: sealedTaskResult ? "trusted-gateway-sealed-artifact" : "local-mock",
     },
     sealedArtifact: {
       network: artifact.network,
@@ -516,65 +509,22 @@ async function runProtectedAgent(args = {}) {
       ciphertextDigest: artifact.ciphertextDigest,
     },
     runner: {
-      executionMode: attestedTaskResult
-        ? "attested-tee-runner-local-mock"
-        : "sealed-folder-runner-mock",
-      teeRequired: Boolean(attestedTaskResult),
-      attestationVerified: attestedTaskResult?.attestation?.verified || false,
-      privateAgentFolderLoaded: Boolean(attestedTaskResult),
+      executionMode: sealedTaskResult
+        ? "trusted-gateway-sealed-folder-runner"
+        : "local-mock-runner",
+      gatewayTrustedExecutor: true,
+      privateAgentFolderLoaded: Boolean(sealedTaskResult),
       privateHarnessApplied: true,
       privateFolderReturnedToCodex: false,
-      gatewayPlaintextAccess: attestedTaskResult ? false : null,
+      gatewayCanReadUserInput: true,
+      gatewayCanReadCreatorArtifact: Boolean(sealedTaskResult),
       exposedSkills: false,
       exposedPluginCode: false,
       exposedHarnessInternals: false,
     },
     result: safeResult,
-    jsonOutput: attestedTaskResult?.jsonOutput || null,
-    attestedExecution: attestedTaskResult,
-    sealedValidation: attestedTaskResult?.sealedValidation || null,
+    sealedValidation: sealedTaskResult?.validation || null,
     ledgerEvent,
-  };
-}
-
-async function runAttestedRunnerRequest(args = {}) {
-  const agentId = args.agent_id || args.agentId || "example-code-reviewer";
-  const agent = findAgent(agentId);
-  const recordPath =
-    args.record_path ||
-    args.recordPath ||
-    localSealedExampleRecords[agent.id];
-
-  if (!recordPath) {
-    throw Object.assign(
-      new Error(`No sealed local artifact is registered for attested agent: ${agent.id}`),
-      {
-        statusCode: 404,
-        code: "attested_artifact_not_found",
-      },
-    );
-  }
-
-  const result = await runAttestedAgentTask({
-    agentId: agent.id,
-    recordPath,
-    walrusPath: args.walrus_path || args.walrusPath,
-    hireReceiptObjectId:
-      args.hire_receipt_object_id ||
-      args.hireReceiptObjectId ||
-      "hire_receipt_local_paid_demo",
-    attestationQuote: args.attestation_quote || args.attestationQuote,
-    runnerIdentity: args.runner_identity || args.runnerIdentity,
-    task: args.task || "",
-  });
-
-  return {
-    ...result,
-    agent: {
-      id: agent.id,
-      name: agent.name,
-      pricePerCallUsd: agent.pricePerCallUsd,
-    },
   };
 }
 

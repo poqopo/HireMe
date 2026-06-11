@@ -52,27 +52,12 @@ try {
     throw new Error("Gateway example agent call did not validate the sealed artifact");
   }
 
-  if (!exampleCall.attestedExecution?.attestation?.verified) {
-    throw new Error("Gateway example agent call did not use the attested runner mock");
-  }
-
-  if (exampleCall.runner?.gatewayPlaintextAccess !== false) {
-    throw new Error("Gateway example agent call did not preserve the TEE plaintext boundary");
-  }
-
-  const teeCall = await postJson(`${gatewayUrl}/v1/tee-runner/execute`, gatewayKey, {
-    agent_id: "example-code-reviewer",
-    task: "Review this migration diff through TEE",
-    hire_receipt_object_id: "hire_receipt_local_paid_demo",
-  });
-
   if (
-    teeCall.protocol !== "hireme.attested-runner.v1" ||
-    !teeCall.attestation?.verified ||
-    teeCall.runner?.gatewayPlaintextAccess !== false ||
-    !teeCall.jsonOutput?.proof?.runnerSignature
+    !exampleCall.runner?.gatewayTrustedExecutor ||
+    exampleCall.runner?.gatewayCanReadUserInput !== true ||
+    exampleCall.runner?.privateFolderReturnedToCodex !== false
   ) {
-    throw new Error("TEE runner endpoint did not return the expected proof boundary");
+    throw new Error("Gateway example agent call did not preserve the MVP trusted gateway boundary");
   }
 
   const pluginOutput = await runPluginThroughGateway(gatewayUrl, gatewayKey);
@@ -85,11 +70,9 @@ try {
   const callResult = responses.find((response) => response.id === 4);
   const validateResult = responses.find((response) => response.id === 5);
   const naturalResult = responses.find((response) => response.id === 6);
-  const attestedResult = responses.find((response) => response.id === 7);
   const text = callResult?.result?.content?.[0]?.text || "";
   const validateText = validateResult?.result?.content?.[0]?.text || "";
   const naturalText = naturalResult?.result?.content?.[0]?.text || "";
-  const attestedText = attestedResult?.result?.content?.[0]?.text || "";
 
   if (!text.includes('"gatewayCall": true')) {
     throw new Error("Plugin MCP call did not route through the gateway");
@@ -108,13 +91,6 @@ try {
     !naturalText.includes('"type": "landing_page_brief"')
   ) {
     throw new Error("Plugin MCP natural request did not route to the landing designer");
-  }
-
-  if (
-    !attestedText.includes('"protocol": "hireme.attested-runner.v1"') ||
-    !attestedText.includes('"gatewayPlaintextAccess": false')
-  ) {
-    throw new Error("Plugin MCP attested runner call did not route through the gateway");
   }
 
   console.log("HireMe gateway smoke test passed.");
@@ -227,19 +203,6 @@ async function runPluginThroughGateway(gatewayUrl, gatewayKey) {
         arguments: {
           request:
             "example-landing-designer에게 핸드폰 상세 랜딩페이지 하나 만들어달라고 해",
-        },
-      },
-    },
-    {
-      jsonrpc: "2.0",
-      id: 7,
-      method: "tools/call",
-      params: {
-        name: "hireme_call_attested_agent",
-        arguments: {
-          agent_id: "example-code-reviewer",
-          task: "Review this migration diff through TEE",
-          hire_receipt_object_id: "hire_receipt_local_paid_demo",
         },
       },
     },

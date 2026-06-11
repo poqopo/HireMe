@@ -310,32 +310,6 @@ const inputSchemas = {
     },
     required: ["task"],
   },
-  hireme_call_attested_agent: {
-    type: "object",
-    properties: {
-      agent_id: {
-        type: "string",
-        description:
-          "Sealed example agent id to execute through the attested runner mock.",
-      },
-      task: {
-        type: "string",
-        minLength: 1,
-        description: "The task to send to the attested runner.",
-      },
-      hire_receipt_object_id: {
-        type: "string",
-        description:
-          "Optional paid hire receipt object id. Local demo defaults to hire_receipt_local_paid_demo.",
-      },
-      record_path: {
-        type: "string",
-        description:
-          "Optional public artifact record path for sealed example agents.",
-      },
-    },
-    required: ["task"],
-  },
   hireme_call_walrus_agent: {
     type: "object",
     properties: {
@@ -462,13 +436,6 @@ const tools = [
     description:
       "Call an explicitly selected or session-active protected agent. Returns mock output and a ledger event in this demo.",
     inputSchema: inputSchemas.hireme_call_agent,
-  },
-  {
-    name: "hireme_call_attested_agent",
-    title: "Call an attested HireMe runner",
-    description:
-      "Execute a sealed example agent through the local TEE attestation mock. The gateway routes the job, and only the attested runner boundary may decrypt.",
-    inputSchema: inputSchemas.hireme_call_attested_agent,
   },
   {
     name: "hireme_call_walrus_agent",
@@ -794,32 +761,6 @@ async function callTool(name, args = {}) {
         },
       });
     }
-    case "hireme_call_attested_agent": {
-      const payload = {
-        agent_id: args.agent_id || args.agentId || activeAgentId,
-        task: args.task,
-        hire_receipt_object_id:
-          args.hire_receipt_object_id ||
-          args.hireReceiptObjectId ||
-          "hire_receipt_local_paid_demo",
-        record_path: args.record_path || args.recordPath,
-      };
-      const gateway = await callGateway("/v1/tee-runner/execute", payload, {
-        timeoutMs: Number(process.env.HIREME_MCP_TEE_TIMEOUT_MS || 60_000),
-      });
-      if (gateway) {
-        activeAgentId = gateway.agentId || payload.agent_id || activeAgentId;
-        return textResult(gateway);
-      }
-      return textResult({
-        status: "gateway_required",
-        reason:
-          "Attested runner execution requires the gateway because the MCP plugin must not decrypt or inspect creator folders.",
-        runGateway: "npm run gateway:dev",
-        retryTool: "hireme_call_attested_agent",
-        payload,
-      });
-    }
     case "hireme_call_walrus_agent": {
       const payload = {
         blob_id: args.blob_id || args.blobId,
@@ -914,8 +855,6 @@ async function callTool(name, args = {}) {
           "For plain user wording, call hireme_request. Example: request='example-landing-designer에게 핸드폰 상세 랜딩페이지 하나 만들어달라고 해'.",
         walrusAgent:
           "For the plaintext Walrus storage demo, call hireme_call_walrus_agent with agent_id='wal-test1' or a direct blob_id. The gateway reads Supabase and Walrus; Codex does not download the creator folder.",
-        teeRunner:
-          "For protected execution, call hireme_call_attested_agent with agent_id='example-code-reviewer' or 'example-landing-designer'. The local demo uses a mock attestation quote; production must verify hardware attestation before Seal key release.",
         switching:
           "Use hireme_list_hired_agents, then hireme_select_agent, then hireme_call_agent. For high-stakes calls, pass agent_id explicitly.",
         sealedExample:

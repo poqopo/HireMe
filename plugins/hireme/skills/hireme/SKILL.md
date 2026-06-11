@@ -13,15 +13,14 @@ Use this skill when the user wants to work with HireMe protected AI agents from 
 2. Call `hireme_list_hired_agents` when the user asks what agents are available.
 3. If the user explicitly asks to switch active agents, call `hireme_select_agent` with that `agent_id`.
 4. For structured execution, prefer `hireme_call_agent` with an explicit `agent_id` when the user names one.
-5. For explicit protected execution tests, call `hireme_call_attested_agent`; this routes through the local TEE attestation mock.
-6. For the plaintext Walrus storage demo, call `hireme_call_walrus_agent` with `agent_id: "wal-test1"` or a direct `blob_id`.
-7. If the user does not name an agent, call `hireme_current_agent` and ask for selection only when no active agent is set.
-8. Never ask for or expose creator `AGENTS.md`, private `skills/`, plugin source, Harness internals, prompts, eval sets, backup keys, or protected memWal/Walrus artifacts.
-9. Treat `pricePerCallUsd`, `budgetCalls`, and ledger output as billing-relevant data.
+5. For the plaintext Walrus storage demo, call `hireme_call_walrus_agent` with `agent_id: "wal-test1"` or a direct `blob_id`.
+6. If the user does not name an agent, call `hireme_current_agent` and ask for selection only when no active agent is set.
+7. Never ask for or expose creator `AGENTS.md`, private `skills/`, plugin source, Harness internals, prompts, eval sets, backup keys, or protected memWal/Walrus artifacts.
+8. Treat `pricePerCallUsd`, `budgetCalls`, and ledger output as billing-relevant data.
 
 ## Privacy Boundary
 
-HireMe does not install creator folders into the hirer's Codex environment. The local Codex plugin is only a connector. Creator `AGENTS.md` and `skills/` folders are sealed, stored on Walrus as ciphertext, and executed by an attested runner after hire, Seal policy, and TEE attestation checks pass. Codex receives tool schemas, public summaries, billing metadata, runner proof, and safe results only.
+HireMe does not install creator folders into the hirer's Codex environment. The local Codex plugin is only a connector. In the MVP, the HireMe gateway is the trusted executor: it verifies hire/access/budget, loads the creator bundle, runs the protected workflow, and returns safe results. Codex receives tool schemas, public summaries, billing metadata, and safe output only.
 
 For creator registration, use `hireme_prepare_sealed_harness_upload` and `hireme_register_sealed_harness`. These tools must only handle encrypted bundle metadata, never plaintext folder contents.
 
@@ -45,6 +44,5 @@ For Korean natural-language requests, route these directly:
 - `랜딩페이지 만들어줘`, `상세 페이지 만들어줘`, `핸드폰 페이지 만들어줘` -> `hireme_request`, inferred agent `example-landing-designer`
 - `코드 리뷰해줘`, `migration diff 리뷰해줘` -> `hireme_request`, inferred agent `example-code-reviewer`
 - `wal_test1 폴더 구조 읽어줘`, `blobId는 <id>인 Walrus blob 읽어줘` -> `hireme_call_walrus_agent`
-- `TEE runner로 example-code-reviewer 실행해줘` -> `hireme_call_attested_agent`
 
 `hireme_select_agent` stores a session-local active agent for convenience. Production should store active-agent state per user and Codex installation on the HireMe backend.

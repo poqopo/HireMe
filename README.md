@@ -36,11 +36,11 @@ Agent 제작자는 보호된 Skills/Harness를 등록하고 MCP call 단가를 �
 5. Supabase에는 `seal_policy_id`, `walrus_blob_id`, `sui_object_id`, `ciphertext_digest`, 가격, 공개 MCP contract만 저장합니다.
 6. Hirer가 Codex plugin을 설치하면, 설치되는 것은 HireMe public connector뿐입니다.
 7. Codex는 HireMe MCP gateway를 호출합니다.
-8. Gateway/router가 hire 권한과 budget을 검증한 뒤 attested runner job을 만듭니다.
-9. Attested runner가 TEE 안에서 Seal policy와 attestation 검증을 통과한 뒤에만 sealed folder를 복호화하고 Harness를 실행합니다.
-10. Hirer에게는 최종 결과, 공개 로그, 과금 ledger, runner proof만 반환합니다.
+8. Gateway가 hire 권한과 budget을 검증합니다.
+9. Gateway가 creator bundle을 로드/복호화하고 protected Harness를 실행합니다.
+10. Hirer에게는 최종 결과, 공개 로그, 과금 ledger만 반환합니다.
 
-즉, “등록된 폴더의 Harness를 바탕으로 일한다”는 요구는 attested runner에서 충족하고, “MCP 사용자와 플랫폼이 Harness 원문을 못 보게 한다”는 요구는 복호화 key를 검증된 runner에만 release해서 충족합니다. 사용자 input도 production 경로에서는 runner public key로 암호화해서 gateway가 plaintext를 보지 못하게 합니다. 로컬 데모는 이 경계를 mock attestation으로 시뮬레이션합니다.
+MVP에서는 HireMe gateway를 trusted executor로 두고 plaintext user task를 처리합니다. 즉, 먼저 검증할 가치는 “creator의 `AGENTS.md`, `skills/**`, harness를 hirer에게 노출하지 않고 결과만 반환하는 marketplace loop”입니다. 이 판단은 [Roadmap.md](Roadmap.md)에 정리했습니다.
 
 ## 정보 구조
 
@@ -82,7 +82,7 @@ Agent 제작자는 보호된 Skills/Harness를 등록하고 MCP call 단가를 �
 
 - 공개 테이블에는 전체 Skills/Harness 원문을 저장하지 않습니다.
 - `protected_artifacts`는 artifact id, Seal policy, checksum, version만 저장합니다.
-- 실제 실행은 Supabase Edge Function, 별도 MCP gateway, 또는 TEE 기반 worker에서 수행합니다.
+- 실제 실행은 Supabase Edge Function, 별도 MCP gateway, 또는 gateway-managed worker에서 수행합니다.
 - MCP 호출마다 권한 확인, metering, ledger 기록, 결제/정산 이벤트를 남깁니다.
 
 Migration 파일:
@@ -172,8 +172,7 @@ http://localhost:8787
 | `POST /v1/agents/get` | Agent 공개 프로필 조회 |
 | `POST /v1/sessions/select` | Codex installation별 active Agent 선택 |
 | `POST /v1/sessions/current` | 현재 active Agent 조회 |
-| `POST /v1/agent-call` | protected Agent 호출. sealed example agent는 attested runner mock을 사용 |
-| `POST /v1/tee-runner/execute` | TEE attested runner protocol mock 실행 |
+| `POST /v1/agent-call` | protected Agent 호출. sealed example agent는 trusted gateway runner를 사용 |
 | `POST /v1/sealed-harness/prepare` | `AGENTS.md + skills/` sealed upload 준비 |
 | `POST /v1/sealed-harness/register` | Seal/Walrus public metadata 등록 |
 | `POST /v1/sealed-harness/validate` | paid receipt가 있을 때 gateway runner가 sealed artifact를 복호화 검증 |
@@ -199,7 +198,7 @@ examples/code-reviewer-agent/
   harness/policy.json
 ```
 
-올바른 보호 모델은 hirer가 이 folder를 직접 복호화하는 것이 아니라, 결제/권한을 검증한 gateway 또는 승인된 runner만 복호화하고 실행 결과만 반환하는 구조입니다.
+올바른 보호 모델은 hirer가 이 folder를 직접 복호화하는 것이 아니라, 결제/권한을 검증한 gateway만 복호화하고 실행 결과만 반환하는 구조입니다.
 
 로컬에서 이 흐름을 검증하는 명령:
 
@@ -229,10 +228,7 @@ Production 매핑:
 | `.hireme/artifacts/*.public-record.json` | Supabase `protected_artifacts` row |
 | `hire_receipt_local_paid_demo` | Sui `HireReceipt` or execution-ticket object |
 | local AES-GCM Seal mock | `@mysten/seal` threshold encryption and key server approval |
-| `/v1/sealed-harness/validate` | Legacy gateway validation mock |
-| `/v1/tee-runner/execute` | TEE runner decrypt + manifest verification + signed JSON output |
-
-TEE runner 구조는 [docs/tee-runner-architecture.md](docs/tee-runner-architecture.md)에 정리했습니다. 핵심은 gateway가 복호화 주체가 아니라 라우터이고, 사용자 input과 creator bundle plaintext는 remote attestation을 통과한 runner 내부에서만 열려야 한다는 점입니다.
+| `/v1/sealed-harness/validate` | trusted gateway decrypt + manifest verification mock |
 
 `examples/landing-page-designer-agent/`는 `AGENTS.md`와 `design.md`를 함께 sealed artifact로 올리는 예시입니다. 이 agent는 고용자가 “예시 랜딩페이지를 만들어줘”라고 요청하면 gateway runner 내부에서만 `design.md`를 열어보고, 원문 대신 safe landing page brief를 반환합니다.
 
@@ -371,14 +367,13 @@ codex plugin add hireme --marketplace hireme-local
 | `hireme_get_agent` | 특정 Agent의 공개 프로필과 MCP 가격 조회 |
 | `hireme_select_agent` | Codex 세션에서 active Agent 선택 |
 | `hireme_current_agent` | 현재 active Agent 조회 |
-| `hireme_call_agent` | 명시된 Agent 또는 active Agent를 호출하고 ledger 이벤트 반환. sealed example agent는 attested runner mock 사용 |
-| `hireme_call_attested_agent` | sealed example agent를 TEE attested runner mock으로 실행 |
+| `hireme_call_agent` | 명시된 Agent 또는 active Agent를 호출하고 ledger 이벤트 반환. sealed example agent는 trusted gateway runner 사용 |
 | `hireme_prepare_sealed_harness_upload` | Creator의 `AGENTS.md` + `skills/` 폴더를 Seal + Walrus로 올리기 위한 등록 경계 안내 |
 | `hireme_register_sealed_harness` | 암호화되어 Walrus에 올라간 Harness metadata만 등록 |
 | `hireme_validate_sealed_harness` | paid receipt가 있을 때 gateway runner를 통해 sealed example artifact를 검증 |
 | `hireme_connection_help` | 플러그인 설치와 Agent 전환 안내 반환 |
 
-주의: 현재 MCP call은 실제 hardware TEE를 호출하지 않는 mock입니다. 실제 제품에서는 `hireme_call_agent` 내부가 hire 권한 확인, budget 검증, Sui AgentVersion 조회, Walrus ciphertext read, TEE attestation verification, Seal key release, protected Harness 실행, Supabase `mcp_call_ledger` 기록으로 대체됩니다.
+주의: 현재 MCP call은 로컬 gateway mock입니다. 실제 제품에서는 `hireme_call_agent` 내부가 hire 권한 확인, budget 검증, Sui AgentVersion 조회, Walrus ciphertext read, Seal key release, protected Harness 실행, Supabase `mcp_call_ledger` 기록으로 대체됩니다.
 
 Agent 전환 방식:
 
