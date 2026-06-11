@@ -39,6 +39,13 @@ try {
   if (!call.result?.privateReferencesApplied?.designMd) {
     throw new Error("Landing designer did not apply the sealed design.md reference");
   }
+  if (
+    call.jsonOutput?.schema !== "hireme.protected_agent_json_output.v1" ||
+    call.jsonOutput?.payload?.type !== "landing_page_brief" ||
+    call.jsonOutput?.localCodex?.shouldAct !== true
+  ) {
+    throw new Error("Landing designer did not return local Codex JSON output");
+  }
   if (!call.sealedValidation?.gatewayOnlyDecrypt) {
     throw new Error("Landing designer did not validate through gateway-only decrypt");
   }

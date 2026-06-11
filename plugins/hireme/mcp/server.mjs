@@ -729,6 +729,16 @@ async function callTool(name, args = {}) {
       const agent = findAgent(args.agent_id || activeAgentId);
       const callId = `call_${Date.now().toString(36)}`;
       const budgetCalls = args.budget_calls || 1;
+      const fallbackPayload = {
+        type: "protected_agent_guidance",
+        summary:
+          "Demo response: the selected protected agent accepted the task. Production will execute the sealed Agent folder inside the MCP gateway and return only safe output.",
+        recommendations: [
+          `Use the public contract ${agent.harnessSummary}.`,
+          "Start npm run gateway:dev for protected artifact execution.",
+          "Keep creator AGENTS.md, skills, and harness files out of the local Codex plugin.",
+        ],
+      };
       return textResult({
         callId,
         activeAgentId,
@@ -751,8 +761,38 @@ async function callTool(name, args = {}) {
           exposedHarnessInternals: false,
           protectedAssetsReturned: false,
         },
-        result:
-          "Demo response: the selected protected agent accepted the task. Production will execute the sealed Agent folder inside the MCP gateway and return only safe output.",
+        result: fallbackPayload,
+        jsonOutput: {
+          schema: "hireme.protected_agent_json_output.v1",
+          type: fallbackPayload.type,
+          generatedBy: "hireme-mcp-local-fallback",
+          executionMode: "local-fallback",
+          agent: {
+            id: agent.id,
+            name: agent.name,
+            publicContract: agent.harnessSummary,
+          },
+          input: {
+            task: args.task,
+            budgetCalls,
+            plaintextTaskVisibleToGateway: false,
+          },
+          harness: {
+            publicContract: agent.harnessSummary,
+            protectedAssetClasses: agent.protectedAssets,
+            rawHarnessReturned: false,
+            rawAgentsReturned: false,
+            rawSkillsReturned: false,
+          },
+          payload: fallbackPayload,
+          localCodex: {
+            shouldAct: true,
+            instruction:
+              "Use jsonOutput.payload as demo guidance only. Start the HireMe gateway for protected Agent execution.",
+            preferredSource: "jsonOutput.payload",
+            blockedSources: ["AGENTS.md", "skills/**", "harness/**"],
+          },
+        },
         ledgerEvent: {
           table: "mcp_call_ledger",
           status: "mock_recorded",

@@ -260,6 +260,8 @@ Codex는 `hireme_request`를 호출하고, MCP 서버가 `example-landing-design
 현재 gateway의 `POST /v1/agent-call`은 다음을 보장하는 mock 결과를 반환합니다.
 
 - private Agent folder를 gateway runner가 사용했다고 표시합니다.
+- local Codex가 바로 소비할 수 있는 `jsonOutput.schema: hireme.protected_agent_json_output.v1`을 반환합니다.
+- `jsonOutput.payload`에는 Agent가 만든 safe guidance가 들어가고, `jsonOutput.localCodex.shouldAct: true`로 후속 작업 지시를 명시합니다.
 - `AGENTS.md`, `skills/`, plugin source, Harness internals는 반환하지 않습니다.
 - ledger에는 raw prompt/response 대신 digest와 과금 metadata만 남깁니다.
 

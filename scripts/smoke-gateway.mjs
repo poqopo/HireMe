@@ -41,6 +41,13 @@ try {
     throw new Error("Gateway direct call did not run through protected runner");
   }
 
+  if (
+    directCall.jsonOutput?.schema !== "hireme.protected_agent_json_output.v1" ||
+    directCall.jsonOutput?.localCodex?.shouldAct !== true
+  ) {
+    throw new Error("Gateway direct call did not return local Codex JSON output");
+  }
+
   const exampleCall = await postJson(`${gatewayUrl}/v1/agent-call`, gatewayKey, {
     agent_id: "example-code-reviewer",
     task: "Review a migration diff",
@@ -58,6 +65,13 @@ try {
     exampleCall.runner?.privateFolderReturnedToCodex !== false
   ) {
     throw new Error("Gateway example agent call did not preserve the MVP trusted gateway boundary");
+  }
+
+  if (
+    exampleCall.jsonOutput?.payload?.type !== "code_review_guidance" ||
+    exampleCall.jsonOutput?.harness?.rawHarnessReturned !== false
+  ) {
+    throw new Error("Gateway example agent call did not return harness-based JSON output");
   }
 
   const pluginOutput = await runPluginThroughGateway(gatewayUrl, gatewayKey);
@@ -78,6 +92,10 @@ try {
     throw new Error("Plugin MCP call did not route through the gateway");
   }
 
+  if (!text.includes('"schema": "hireme.protected_agent_json_output.v1"')) {
+    throw new Error("Plugin MCP call did not return the protected JSON output schema");
+  }
+
   if (!text.includes('"privateFolderReturnedToCodex": false')) {
     throw new Error("Gateway response did not preserve private folder boundary");
   }
@@ -88,7 +106,8 @@ try {
 
   if (
     !naturalText.includes('"inferredAgentId": "example-landing-designer"') ||
-    !naturalText.includes('"type": "landing_page_brief"')
+    !naturalText.includes('"type": "landing_page_brief"') ||
+    !naturalText.includes('"shouldAct": true')
   ) {
     throw new Error("Plugin MCP natural request did not route to the landing designer");
   }

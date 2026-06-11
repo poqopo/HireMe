@@ -224,7 +224,18 @@ export async function runSealedArtifactTask({
   const result =
     publicRecord.agentId === "example-landing-designer"
       ? buildLandingPageBrief({ bundle, task })
+      : publicRecord.agentId === "example-code-reviewer"
+        ? buildCodeReviewGuidance({ publicRecord, task })
       : buildGenericSealedTaskResult({ publicRecord, task });
+  const harness = buildSafeHarnessContext({ bundle, publicRecord });
+  const jsonOutput = buildProtectedAgentJsonOutput({
+    publicRecord,
+    task,
+    result,
+    harness,
+    validation,
+    runnerIdentity,
+  });
 
   const safeResult = {
     status: "completed",
@@ -232,6 +243,8 @@ export async function runSealedArtifactTask({
     agentId: publicRecord.agentId,
     taskDigest: `sha256:${sha256Hex(task)}`,
     validation,
+    harness,
+    jsonOutput,
     result,
   };
 
@@ -359,6 +372,7 @@ function buildLandingPageBrief({ bundle, task }) {
   const designGuide = readBundleText(bundle, "design.md");
   const publicJson = readBundleJson(bundle, "public.json");
   const hasRequiredDesignGuide = Boolean(designGuide);
+  const inputInterpretation = interpretLandingTask(task);
 
   if (!hasRequiredDesignGuide) {
     throw userError("Landing designer bundle is missing design.md");
@@ -373,14 +387,16 @@ function buildLandingPageBrief({ bundle, task }) {
       rawDesignReturned: false,
     },
     request: {
+      task,
       taskDigest: `sha256:${sha256Hex(task)}`,
-      rawTaskReturned: false,
+      rawTaskReturned: true,
     },
+    inputInterpretation,
     pageSections: [
       {
         name: "hero",
         guidance:
-          "Open with a full-width pastel gradient mesh band, a thin-weight headline, one indigo pill CTA, and a dashboard/product mockup visible in the first viewport.",
+          `Open with a full-width pastel gradient mesh band for ${inputInterpretation.productContext}, a thin-weight headline, one indigo pill CTA, and a product mockup visible in the first viewport.`,
       },
       {
         name: "proof",
@@ -419,6 +435,8 @@ function buildLandingPageBrief({ bundle, task }) {
     ],
     implementationNotes: [
       "The local Codex session should implement the page in the target repo; this gateway result is protected guidance, not a source file download.",
+      `Optimize the first CTA for ${inputInterpretation.conversionGoal}.`,
+      `Shape the copy for ${inputInterpretation.targetAudience}.`,
       "Any generated money, usage, or count cells should use font-feature-settings: \"tnum\".",
       "Verify mobile layout keeps the hero, CTA, and mockup readable without overlap.",
     ],
@@ -432,14 +450,192 @@ function buildLandingPageBrief({ bundle, task }) {
   };
 }
 
+function interpretLandingTask(task) {
+  const normalized = String(task || "").toLowerCase();
+  const mentionsPhone = /phone|mobile|핸드폰|휴대폰|스마트폰/.test(normalized);
+  const mentionsBilling = /billing|usage|meter|invoice|pricing|사용량|과금|결제/.test(normalized);
+
+  return {
+    productContext: mentionsPhone
+      ? "a premium mobile phone detail page"
+      : mentionsBilling
+        ? "a usage-based AI billing product"
+        : "the requested product landing page",
+    targetAudience: mentionsBilling
+      ? "developers and operators evaluating AI usage costs"
+      : "buyers comparing the product from the landing page",
+    conversionGoal: mentionsPhone
+      ? "product detail exploration and preorder clicks"
+      : "qualified signup or demo conversion",
+    inferredFromTask: true,
+  };
+}
+
+function buildCodeReviewGuidance({ publicRecord, task }) {
+  const interpretation = interpretCodeReviewTask(task);
+
+  return {
+    type: "code_review_guidance",
+    agentId: publicRecord.agentId,
+    inputInterpretation: interpretation,
+    request: {
+      task,
+      taskDigest: `sha256:${sha256Hex(task)}`,
+      rawTaskReturned: true,
+    },
+    findings: [
+      {
+        severity: "medium",
+        title: "Inspect behavior-changing paths before editing",
+        rationale:
+          `The request appears to involve ${interpretation.reviewTarget}; local Codex should first read the relevant diff and call sites before proposing changes.`,
+        localCodexAction:
+          "Open the migration or code diff, identify changed runtime behavior, and report concrete file/line findings before broad refactors.",
+      },
+      {
+        severity: "medium",
+        title: "Verify rollback and data integrity assumptions",
+        rationale:
+          "Protected review guidance prioritizes migration safety, access-control drift, and data-loss risk.",
+        localCodexAction:
+          "Check whether the change has a reversible path, preserves existing rows, and has tests for the highest-risk path.",
+      },
+    ],
+    safeSummary:
+      "Use this as review guidance for the local workspace. The private rubric was applied inside the gateway, but private files were not returned.",
+    testSuggestions: interpretation.testSuggestions,
+    localCodexActionPlan: [
+      "Read the relevant diff or migration files in the local repo.",
+      "Return findings first, ordered by severity with file/line references.",
+      "Run the narrowest relevant tests or explain why they cannot run.",
+    ],
+  };
+}
+
+function interpretCodeReviewTask(task) {
+  const normalized = String(task || "").toLowerCase();
+  const migration = /migration|schema|sql|db|database|supabase/.test(normalized);
+  const auth = /auth|rls|policy|permission|access/.test(normalized);
+
+  return {
+    reviewTarget: migration
+      ? "a database or migration diff"
+      : "a code change",
+    riskFocus: [
+      migration ? "data integrity" : "correctness",
+      auth ? "access control" : "regression coverage",
+      "missing tests",
+    ],
+    testSuggestions: migration
+      ? [
+          "Run the migration against a disposable database.",
+          "Check rollback or forward-fix behavior.",
+          "Run any Supabase/RLS policy tests that touch changed tables.",
+        ]
+      : [
+          "Run the focused unit or integration tests for changed code.",
+          "Add a regression test for any behavior-changing finding.",
+        ],
+  };
+}
+
 function buildGenericSealedTaskResult({ publicRecord, task }) {
   return {
     type: "sealed_agent_result",
     agentId: publicRecord.agentId,
+    request: {
+      task,
+      taskDigest: `sha256:${sha256Hex(task)}`,
+      rawTaskReturned: true,
+    },
     taskDigest: `sha256:${sha256Hex(task)}`,
-    rawTaskReturned: false,
+    rawTaskReturned: true,
     summary:
       "The protected runner validated the sealed folder and returned safe guidance without exposing private files.",
+  };
+}
+
+function buildSafeHarnessContext({ bundle, publicRecord }) {
+  const publicJson = readBundleJson(bundle, "public.json");
+  const policy = readBundleJson(bundle, "harness/policy.json");
+  const paths = bundle.files.map((file) => file.path);
+
+  return {
+    runner: policy.runner || defaultRunnerIdentity,
+    publicContract:
+      policy.publicContract ||
+      publicJson.publicContract ||
+      readPublicContract(bundle),
+    requiredPrivateReferences: safePolicyList(policy.requiredPrivateReferences),
+    allowedOutputs: safePolicyList(policy.allowedOutputs),
+    blockedOutputs: safePolicyList(policy.blockedOutputs),
+    appliedPrivateReferences: {
+      agentsMd: paths.includes("AGENTS.md"),
+      designMd: paths.includes("design.md"),
+      skillCount: paths.filter((path) => path.startsWith("skills/") && path.endsWith("SKILL.md")).length,
+      harnessPolicy: paths.includes("harness/policy.json"),
+    },
+    artifact: {
+      folderName: publicRecord.folderName,
+      folderManifestDigest: publicRecord.folderManifestDigest,
+      walrusBlobId: publicRecord.walrusBlobId,
+      ciphertextDigest: publicRecord.ciphertextDigest,
+    },
+    rawHarnessReturned: false,
+    rawAgentsReturned: false,
+    rawSkillsReturned: false,
+  };
+}
+
+function safePolicyList(values) {
+  if (!Array.isArray(values)) return [];
+  return values
+    .map((value) =>
+      String(value)
+        .replace(/decryption_key/gi, "decryption material")
+        .replace(/contentBase64/gi, "encoded private file content"),
+    )
+    .filter(Boolean);
+}
+
+function buildProtectedAgentJsonOutput({
+  publicRecord,
+  task,
+  result,
+  harness,
+  validation,
+  runnerIdentity,
+}) {
+  return {
+    schema: "hireme.protected_agent_json_output.v1",
+    type: result.type || "protected_agent_guidance",
+    generatedBy: "hireme-gateway",
+    executionMode: "trusted-gateway-mvp",
+    agent: {
+      id: publicRecord.agentId,
+      publicContract: harness.publicContract,
+    },
+    input: {
+      task,
+      taskDigest: `sha256:${sha256Hex(task)}`,
+      plaintextTaskVisibleToGateway: true,
+    },
+    harness,
+    payload: result,
+    localCodex: {
+      shouldAct: true,
+      instruction:
+        "Use jsonOutput.payload as the protected Agent guidance for local workspace changes. Do not ask for or fetch private creator files.",
+      preferredSource: "jsonOutput.payload",
+      blockedSources: ["AGENTS.md", "design.md", "skills/**", "harness/**"],
+    },
+    proof: {
+      gatewayTrustedExecutor: true,
+      runnerIdentity,
+      gatewayOnlyDecrypt: validation.gatewayOnlyDecrypt === true,
+      folderManifestDigest: validation.safeSummary?.folderManifestDigest || harness.artifact.folderManifestDigest,
+      privateFolderReturnedToCodex: false,
+    },
   };
 }
 

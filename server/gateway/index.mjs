@@ -460,6 +460,16 @@ async function runProtectedAgent(args = {}) {
   const safeResult =
     sealedTaskResult?.result || buildSafeResult(agent, args.task || "");
   const responseDigest = `sha256:${sha256Hex(JSON.stringify(safeResult))}`;
+  const jsonOutput =
+    sealedTaskResult?.jsonOutput ||
+    buildGatewayJsonOutput({
+      agent,
+      task: args.task || "",
+      budgetCalls,
+      requestDigest,
+      responseDigest,
+      payload: safeResult,
+    });
   const ledgerEvent = {
     callId,
     table: "mcp_call_ledger",
@@ -523,6 +533,7 @@ async function runProtectedAgent(args = {}) {
       exposedHarnessInternals: false,
     },
     result: safeResult,
+    jsonOutput,
     sealedValidation: sealedTaskResult?.validation || null,
     ledgerEvent,
   };
@@ -549,6 +560,57 @@ function buildSafeResult(agent, task) {
       "Pass an explicit agent_id for high-value calls.",
       "Check ledgerEvent.amountUsd before repeated calls.",
     ],
+  };
+}
+
+function buildGatewayJsonOutput({
+  agent,
+  task,
+  budgetCalls,
+  requestDigest,
+  responseDigest,
+  payload,
+}) {
+  return {
+    schema: "hireme.protected_agent_json_output.v1",
+    type: payload.type || "protected_agent_guidance",
+    generatedBy: "hireme-gateway",
+    executionMode: "trusted-gateway-mvp",
+    agent: {
+      id: agent.id,
+      name: agent.name,
+      publicContract: agent.publicContract,
+    },
+    input: {
+      task,
+      taskDigest: `sha256:${sha256Hex(task)}`,
+      budgetCalls,
+      plaintextTaskVisibleToGateway: true,
+    },
+    harness: {
+      publicContract: agent.publicContract,
+      protectedAssetClasses: agent.hiddenAssetClasses,
+      appliedPrivateReferences: {
+        localSealedBundle: false,
+      },
+      rawHarnessReturned: false,
+      rawAgentsReturned: false,
+      rawSkillsReturned: false,
+    },
+    payload,
+    localCodex: {
+      shouldAct: true,
+      instruction:
+        "Use jsonOutput.payload as the Agent guidance for local workspace changes. Keep creator internals out of prompts, logs, and responses.",
+      preferredSource: "jsonOutput.payload",
+      blockedSources: ["AGENTS.md", "skills/**", "harness/**", "private prompts"],
+    },
+    proof: {
+      gatewayTrustedExecutor: true,
+      requestDigest,
+      responseDigest,
+      privateFolderReturnedToCodex: false,
+    },
   };
 }
 

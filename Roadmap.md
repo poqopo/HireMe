@@ -111,7 +111,13 @@ MVP privacy boundary:
    - No harness source.
    - No private prompt/rubric/design guide text.
 
-4. Add practical audit controls.
+4. Return a local Codex-ready JSON output.
+   - `jsonOutput.schema` identifies the contract.
+   - `jsonOutput.payload` contains the Agent guidance.
+   - `jsonOutput.harness` describes only safe harness metadata.
+   - `jsonOutput.localCodex.shouldAct` tells Codex to continue the local workspace task.
+
+5. Add practical audit controls.
    - Request digest.
    - Response digest.
    - Artifact digest.
@@ -119,13 +125,13 @@ MVP privacy boundary:
    - Ledger entry.
    - Access decision reason.
 
-5. Use Walrus where it helps now.
+6. Use Walrus where it helps now.
    - Store packaged Agent artifacts.
    - Track blob IDs and digests.
    - Treat Supabase as the fast index/cache.
    - Do not claim Walrus alone provides confidentiality.
 
-6. Add Seal/Sui after the loop works.
+7. Add Seal/Sui after the loop works.
    - Sui object records artifact/version/payment authority.
    - Seal controls key release for encrypted bundles.
    - Gateway decrypts after access is approved.
@@ -207,7 +213,7 @@ publish protected Agent bundle
 hire Agent
 call Agent from Codex
 gateway executes with creator instructions
-return JSON output
+return local Codex-ready JSON output
 record usage
 ```
 

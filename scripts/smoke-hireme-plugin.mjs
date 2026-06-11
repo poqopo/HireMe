@@ -145,6 +145,14 @@ if (!callResult?.result?.content?.[0]?.text?.includes('"agent"')) {
 }
 
 if (
+  !callResult?.result?.content?.[0]?.text?.includes(
+    '"schema": "hireme.protected_agent_json_output.v1"',
+  )
+) {
+  throw new Error("hireme_call_agent did not return local Codex JSON output");
+}
+
+if (
   !validateResult?.result?.content?.[0]?.text?.includes('"status": "gateway_required"')
 ) {
   throw new Error("hireme_validate_sealed_harness did not preserve gateway-only decrypt boundary");
