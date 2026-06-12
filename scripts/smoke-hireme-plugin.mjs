@@ -87,6 +87,17 @@ const requests = [
       },
     },
   },
+  {
+    jsonrpc: "2.0",
+    id: 8,
+    method: "tools/call",
+    params: {
+      name: "hireme_read_memwal",
+      arguments: {
+        agent_id: "example-code-reviewer",
+      },
+    },
+  },
 ];
 
 let stdout = "";
@@ -115,6 +126,7 @@ const callResult = responses.find((response) => response.id === 4);
 const validateResult = responses.find((response) => response.id === 5);
 const naturalResult = responses.find((response) => response.id === 6);
 const walrusResult = responses.find((response) => response.id === 7);
+const memwalResult = responses.find((response) => response.id === 8);
 
 if (!toolList?.result?.tools?.some((tool) => tool.name === "hireme_call_agent")) {
   throw new Error("hireme_call_agent was not advertised by tools/list");
@@ -138,6 +150,10 @@ if (
   )
 ) {
   throw new Error("hireme_call_walrus_agent was not advertised by tools/list");
+}
+
+if (!toolList?.result?.tools?.some((tool) => tool.name === "hireme_read_memwal")) {
+  throw new Error("hireme_read_memwal was not advertised by tools/list");
 }
 
 if (!callResult?.result?.content?.[0]?.text?.includes('"agent"')) {
@@ -172,6 +188,14 @@ if (
   )
 ) {
   throw new Error("hireme_call_walrus_agent did not preserve gateway-only read boundary");
+}
+
+if (
+  !memwalResult?.result?.content?.[0]?.text?.includes(
+    '"status": "gateway_required"',
+  )
+) {
+  throw new Error("hireme_read_memwal did not preserve gateway-only read boundary");
 }
 
 console.log("HireMe plugin MCP smoke test passed.");

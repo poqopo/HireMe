@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
+import { createHash } from "node:crypto";
 import {
   mkdir,
   readFile,
@@ -7,8 +7,18 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { basename, join, relative, resolve } from "node:path";
+import {
+  approveSealAccess,
+  assertCiphertextDoesNotContainPlaintext,
+  buildLocalSealPolicyId,
+  buildSealEncryptionId,
+  decryptSealEnvelope,
+  defaultRunnerIdentity,
+  encryptWithSealEnvelope,
+  readSealEnvelopeMetadata,
+} from "./sealEnvelope.mjs";
+import { readWalrusBlobBytes } from "./walrusBlobStore.mjs";
 
-const defaultRunnerIdentity = "hireme-local-protected-runner";
 const defaultArtifactsDir = ".hireme/artifacts";
 const defaultWalrusDir = ".hireme/local-walrus";
 
@@ -22,7 +32,11 @@ export async function sealAgentFolder({
 }) {
   const resolvedFolder = resolve(folderPath);
   const validation = await validateAgentFolder(resolvedFolder);
-  const encryptionId = `hireme::agent-folder::${agentId}::${validation.folderManifestDigest.slice(7, 23)}`;
+  const encryptionId = buildSealEncryptionId({
+    agentId,
+    folderManifestDigest: validation.folderManifestDigest,
+  });
+  const sealPolicyId = buildLocalSealPolicyId(agentId);
   const bundle = {
     format: "hireme.local-sealed-agent-folder.v1",
     agentId,
@@ -39,21 +53,15 @@ export async function sealAgentFolder({
     ),
   };
   const plaintext = Buffer.from(JSON.stringify(bundle), "utf8");
-  const iv = randomBytes(12);
-  const key = deriveLocalSealKey(encryptionId);
-  const cipher = createCipheriv("aes-256-gcm", key, iv);
-  const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
-  const authTag = cipher.getAuthTag();
-  const encryptedObject = {
-    format: "hireme.local-seal-ciphertext.v1",
-    algorithm: "aes-256-gcm",
+  const {
+    encryptedBytes,
+    sealMetadata,
+  } = await encryptWithSealEnvelope({
+    plaintext,
+    agentId,
     encryptionId,
-    iv: iv.toString("base64"),
-    authTag: authTag.toString("base64"),
-    ciphertext: ciphertext.toString("base64"),
-  };
-  const encryptedPayload = JSON.stringify(encryptedObject, null, 2);
-  const encryptedBytes = Buffer.from(encryptedPayload, "utf8");
+    sealPolicyId,
+  });
   const ciphertextDigest = `sha256:${sha256Hex(encryptedBytes)}`;
   const walrusBlobId = `local_walrus_${sha256Hex(encryptedBytes).slice(0, 32)}`;
   const suiObjectId = `0x${sha256Hex(`${walrusBlobId}:sui-object`).slice(0, 64)}`;
@@ -64,14 +72,36 @@ export async function sealAgentFolder({
   const walrusPath = join(walrusDir, `${walrusBlobId}.seal.json`);
   const recordPath = join(outDir, `${agentId}.public-record.json`);
 
-  await writeFile(walrusPath, encryptedPayload);
+  assertCiphertextDoesNotContainPlaintext({
+    encryptedBytes,
+    blockedPlaintextMarkers: bundle.files.flatMap((file) => {
+      const content = Buffer.from(file.contentBase64, "base64").toString("utf8");
+      const firstMeaningfulLine = content
+        .split("\n")
+        .map((line) => line.trim())
+        .find((line) => line.length >= 16);
+      return [file.path, firstMeaningfulLine].filter(Boolean);
+    }),
+  });
+  await writeFile(walrusPath, encryptedBytes);
 
   const publicRecord = {
     format: "hireme.public-artifact-record.v1",
     agentId,
     network: process.env.WALRUS_NETWORK === "mainnet" ? "walrus-mainnet" : "walrus-testnet",
-    sealPolicyId: `seal:local:${agentId}`,
+    encryptionProvider: sealMetadata.provider,
+    platformKmsKeyId: sealMetadata.kmsKeyId,
+    ciphertextFormat: "hireme.platform-ciphertext-envelope.v1",
+    policyId: sealPolicyId,
+    sealProvider: sealMetadata.provider,
+    sealPolicyId,
     sealEncryptionId: encryptionId,
+    sealPackageId: sealMetadata.packageId,
+    sealApproveTarget: sealMetadata.sealApproveTarget,
+    sealThreshold: sealMetadata.threshold,
+    sealKeyServerIds: sealMetadata.keyServerIds,
+    sealPolicyModel: sealMetadata.policyModel,
+    sealCiphertextFormat: "hireme.platform-ciphertext-envelope.v1",
     walrusBlobId,
     walrusSuiObjectId: suiObjectId,
     ciphertextDigest,
@@ -165,7 +195,7 @@ export async function validateSealedArtifact({
   hireReceiptObjectId,
   runnerIdentity = process.env.HIREME_GATEWAY_RUNNER_ID || defaultRunnerIdentity,
 }) {
-  const { publicRecord, bundle, approval, folderManifestDigest, paths } =
+  const { publicRecord, bundle, approval, sealMetadata, encryptedSource, folderManifestDigest, paths } =
     await decryptAndVerifyArtifact({
       recordPath,
       walrusPath,
@@ -180,7 +210,21 @@ export async function validateSealedArtifact({
     hireReceiptVerified: true,
     runnerApproved: true,
     sealPolicyApproved: true,
+    platformAccessApproved: true,
     walrusBlobVerified: true,
+    sealEncryption: {
+      provider: sealMetadata.provider || publicRecord.sealProvider || "unknown",
+      ciphertextFormat: publicRecord.ciphertextFormat || publicRecord.sealCiphertextFormat || "legacy",
+      packageId: sealMetadata.packageId || publicRecord.sealPackageId || null,
+      sealApproveTarget: sealMetadata.sealApproveTarget || null,
+      policyId: publicRecord.sealPolicyId,
+      encryptionId: publicRecord.sealEncryptionId,
+      threshold: sealMetadata.threshold ?? publicRecord.sealThreshold ?? null,
+      keyServerIds: sealMetadata.keyServerIds || publicRecord.sealKeyServerIds || [],
+      platformKmsKeyId: sealMetadata.kmsKeyId || publicRecord.platformKmsKeyId || null,
+      plaintextInWalrus: false,
+    },
+    ciphertextSource: encryptedSource,
     folderManifestDigest,
     safeSummary: {
       folderName: publicRecord.folderName,
@@ -215,7 +259,7 @@ export async function runSealedArtifactTask({
     hireReceiptObjectId,
     runnerIdentity,
   });
-  const { publicRecord, bundle } = await decryptAndVerifyArtifact({
+  const { publicRecord, bundle, sealMetadata, encryptedSource } = await decryptAndVerifyArtifact({
     recordPath,
     walrusPath,
     hireReceiptObjectId,
@@ -224,6 +268,8 @@ export async function runSealedArtifactTask({
   const result =
     publicRecord.agentId === "example-landing-designer"
       ? buildLandingPageBrief({ bundle, task })
+      : publicRecord.agentId === "example-aster-x1-launcher"
+        ? buildAsterX1PreorderPage({ bundle, task })
       : publicRecord.agentId === "example-code-reviewer"
         ? buildCodeReviewGuidance({ publicRecord, task })
       : buildGenericSealedTaskResult({ publicRecord, task });
@@ -242,6 +288,19 @@ export async function runSealedArtifactTask({
     gatewayOnlyDecrypt: true,
     agentId: publicRecord.agentId,
     taskDigest: `sha256:${sha256Hex(task)}`,
+    sealEncryption: {
+      provider: sealMetadata.provider || publicRecord.sealProvider || "unknown",
+      ciphertextFormat: publicRecord.ciphertextFormat || publicRecord.sealCiphertextFormat || "legacy",
+      packageId: sealMetadata.packageId || publicRecord.sealPackageId || null,
+      sealApproveTarget: sealMetadata.sealApproveTarget || null,
+      policyId: publicRecord.sealPolicyId,
+      encryptionId: publicRecord.sealEncryptionId,
+      threshold: sealMetadata.threshold ?? publicRecord.sealThreshold ?? null,
+      keyServerIds: sealMetadata.keyServerIds || publicRecord.sealKeyServerIds || [],
+      platformKmsKeyId: sealMetadata.kmsKeyId || publicRecord.platformKmsKeyId || null,
+      plaintextInWalrus: false,
+    },
+    ciphertextSource: encryptedSource,
     validation,
     harness,
     jsonOutput,
@@ -263,24 +322,35 @@ async function decryptAndVerifyArtifact({
   runnerIdentity,
 }) {
   const publicRecord = JSON.parse(await readFile(resolve(recordPath), "utf8"));
-  const encryptedPath = resolve(walrusPath || publicRecord.localWalrusPath);
-  const encryptedBytes = await readFile(encryptedPath);
+  const { encryptedBytes, encryptedSource } = await loadEncryptedArtifactBytes({
+    publicRecord,
+    walrusPath,
+  });
   const encryptedDigest = `sha256:${sha256Hex(encryptedBytes)}`;
+  const sealMetadata = readSealEnvelopeMetadata(encryptedBytes);
 
   if (encryptedDigest !== publicRecord.ciphertextDigest) {
     throw userError("Ciphertext digest mismatch; refusing to decrypt");
   }
 
-  const approval = approveLocalSealAccess({
+  if (sealMetadata.encryptionId && sealMetadata.encryptionId !== publicRecord.sealEncryptionId) {
+    throw userError("Seal metadata encryption id mismatch");
+  }
+
+  const approval = approveSealAccess({
     agentId: publicRecord.agentId,
     hireReceiptObjectId,
     runnerIdentity,
     sealEncryptionId: publicRecord.sealEncryptionId,
+    sealPolicyId: publicRecord.sealPolicyId,
+    sealMetadata,
   });
-  const bundle = decryptLocalSealObject({
-    encryptedObject: JSON.parse(encryptedBytes.toString("utf8")),
+  const plaintext = decryptSealEnvelope({
+    encryptedBytes,
     encryptionId: publicRecord.sealEncryptionId,
+    approval,
   });
+  const bundle = JSON.parse(plaintext.toString("utf8"));
 
   const reconstructedManifest = {
     format: "hireme.agent-folder-manifest.v1",
@@ -311,54 +381,58 @@ async function decryptAndVerifyArtifact({
     publicRecord,
     bundle,
     approval,
+    sealMetadata,
+    encryptedSource,
     folderManifestDigest,
     paths,
   };
 }
 
-function approveLocalSealAccess({
-  agentId,
-  hireReceiptObjectId,
-  runnerIdentity,
-  sealEncryptionId,
-}) {
-  if (runnerIdentity !== defaultRunnerIdentity) {
-    throw userError(`Runner identity is not approved: ${runnerIdentity}`);
+async function loadEncryptedArtifactBytes({ publicRecord, walrusPath }) {
+  if (walrusPath) {
+    const encryptedPath = resolve(walrusPath);
+    return {
+      encryptedBytes: await readFile(encryptedPath),
+      encryptedSource: {
+        type: "local-file",
+        path: encryptedPath,
+      },
+    };
   }
 
-  if (!/^hire_receipt_[a-z0-9_-]+$/i.test(hireReceiptObjectId || "")) {
-    throw userError("Missing or invalid paid hire receipt object id");
+  if (
+    publicRecord.storageProvider === "walrus" &&
+    publicRecord.walrusBlobId &&
+    !String(publicRecord.walrusBlobId).startsWith("local_walrus_")
+  ) {
+    const walrusRead = await readWalrusBlobBytes({
+      blobId: publicRecord.walrusBlobId,
+      fileName: `${publicRecord.agentId || "agent"}.seal.json`,
+    });
+    return {
+      encryptedBytes: walrusRead.bytes,
+      encryptedSource: {
+        type: "walrus",
+        blobId: publicRecord.walrusBlobId,
+        cachePath: walrusRead.outPath,
+        digest: walrusRead.digest,
+        sizeBytes: walrusRead.sizeBytes,
+      },
+    };
   }
 
-  return {
-    model: "local-seal-approval-simulation",
-    agentId,
-    sealEncryptionId,
-    hireReceiptObjectId,
-    runnerIdentity,
-    txBytesDigest: `sha256:${sha256Hex(
-      JSON.stringify({ agentId, hireReceiptObjectId, runnerIdentity, sealEncryptionId }),
-    )}`,
-    note:
-      "Production replaces this with a Sui seal_approve transaction dry-run checked by Seal key servers.",
-  };
-}
-
-function decryptLocalSealObject({ encryptedObject, encryptionId }) {
-  if (encryptedObject.encryptionId !== encryptionId) {
-    throw userError("Seal encryption id mismatch");
+  if (publicRecord.localWalrusPath) {
+    const encryptedPath = resolve(publicRecord.localWalrusPath);
+    return {
+      encryptedBytes: await readFile(encryptedPath),
+      encryptedSource: {
+        type: "local-walrus-cache",
+        path: encryptedPath,
+      },
+    };
   }
-  const decipher = createDecipheriv(
-    "aes-256-gcm",
-    deriveLocalSealKey(encryptionId),
-    Buffer.from(encryptedObject.iv, "base64"),
-  );
-  decipher.setAuthTag(Buffer.from(encryptedObject.authTag, "base64"));
-  const plaintext = Buffer.concat([
-    decipher.update(Buffer.from(encryptedObject.ciphertext, "base64")),
-    decipher.final(),
-  ]);
-  return JSON.parse(plaintext.toString("utf8"));
+
+  throw userError("Public artifact record has no readable Walrus ciphertext source");
 }
 
 function readPublicContract(bundle) {
@@ -471,6 +545,117 @@ function interpretLandingTask(task) {
   };
 }
 
+function buildAsterX1PreorderPage({ bundle, task }) {
+  const publicJson = readBundleJson(bundle, "public.json");
+  const dossier = readBundleJson(bundle, "product-dossier.json");
+  const playbook = readBundleJson(bundle, "launch-playbook.json");
+  const visualHarness = readBundleJson(bundle, "visual-layout-harness.json");
+
+  if (!dossier.productName || !playbook.campaignName || !visualHarness.compositionRules) {
+    throw userError("Aster X1 launch bundle is missing product dossier, launch playbook, or visual layout harness");
+  }
+
+  return {
+    type: "aster_x1_preorder_landing",
+    agent: publicJson.name || "Example Aster X1 Launch Agent",
+    privateReferencesApplied: {
+      agentsMd: true,
+      productDossier: true,
+      launchPlaybook: true,
+      visualLayoutHarness: true,
+      preorderSkill: true,
+      mobileConversionLayoutSkill: true,
+      rawDossierReturned: false,
+      rawPlaybookReturned: false,
+      rawVisualHarnessReturned: false,
+    },
+    request: {
+      task,
+      taskDigest: `sha256:${sha256Hex(task)}`,
+      rawTaskReturned: true,
+    },
+    productPositioning: {
+      productName: dossier.productName,
+      tagline: dossier.tagline,
+      positioning: dossier.positioning,
+      primaryAudience: playbook.primaryAudience,
+      conversionGoal: playbook.conversionGoal,
+      campaignName: playbook.campaignName,
+      launchWindow: playbook.launchWindow,
+    },
+    visualSystem: {
+      colors: dossier.colors,
+      typography:
+        "Use thin premium display type for headlines and tabular numerals for prices, storage, battery, and countdown values.",
+      deviceStage:
+        "Use a dark device stage with a three-quarter floating phone, visible camera island, and titanium rail.",
+      accentRule:
+        "Use Signal Green only for verified availability, savings, or preorder status.",
+      layoutHarness: {
+        name: visualHarness.name,
+        intent: visualHarness.intent,
+        radiusPx: visualHarness.visualRules?.radiusPx,
+        headlineWeight: visualHarness.visualRules?.headlineWeight,
+        primaryCtaShape: visualHarness.visualRules?.primaryCtaShape,
+      },
+    },
+    heroComposition: {
+      headline: "Aster X1 is open for First Signal preorders.",
+      subhead:
+        "A pocket cinema phone with pro-grade signal, two-day confidence, and repair pricing shown before checkout.",
+      primaryCta: playbook.cta.primary,
+      secondaryCta: playbook.cta.secondary,
+      requiredElements: [
+        "three-quarter product mockup",
+        "72-hour preorder countdown",
+        "$49 refundable deposit chip",
+        "trade-in value chip",
+        "single filled primary CTA",
+      ],
+      guidance: playbook.heroRule,
+      mobileOrder: visualHarness.compositionRules.hero.mobileOrder,
+      requiredAboveFold: visualHarness.compositionRules.hero.requiredAboveFold,
+    },
+    metricStrip: [
+      { value: "48h", label: "adaptive battery target" },
+      { value: "1-inch", label: "class main sensor" },
+      { value: "29m", label: "fast-charge target" },
+      { value: "$49", label: "refundable preorder deposit" },
+    ],
+    launchOfferStack: playbook.offerStack,
+    preorderTiers: dossier.models,
+    specHighlights: dossier.safeClaims,
+    trustModules: playbook.proofModules,
+    layoutRules: playbook.layoutRules,
+    mobileLayoutSystem: {
+      stickyPreorderBar: {
+        required: visualHarness.compositionRules.mobileStickyCta.required === true,
+        safeArea: visualHarness.compositionRules.mobileStickyCta.safeArea === true,
+        content: visualHarness.compositionRules.mobileStickyCta.content,
+      },
+      sectionOrder: visualHarness.compositionRules.sections,
+      mobileOrder: visualHarness.compositionRules.hero.mobileOrder,
+      modelSelector: "mobile snap rail or single-column cards with 44px minimum tap targets",
+      proofDensity:
+        "Use compact number-first proof cells on mobile; avoid paragraph-heavy feature cards.",
+    },
+    implementationNotes: [
+      "Render a real Aster X1 product-detail page, not a generic smartphone landing page.",
+      "Put preorder economics, countdown, model tiers, and repair transparency before the final CTA.",
+      "At mobile width, render a sticky preorder bar with safe-area padding and no section heading overlap.",
+      "Use a device-stage hero and a mobile-first order rather than a desktop-only split hero.",
+      "Use product-specific safe claims only; do not invent benchmark comparisons.",
+      "Local Codex should implement from jsonOutput.payload and never request raw private dossier/playbook files.",
+    ],
+    responsiveChecks: visualHarness.mobileChecks,
+    verificationChecks: [
+      ...playbook.verificationChecks,
+      ...visualHarness.mobileChecks,
+    ],
+    blockedClaims: dossier.avoid,
+  };
+}
+
 function buildCodeReviewGuidance({ publicRecord, task }) {
   const interpretation = interpretCodeReviewTask(task);
 
@@ -580,6 +765,13 @@ function buildSafeHarnessContext({ bundle, publicRecord }) {
       folderManifestDigest: publicRecord.folderManifestDigest,
       walrusBlobId: publicRecord.walrusBlobId,
       ciphertextDigest: publicRecord.ciphertextDigest,
+      sealProvider: publicRecord.sealProvider || "legacy-local-aes-gcm",
+      sealCiphertextFormat: publicRecord.ciphertextFormat || publicRecord.sealCiphertextFormat || "legacy",
+      platformKmsKeyId: publicRecord.platformKmsKeyId || null,
+      sealPackageId: publicRecord.sealPackageId || null,
+      sealPolicyId: publicRecord.sealPolicyId,
+      sealEncryptionId: publicRecord.sealEncryptionId,
+      plaintextInWalrus: false,
     },
     rawHarnessReturned: false,
     rawAgentsReturned: false,
@@ -634,6 +826,11 @@ function buildProtectedAgentJsonOutput({
       runnerIdentity,
       gatewayOnlyDecrypt: validation.gatewayOnlyDecrypt === true,
       folderManifestDigest: validation.safeSummary?.folderManifestDigest || harness.artifact.folderManifestDigest,
+      sealProvider: validation.sealEncryption?.provider || harness.artifact.sealProvider,
+      sealPackageId: validation.sealEncryption?.packageId || harness.artifact.sealPackageId,
+      sealApproveTarget: validation.sealEncryption?.sealApproveTarget || null,
+      sealPolicyId: harness.artifact.sealPolicyId,
+      walrusStoresCiphertextOnly: true,
       privateFolderReturnedToCodex: false,
     },
   };
@@ -676,14 +873,6 @@ async function listFiles(root) {
 
   await walk(root);
   return results.sort((a, b) => a.path.localeCompare(b.path));
-}
-
-function deriveLocalSealKey(encryptionId) {
-  return createHash("sha256")
-    .update(process.env.HIREME_LOCAL_SEAL_KEY || "hireme-local-dev-seal-key")
-    .update(":")
-    .update(encryptionId)
-    .digest();
 }
 
 function assertNoPlaintextLeak(value) {

@@ -8,6 +8,7 @@ import {
   runSealedArtifactTask,
   validateSealedArtifact,
 } from "./localSealedArtifact.mjs";
+import { readMemWalSnapshot } from "./memWal.mjs";
 import { readWalrusAgentArtifact } from "./walrusAgentArtifact.mjs";
 
 loadEnvFile(".env");
@@ -26,7 +27,7 @@ const agents = [
     creator: "Han Labs",
     category: "Research",
     status: "Available",
-    headline: "Finds protocol evidence, cites sources, and keeps private notes sealed.",
+    headline: "Finds protocol evidence, cites sources, and keeps private notes protected.",
     publicSummary:
       "A research agent for Sui, Walrus, and storage-market analysis. It exposes source-backed briefs while keeping private heuristics and scoring prompts protected.",
     publicContract: "research_brief(input, citation_policy, max_sources)",
@@ -146,7 +147,7 @@ const agents = [
     creator: "HireMe Examples",
     category: "Code",
     status: "Available",
-    headline: "Reviews pull requests through a sealed private rubric.",
+    headline: "Reviews pull requests through a protected private rubric.",
     publicSummary:
       "A demo agent for validating the HireMe protected runner flow. Buyers see review findings, not the creator folder.",
     publicContract: "review_pull_request(diff, repo_context, risk_level)",
@@ -167,7 +168,7 @@ const agents = [
     creator: "HireMe Examples",
     category: "Growth",
     status: "Available",
-    headline: "Creates landing page briefs from a sealed design system guide.",
+    headline: "Creates landing page briefs from a protected design system guide.",
     publicSummary:
       "A demo agent that uses protected AGENTS.md and design.md instructions to produce safe landing page implementation guidance.",
     publicContract:
@@ -183,6 +184,34 @@ const agents = [
     latencyMs: 790,
   },
   {
+    id: "example-aster-x1-launcher",
+    name: "Example Aster X1 Launch Agent",
+    handle: "@examples/aster-x1-launcher",
+    creator: "HireMe Examples",
+    category: "Growth",
+    status: "Available",
+    headline: "Builds Aster X1 preorder pages from a protected product dossier.",
+    publicSummary:
+      "A narrow demo agent for a single smartphone launch. Buyers receive preorder-page output, not the private product dossier or launch playbook.",
+    publicContract: "create_aster_x1_preorder_page(task, market, launch_window)",
+    memwalPolicy:
+      "Private Aster X1 product dossier, launch playbook, and preorder-page skill decrypt only inside the gateway runner.",
+    skills: ["Smartphone preorder pages", "Launch offer mechanics", "Product detail conversion"],
+    hiddenAssetClasses: [
+      "AGENTS.md",
+      "product-dossier.json",
+      "launch-playbook.json",
+      "visual-layout-harness.json",
+      "skills/**",
+      "harness/**",
+    ],
+    pricePerCallUsd: 0.034,
+    freeCalls: 3,
+    rating: 5.0,
+    calls: 2,
+    latencyMs: 810,
+  },
+  {
     id: "wal-test1",
     name: "Walrus Test One",
     handle: "@examples/wal-test1",
@@ -194,7 +223,7 @@ const agents = [
       "A plaintext storage-path demo that proves a creator folder can be bundled, uploaded to Walrus, registered in Supabase, and inspected by the MCP gateway.",
     publicContract: "inspect_walrus_agent_folder(blob_id, task)",
     memwalPolicy:
-      "Plaintext Walrus test only. Production protected agents should store Seal ciphertext and decrypt only inside the gateway runner.",
+      "Plaintext Walrus test only. Production protected agents should store platform-managed ciphertext and decrypt only inside the gateway runner.",
     skills: ["Walrus read", "Supabase registry", "Folder manifest inspection"],
     hiddenAssetClasses: ["AGENTS.md"],
     pricePerCallUsd: 0.001,
@@ -213,20 +242,48 @@ const localSealedExampleRecords = {
     ".hireme/artifacts/example-code-reviewer.public-record.json",
   "example-landing-designer":
     ".hireme/artifacts/example-landing-designer.public-record.json",
+  "example-aster-x1-launcher":
+    ".hireme/artifacts/example-aster-x1-launcher.public-record.json",
 };
 
 for (const agent of agents) {
   protectedArtifacts.set(agent.id, {
     agentId: agent.id,
     network: process.env.WALRUS_NETWORK === "mainnet" ? "walrus-mainnet" : "walrus-testnet",
+    encryptionProvider: agent.id === "wal-test1" ? "none" : "platform-managed-envelope",
+    platformKmsKeyId:
+      agent.id === "wal-test1"
+        ? null
+        : process.env.HIREME_PLATFORM_KMS_KEY_ID || "platform:local-dev-key",
+    ciphertextFormat:
+      agent.id === "wal-test1" ? "plaintext-walrus-folder-demo" : "hireme.platform-ciphertext-envelope.v1",
+    policyId:
+      agent.id === "wal-test1"
+        ? "none:plaintext-walrus-demo"
+        : `platform:agent:${agent.id}`,
     sealPolicyId:
       agent.id === "wal-test1"
         ? "none:plaintext-walrus-demo"
-        : `seal:${process.env.SUI_NETWORK || "testnet"}:${agent.id}-policy`,
+        : `platform:agent:${agent.id}`,
     sealEncryptionId:
       agent.id === "wal-test1"
         ? null
         : `hireme::agent-folder::${agent.id}`,
+    sealPackageId:
+      agent.id === "wal-test1"
+        ? null
+        : process.env.HIREME_SEAL_PACKAGE_ID || null,
+    sealApproveTarget:
+      agent.id === "wal-test1"
+        ? null
+        : process.env.HIREME_SEAL_APPROVE_TARGET ||
+          (process.env.HIREME_SEAL_PACKAGE_ID
+            ? `${process.env.HIREME_SEAL_PACKAGE_ID}::access::seal_approve`
+            : null),
+    sealThreshold:
+      agent.id === "wal-test1" ? null : readPlatformThreshold(),
+    sealKeyServerIds:
+      agent.id === "wal-test1" ? [] : readSealKeyServerIds(),
     walrusBlobId:
       agent.id === "wal-test1"
         ? "supabase:walrus_agent_artifacts/latest"
@@ -236,7 +293,7 @@ for (const agent of agents) {
     folderManifestDigest: `sha256:${sha256Hex(`${agent.id}:AGENTS.md:skills`)}`,
     visibility:
       agent.id === "wal-test1"
-        ? "Plaintext Walrus demo. The gateway reads the blob and returns only a folder summary; production should switch this path to Seal ciphertext."
+        ? "Plaintext Walrus demo. The gateway reads the blob and returns only a folder summary; production should switch this path to platform-managed ciphertext."
         : "The hirer's Codex receives only public metadata and safe results. The gateway runner is the only component that can load the decrypted folder.",
     registeredAt: new Date("2026-06-10T00:00:00.000Z").toISOString(),
   });
@@ -339,6 +396,22 @@ const server = createServer(async (req, res) => {
         blob_id: body.blob_id || body.blobId,
         agent_id: body.agent_id || body.agentId,
         task: body.task,
+      });
+      sendJson(res, 200, result);
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/v1/memwal/read") {
+      const result = await readMemWalSnapshot({
+        recordPath:
+          body.record_path ||
+          body.recordPath ||
+          `.hireme/memwal/${body.agent_id || body.agentId || "example-code-reviewer"}.memwal-record.json`,
+        hireReceiptObjectId:
+          body.hire_receipt_object_id ||
+          body.hireReceiptObjectId ||
+          "hire_receipt_local_paid_demo",
+        runnerIdentity: body.runner_identity,
       });
       sendJson(res, 200, result);
       return;
@@ -459,6 +532,19 @@ async function runProtectedAgent(args = {}) {
   }))}`;
   const safeResult =
     sealedTaskResult?.result || buildSafeResult(agent, args.task || "");
+  const sealEncryption =
+    sealedTaskResult?.sealEncryption || {
+      provider: artifact.encryptionProvider || artifact.sealProvider || "registered-metadata",
+      ciphertextFormat: artifact.ciphertextFormat || artifact.sealCiphertextFormat || "pending",
+      packageId: artifact.sealPackageId || null,
+      sealApproveTarget: artifact.sealApproveTarget || null,
+      policyId: artifact.policyId || artifact.sealPolicyId,
+      encryptionId: artifact.sealEncryptionId,
+      threshold: artifact.sealThreshold || null,
+      keyServerIds: artifact.sealKeyServerIds || [],
+      platformKmsKeyId: artifact.platformKmsKeyId || null,
+      plaintextInWalrus: agent.id === "wal-test1",
+    };
   const responseDigest = `sha256:${sha256Hex(JSON.stringify(safeResult))}`;
   const jsonOutput =
     sealedTaskResult?.jsonOutput ||
@@ -509,18 +595,36 @@ async function runProtectedAgent(args = {}) {
       hireVerified: true,
       budgetApproved: budgetCalls <= 100,
       sealPolicyApproved: true,
+      platformAccessApproved: true,
       gatewayTrustedExecutor: true,
-      mode: sealedTaskResult ? "trusted-gateway-sealed-artifact" : "local-mock",
+      mode: sealedTaskResult ? "trusted-gateway-protected-artifact" : "local-mock",
     },
     sealedArtifact: {
       network: artifact.network,
-      sealPolicyId: artifact.sealPolicyId,
-      walrusBlobId: artifact.walrusBlobId,
-      ciphertextDigest: artifact.ciphertextDigest,
+      encryptionProvider: sealEncryption.provider || artifact.encryptionProvider,
+      platformKmsKeyId:
+        sealEncryption.platformKmsKeyId || artifact.platformKmsKeyId || null,
+      ciphertextFormat:
+        sealEncryption.ciphertextFormat || artifact.ciphertextFormat || artifact.sealCiphertextFormat,
+      policyId: sealEncryption.policyId || artifact.policyId || artifact.sealPolicyId,
+      sealProvider: sealEncryption.provider,
+      sealPolicyId: sealEncryption.policyId || artifact.sealPolicyId,
+      sealEncryptionId: sealEncryption.encryptionId || artifact.sealEncryptionId,
+      sealPackageId: sealEncryption.packageId || artifact.sealPackageId,
+      sealApproveTarget: sealEncryption.sealApproveTarget || artifact.sealApproveTarget,
+      sealCiphertextFormat: sealEncryption.ciphertextFormat || artifact.sealCiphertextFormat,
+      sealThreshold: sealEncryption.threshold || artifact.sealThreshold || null,
+      sealKeyServerIds: sealEncryption.keyServerIds || artifact.sealKeyServerIds || [],
+      walrusBlobId:
+        sealedTaskResult?.harness?.artifact?.walrusBlobId || artifact.walrusBlobId,
+      ciphertextDigest:
+        sealedTaskResult?.harness?.artifact?.ciphertextDigest || artifact.ciphertextDigest,
+      plaintextInWalrus: sealEncryption.plaintextInWalrus === true,
     },
+    sealEncryption,
     runner: {
       executionMode: sealedTaskResult
-        ? "trusted-gateway-sealed-folder-runner"
+        ? "trusted-gateway-protected-folder-runner"
         : "local-mock-runner",
       gatewayTrustedExecutor: true,
       privateAgentFolderLoaded: Boolean(sealedTaskResult),
@@ -616,22 +720,53 @@ function buildGatewayJsonOutput({
 
 function prepareSealedHarnessUpload(args = {}) {
   const epochs = args.epochs || 3;
+  const agentId = args.agent_id || "new-agent";
   return {
     gatewayCall: true,
-    agentId: args.agent_id || "new-agent",
+    agentId,
     expectedFolderShape: ["AGENTS.md", "skills/**", "optional adapters/**"],
     visibilityBoundary:
-      "The creator folder is sealed before Walrus upload. Hirer Codex receives only metadata and safe execution results.",
-    localTestnetCommands: [
-      "tar -czf agent-folder.tar.gz AGENTS.md skills/",
-      "seal-cli encrypt --policy <seal_policy_id> --in agent-folder.tar.gz --out agent-folder.seal.bin",
-      `walrus store agent-folder.seal.bin --epochs ${epochs} --context testnet`,
+      "The creator folder is encrypted before Walrus upload. Hirer Codex receives only metadata and safe execution results.",
+    platformEncryptionDemo: {
+      command: "node scripts/seal-example-agent.mjs <agent-folder>",
+      ciphertextFormat: "hireme.platform-ciphertext-envelope.v1",
+      provider: "platform-managed-envelope",
+      kmsKeyId: process.env.HIREME_PLATFORM_KMS_KEY_ID || "platform:local-dev-key",
+      packageId: process.env.HIREME_SEAL_PACKAGE_ID || null,
+      sealApproveTarget:
+        process.env.HIREME_SEAL_APPROVE_TARGET ||
+        (process.env.HIREME_SEAL_PACKAGE_ID
+          ? `${process.env.HIREME_SEAL_PACKAGE_ID}::access::seal_approve`
+          : null),
+      walrusPath: ".hireme/local-walrus/<blob>.seal.json",
+      note:
+        "Local MVP uses platform-managed encryption with AES-GCM DEM. The plaintext folder is never written to Walrus or public metadata.",
+    },
+    localSealDemo: {
+      compatibility: true,
+      note: "Legacy response key kept for old clients. Use platformEncryptionDemo for the MVP provider.",
+    },
+    productionEncryptionSteps: [
+      "Bundle the creator folder into bytes.",
+      "Encrypt the bytes with the platform KMS provider. Optional later Seal mode can replace this provider.",
+      `Store only the encrypted object on Walrus for ${epochs} epoch(s).`,
+      "Register only public metadata in Supabase/Sui: provider, encryption id, Walrus blob id, object id, digest, price.",
+      "At call time, the gateway verifies the paid hire receipt and decrypts inside the runner.",
     ],
     publicMetadataToRegister: [
+      "encryption_provider",
+      "platform_kms_key_id",
+      "ciphertext_format",
+      "policy_id",
       "seal_policy_id",
+      "seal_package_id",
+      "seal_approve_target",
+      "seal_encryption_id",
       "walrus_blob_id",
       "sui_object_id",
       "ciphertext_digest",
+      "seal_threshold",
+      "seal_key_server_ids",
       "price_per_call_usd",
     ],
   };
@@ -640,7 +775,6 @@ function prepareSealedHarnessUpload(args = {}) {
 function registerSealedHarness(args = {}) {
   for (const field of [
     "agent_id",
-    "seal_policy_id",
     "walrus_blob_id",
     "sui_object_id",
     "ciphertext_digest",
@@ -657,7 +791,20 @@ function registerSealedHarness(args = {}) {
   const record = {
     agentId: args.agent_id,
     network: process.env.WALRUS_NETWORK === "mainnet" ? "walrus-mainnet" : "walrus-testnet",
-    sealPolicyId: args.seal_policy_id,
+    encryptionProvider: args.encryption_provider || "platform-managed-envelope",
+    platformKmsKeyId: args.platform_kms_key_id || process.env.HIREME_PLATFORM_KMS_KEY_ID || "platform:local-dev-key",
+    ciphertextFormat: args.ciphertext_format || "hireme.platform-ciphertext-envelope.v1",
+    policyId: args.policy_id || args.seal_policy_id || `platform:agent:${args.agent_id}`,
+    sealPolicyId: args.seal_policy_id || args.policy_id || `platform:agent:${args.agent_id}`,
+    sealPackageId: args.seal_package_id || process.env.HIREME_SEAL_PACKAGE_ID || null,
+    sealApproveTarget:
+      args.seal_approve_target ||
+      (args.seal_package_id || process.env.HIREME_SEAL_PACKAGE_ID
+        ? `${args.seal_package_id || process.env.HIREME_SEAL_PACKAGE_ID}::access::seal_approve`
+        : null),
+    sealEncryptionId: args.seal_encryption_id || null,
+    sealThreshold: args.seal_threshold || null,
+    sealKeyServerIds: args.seal_key_server_ids || [],
     walrusBlobId: args.walrus_blob_id,
     suiObjectId: args.sui_object_id,
     ciphertextDigest: args.ciphertext_digest,
@@ -674,6 +821,24 @@ function registerSealedHarness(args = {}) {
     storedPlaintextHarness: false,
     returnedCreatorSecrets: false,
   };
+}
+
+function readSealKeyServerIds() {
+  const raw = process.env.HIREME_SEAL_KEY_SERVER_IDS;
+  if (!raw) {
+    return [];
+  }
+  return raw
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+}
+
+function readPlatformThreshold() {
+  const raw = process.env.HIREME_PLATFORM_THRESHOLD || process.env.HIREME_SEAL_THRESHOLD;
+  if (!raw) return null;
+  const value = Number.parseInt(raw, 10);
+  return Number.isInteger(value) && value > 0 ? value : null;
 }
 
 function findAgent(agentId) {

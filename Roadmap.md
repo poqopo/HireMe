@@ -64,9 +64,11 @@ Creator
   -> uploads protected Agent bundle
 
 Storage
-  -> Walrus stores packaged or encrypted Agent artifacts
+  -> Walrus stores encrypted Agent artifacts
+  -> memWal stores encrypted private memory snapshots
   -> Supabase stores searchable metadata, pricing, hires, and ledger data
-  -> Sui/Seal can become the authority and key-release layer after the loop works
+  -> one HireMe Sui package stores Agent/Artifact/Receipt authority
+  -> optional later Seal mode can evaluate that package's seal_approve policy
 
 Hirer
   -> installs HireMe MCP connector in Codex
@@ -95,7 +97,7 @@ MVP privacy boundary:
    - `hireme_request`
    - `hireme_call_agent`
    - `hireme_call_walrus_agent`
-   - sealed artifact registration/validation helpers
+   - protected artifact registration/validation helpers
 
 2. Make Gateway the trusted executor.
    - Accept plaintext `task`.
@@ -126,14 +128,22 @@ MVP privacy boundary:
    - Access decision reason.
 
 6. Use Walrus where it helps now.
-   - Store packaged Agent artifacts.
+   - Store encrypted Agent artifacts.
    - Track blob IDs and digests.
    - Treat Supabase as the fast index/cache.
    - Do not claim Walrus alone provides confidentiality.
 
-7. Add Seal/Sui after the loop works.
+7. Use platform-managed encryption now.
+   - Local MVP writes `hireme.platform-ciphertext-envelope.v1`.
+   - The platform provider uses AES-GCM DEM and a platform KMS/root secret.
+   - Public records keep provider, KMS key id, encryption id, Walrus blob id, and digest.
+   - memWal uses the same boundary for private memory snapshots.
+   - `move/hireme` defines the single platform package: `Agent`, `AgentVersion`, `ProtectedArtifact`, `HireReceipt`, and `seal_approve`.
+   - Optional later Seal mode can replace platform KMS with `@mysten/seal`, the published `HIREME_SEAL_PACKAGE_ID`, and real key servers.
+
+8. Add full Sui authority after the loop works.
    - Sui object records artifact/version/payment authority.
-   - Seal controls key release for encrypted bundles.
+   - Optional Seal controls key release for encrypted bundles after the platform-managed MVP is working.
    - Gateway decrypts after access is approved.
 
 ## Milestones
@@ -142,7 +152,7 @@ MVP privacy boundary:
 
 ```txt
 examples/* Agent folder
-  -> local seal mock
+  -> platform-managed ciphertext envelope
   -> local gateway
   -> Codex MCP plugin
   -> JSON output + ledger metadata
@@ -153,6 +163,7 @@ Goal:
 - Demo creator folder registration.
 - Demo natural-language `hireme_request`.
 - Demo `example-landing-designer` using protected `design.md`.
+- Prove local Walrus stores ciphertext envelope, not plaintext folders.
 - Prove responses do not include private creator files.
 
 ### Phase 2: Walrus Artifact Registry
@@ -183,7 +194,7 @@ Encrypted Agent bundle
 
 Goal:
 
-- Replace local seal mock with Seal integration.
+- Replace local root-secret encryption with production KMS/HSM-backed platform-managed encryption.
 - Add Sui object references for version/payment authority.
 - Record call ledger and creator payout basis.
 

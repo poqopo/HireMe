@@ -37,7 +37,7 @@ try {
     throw new Error("Landing designer did not return a landing page brief");
   }
   if (!call.result?.privateReferencesApplied?.designMd) {
-    throw new Error("Landing designer did not apply the sealed design.md reference");
+    throw new Error("Landing designer did not apply the protected design.md reference");
   }
   if (
     call.jsonOutput?.schema !== "hireme.protected_agent_json_output.v1" ||

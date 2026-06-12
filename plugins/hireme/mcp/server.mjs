@@ -8,7 +8,7 @@ const agents = [
     creator: "Han Labs",
     category: "Research",
     status: "Available",
-    headline: "Finds protocol evidence, cites sources, and keeps private notes sealed.",
+    headline: "Finds protocol evidence, cites sources, and keeps private notes protected.",
     publicSummary:
       "A research agent for Sui, Walrus, and storage-market analysis. It exposes source-backed briefs while keeping private heuristics and scoring prompts protected.",
     harnessSummary: "retrieval + citation verifier + confidence scorer",
@@ -128,7 +128,7 @@ const agents = [
     creator: "HireMe Examples",
     category: "Code",
     status: "Available",
-    headline: "Reviews pull requests through a sealed private rubric.",
+    headline: "Reviews pull requests through a protected private rubric.",
     publicSummary:
       "A demo agent for validating the HireMe protected runner flow. Buyers see review findings, not the creator folder.",
     harnessSummary: "private rubric + risk-review skill + redacted finding formatter",
@@ -149,7 +149,7 @@ const agents = [
     creator: "HireMe Examples",
     category: "Growth",
     status: "Available",
-    headline: "Creates landing page briefs from a sealed design system guide.",
+    headline: "Creates landing page briefs from a protected design system guide.",
     publicSummary:
       "A demo agent that uses protected AGENTS.md and design.md instructions to produce safe landing page implementation guidance.",
     harnessSummary:
@@ -165,6 +165,35 @@ const agents = [
     latencyMs: 790,
   },
   {
+    id: "example-aster-x1-launcher",
+    name: "Example Aster X1 Launch Agent",
+    handle: "@examples/aster-x1-launcher",
+    creator: "HireMe Examples",
+    category: "Growth",
+    status: "Available",
+    headline: "Builds Aster X1 preorder pages from a protected product dossier.",
+    publicSummary:
+      "A narrow demo agent for a single smartphone launch. Buyers receive preorder-page output, not the private product dossier or launch playbook.",
+    harnessSummary:
+      "private Aster X1 product dossier + launch playbook + preorder-page formatter",
+    memwalPolicy:
+      "Private Aster X1 product dossier, launch playbook, and preorder skill decrypt only inside the gateway runner.",
+    skills: ["Smartphone preorder pages", "Launch offer mechanics", "Product detail conversion"],
+    protectedAssets: [
+      "AGENTS.md",
+      "product-dossier.json",
+      "launch-playbook.json",
+      "visual-layout-harness.json",
+      "skills/**",
+      "harness/**",
+    ],
+    pricePerCallUsd: 0.034,
+    freeCalls: 3,
+    rating: 5.0,
+    calls: 2,
+    latencyMs: 810,
+  },
+  {
     id: "wal-test1",
     name: "Walrus Test One",
     handle: "@examples/wal-test1",
@@ -176,7 +205,7 @@ const agents = [
       "A plaintext storage-path demo that proves a creator folder can be bundled, uploaded to Walrus, registered in Supabase, and inspected by the MCP gateway.",
     harnessSummary: "Supabase blob registry + Walrus archive reader + folder manifest summarizer",
     memwalPolicy:
-      "Plaintext Walrus test only. Production protected agents should store Seal ciphertext and decrypt only inside the gateway runner.",
+      "Plaintext Walrus test only. Production protected agents should store platform-managed ciphertext and decrypt only inside the gateway runner.",
     skills: ["Walrus read", "Supabase registry", "Folder manifest inspection"],
     protectedAssets: ["AGENTS.md"],
     pricePerCallUsd: 0.001,
@@ -192,7 +221,7 @@ const sealedHarnessRegistry = [
   {
     agentId: "walrus-researcher",
     network: "walrus-testnet",
-    sealPolicyId: "seal:testnet:walrus-researcher-policy",
+    sealPolicyId: "platform:agent:walrus-researcher",
     walrusBlobId: "walrus_researcher_encrypted_bundle",
     suiObjectId: "0x9f1d4c739f6f3c9b72c8d2c64ad93f459081dfe2aa49c881d2df0672b591021a",
     ciphertextDigest:
@@ -240,7 +269,7 @@ const inputSchemas = {
       hire_receipt_object_id: {
         type: "string",
         description:
-          "Optional paid hire receipt. Local sealed example agents default to hire_receipt_local_paid_demo.",
+          "Optional paid hire receipt. Local protected example agents default to hire_receipt_local_paid_demo.",
       },
     },
     required: ["request"],
@@ -300,12 +329,12 @@ const inputSchemas = {
       record_path: {
         type: "string",
         description:
-          "Optional public artifact record path for sealed example agents.",
+          "Optional public artifact record path for protected example agents.",
       },
       hire_receipt_object_id: {
         type: "string",
         description:
-          "Optional paid hire receipt object id for sealed example agents.",
+          "Optional paid hire receipt object id for protected example agents.",
       },
     },
     required: ["task"],
@@ -330,12 +359,29 @@ const inputSchemas = {
       },
     },
   },
+  hireme_read_memwal: {
+    type: "object",
+    properties: {
+      agent_id: {
+        type: "string",
+        description: "Agent id whose memWal record should be read safely through the gateway.",
+      },
+      record_path: {
+        type: "string",
+        description: "Optional public memWal record path.",
+      },
+      hire_receipt_object_id: {
+        type: "string",
+        description: "Paid hire receipt or execution-ticket object id. Local demo accepts hire_receipt_* values.",
+      },
+    },
+  },
   hireme_prepare_sealed_harness_upload: {
     type: "object",
     properties: {
       agent_id: {
         type: "string",
-        description: "Draft agent id for the sealed Harness registration",
+        description: "Draft agent id for the protected Harness registration",
       },
       epochs: {
         type: "integer",
@@ -349,15 +395,26 @@ const inputSchemas = {
     type: "object",
     properties: {
       agent_id: { type: "string" },
+      policy_id: { type: "string" },
+      encryption_provider: { type: "string" },
+      platform_kms_key_id: { type: "string" },
+      ciphertext_format: { type: "string" },
       seal_policy_id: { type: "string" },
+      seal_package_id: { type: "string" },
+      seal_approve_target: { type: "string" },
+      seal_encryption_id: { type: "string" },
       walrus_blob_id: { type: "string" },
       sui_object_id: { type: "string" },
       ciphertext_digest: { type: "string" },
+      seal_threshold: { type: "integer", minimum: 1 },
+      seal_key_server_ids: {
+        type: "array",
+        items: { type: "string" },
+      },
       price_per_call_usd: { type: "number", minimum: 0 },
     },
     required: [
       "agent_id",
-      "seal_policy_id",
       "walrus_blob_id",
       "sui_object_id",
       "ciphertext_digest",
@@ -370,7 +427,7 @@ const inputSchemas = {
       agent_id: {
         type: "string",
         description:
-          "Optional sealed example agent id. Use example-landing-designer for the design.md landing page demo.",
+          "Optional protected example agent id. Use example-landing-designer for the design.md landing page demo.",
       },
       record_path: {
         type: "string",
@@ -445,24 +502,31 @@ const tools = [
     inputSchema: inputSchemas.hireme_call_walrus_agent,
   },
   {
-    name: "hireme_prepare_sealed_harness_upload",
-    title: "Prepare sealed Harness upload",
+    name: "hireme_read_memwal",
+    title: "Read protected memWal memory",
     description:
-      "Return the local Seal + Walrus upload boundary for a creator Harness bundle. Does not accept or expose plaintext Harness content.",
+      "Ask the gateway to decrypt a platform-managed memWal snapshot and return only safe memory metadata.",
+    inputSchema: inputSchemas.hireme_read_memwal,
+  },
+  {
+    name: "hireme_prepare_sealed_harness_upload",
+    title: "Prepare protected Harness upload",
+    description:
+      "Return the platform-managed encryption + Walrus upload boundary for a creator Harness bundle. Does not accept or expose plaintext Harness content.",
     inputSchema: inputSchemas.hireme_prepare_sealed_harness_upload,
   },
   {
     name: "hireme_register_sealed_harness",
-    title: "Register sealed Harness metadata",
+    title: "Register protected Harness metadata",
     description:
-      "Register only public metadata for an encrypted Harness already protected with Seal and stored on Walrus.",
+      "Register only public metadata for an encrypted Harness already protected with platform-managed encryption and stored on Walrus.",
     inputSchema: inputSchemas.hireme_register_sealed_harness,
   },
   {
     name: "hireme_validate_sealed_harness",
-    title: "Validate sealed Harness through gateway",
+    title: "Validate protected Harness through gateway",
     description:
-      "Validate a sealed Agent folder through the protected gateway runner. Requires a paid hire receipt and returns only safe metadata, never AGENTS.md or skills content.",
+      "Validate a protected Agent folder through the gateway runner. Requires a paid hire receipt and returns only safe metadata, never AGENTS.md or skills content.",
     inputSchema: inputSchemas.hireme_validate_sealed_harness,
   },
   {
@@ -478,6 +542,8 @@ const localSealedExampleRecords = {
     ".hireme/artifacts/example-code-reviewer.public-record.json",
   "example-landing-designer":
     ".hireme/artifacts/example-landing-designer.public-record.json",
+  "example-aster-x1-launcher":
+    ".hireme/artifacts/example-aster-x1-launcher.public-record.json",
 };
 
 function sealedHarnessFor(agentId) {
@@ -485,7 +551,7 @@ function sealedHarnessFor(agentId) {
     sealedHarnessRegistry.find((item) => item.agentId === agentId) || {
       agentId,
       network: "walrus-testnet",
-      sealPolicyId: `seal:testnet:${agentId}-policy`,
+      sealPolicyId: `platform:agent:${agentId}`,
       walrusBlobId: `walrus_${agentId}_encrypted_bundle`,
       suiObjectId: "pending",
       ciphertextDigest: "pending",
@@ -677,7 +743,7 @@ async function callTool(name, args = {}) {
         inferredAgentId: routed.agentId,
         task: routed.task,
         reason:
-          "Natural HireMe requests for sealed agents require the protected gateway.",
+          "Natural HireMe requests for protected agents require the protected gateway.",
         runGateway: "npm run gateway:dev",
         retryTool: "hireme_request",
       });
@@ -732,7 +798,7 @@ async function callTool(name, args = {}) {
       const fallbackPayload = {
         type: "protected_agent_guidance",
         summary:
-          "Demo response: the selected protected agent accepted the task. Production will execute the sealed Agent folder inside the MCP gateway and return only safe output.",
+          "Demo response: the selected protected agent accepted the task. Production will execute the encrypted Agent folder inside the MCP gateway and return only safe output.",
         recommendations: [
           `Use the public contract ${agent.harnessSummary}.`,
           "Start npm run gateway:dev for protected artifact execution.",
@@ -820,6 +886,28 @@ async function callTool(name, args = {}) {
         payload,
       });
     }
+    case "hireme_read_memwal": {
+      const payload = {
+        agent_id: args.agent_id || args.agentId,
+        record_path: args.record_path || args.recordPath,
+        hire_receipt_object_id:
+          args.hire_receipt_object_id ||
+          args.hireReceiptObjectId ||
+          "hire_receipt_local_paid_demo",
+      };
+      const gateway = await callGateway("/v1/memwal/read", payload, {
+        timeoutMs: Number(process.env.HIREME_MCP_MEMWAL_TIMEOUT_MS || 60_000),
+      });
+      if (gateway) return textResult(gateway);
+      return textResult({
+        status: "gateway_required",
+        reason:
+          "memWal reads require the protected gateway. The Codex plugin must not decrypt private memory locally.",
+        runGateway: "npm run gateway:dev",
+        retryTool: "hireme_read_memwal",
+        payload,
+      });
+    }
     case "hireme_prepare_sealed_harness_upload": {
       const gateway = await callGateway("/v1/sealed-harness/prepare", args);
       if (gateway) return textResult(gateway);
@@ -828,17 +916,47 @@ async function callTool(name, args = {}) {
         agentId: args.agent_id || "new-agent",
         expectedFolderShape: ["AGENTS.md", "skills/**", "optional adapters/**"],
         visibilityBoundary:
-          "Do not ship creator AGENTS.md, skills, plugin files, prompts, or Harness code to the hirer's Codex installation. Seal the folder first, store only ciphertext on Walrus, and let the gateway decrypt it after policy approval.",
-        localTestnetCommands: [
-          "tar -czf agent-folder.tar.gz AGENTS.md skills/",
-          "seal-cli encrypt --policy <seal_policy_id> --in agent-folder.tar.gz --out agent-folder.seal.bin",
-          `walrus store agent-folder.seal.bin --epochs ${epochs} --context testnet`,
+          "Do not ship creator AGENTS.md, skills, plugin files, prompts, or Harness code to the hirer's Codex installation. Encrypt the folder first, store only ciphertext on Walrus, and let the gateway decrypt it after platform access approval.",
+        platformEncryptionDemo: {
+          command: "node scripts/seal-example-agent.mjs <agent-folder>",
+          ciphertextFormat: "hireme.platform-ciphertext-envelope.v1",
+          provider: "platform-managed-envelope",
+          kmsKeyId: process.env.HIREME_PLATFORM_KMS_KEY_ID || "platform:local-dev-key",
+          packageId: process.env.HIREME_SEAL_PACKAGE_ID || null,
+          sealApproveTarget:
+            process.env.HIREME_SEAL_APPROVE_TARGET ||
+            (process.env.HIREME_SEAL_PACKAGE_ID
+              ? `${process.env.HIREME_SEAL_PACKAGE_ID}::access::seal_approve`
+              : null),
+          walrusPath: ".hireme/local-walrus/<blob>.seal.json",
+          note:
+            "Local MVP uses platform-managed encryption with AES-GCM DEM. The plaintext folder is never written to Walrus or public metadata.",
+        },
+        localSealDemo: {
+          compatibility: true,
+          note: "Legacy response key kept for old clients. Use platformEncryptionDemo for the MVP provider.",
+        },
+        productionEncryptionSteps: [
+          "Bundle the creator folder into bytes.",
+          "Encrypt the bytes with the platform KMS provider. Optional later Seal mode can replace this provider.",
+          `Store only the encrypted object on Walrus for ${epochs} epoch(s).`,
+          "Register only public metadata in Supabase/Sui: provider, encryption id, Walrus blob id, object id, digest, price.",
+          "At call time, the gateway verifies the paid hire receipt and decrypts inside the runner.",
         ],
         publicMetadataToRegister: [
+          "encryption_provider",
+          "platform_kms_key_id",
+          "ciphertext_format",
+          "policy_id",
           "seal_policy_id",
+          "seal_package_id",
+          "seal_approve_target",
+          "seal_encryption_id",
           "walrus_blob_id",
           "sui_object_id",
           "ciphertext_digest",
+          "seal_threshold",
+          "seal_key_server_ids",
           "price_per_call_usd",
         ],
       });
@@ -849,7 +967,20 @@ async function callTool(name, args = {}) {
       const record = {
         agentId: args.agent_id,
         network: "walrus-testnet",
-        sealPolicyId: args.seal_policy_id,
+        encryptionProvider: args.encryption_provider || "platform-managed-envelope",
+        platformKmsKeyId: args.platform_kms_key_id || process.env.HIREME_PLATFORM_KMS_KEY_ID || "platform:local-dev-key",
+        ciphertextFormat: args.ciphertext_format || "hireme.platform-ciphertext-envelope.v1",
+        policyId: args.policy_id || args.seal_policy_id || `platform:agent:${args.agent_id}`,
+        sealPolicyId: args.seal_policy_id || args.policy_id || `platform:agent:${args.agent_id}`,
+        sealPackageId: args.seal_package_id || process.env.HIREME_SEAL_PACKAGE_ID || null,
+        sealApproveTarget:
+          args.seal_approve_target ||
+          (args.seal_package_id || process.env.HIREME_SEAL_PACKAGE_ID
+            ? `${args.seal_package_id || process.env.HIREME_SEAL_PACKAGE_ID}::access::seal_approve`
+            : null),
+        sealEncryptionId: args.seal_encryption_id || null,
+        sealThreshold: args.seal_threshold || null,
+        sealKeyServerIds: args.seal_key_server_ids || [],
         walrusBlobId: args.walrus_blob_id,
         suiObjectId: args.sui_object_id,
         ciphertextDigest: args.ciphertext_digest,
@@ -880,7 +1011,7 @@ async function callTool(name, args = {}) {
       return textResult({
         status: "gateway_required",
         reason:
-          "Sealed Harness validation requires the protected gateway because the MCP server must not decrypt or inspect creator folders locally.",
+          "Protected Harness validation requires the gateway because the MCP server must not decrypt or inspect creator folders locally.",
         runGateway: "npm run gateway:dev",
         retryTool: "hireme_validate_sealed_harness",
         payload,
@@ -897,8 +1028,8 @@ async function callTool(name, args = {}) {
           "For the plaintext Walrus storage demo, call hireme_call_walrus_agent with agent_id='wal-test1' or a direct blob_id. The gateway reads Supabase and Walrus; Codex does not download the creator folder.",
         switching:
           "Use hireme_list_hired_agents, then hireme_select_agent, then hireme_call_agent. For high-stakes calls, pass agent_id explicitly.",
-        sealedExample:
-          "Run npm run example:seal, start npm run gateway:dev, then call hireme_validate_sealed_harness with hire_receipt_object_id='hire_receipt_local_paid_demo'.",
+        protectedExample:
+          "Run npm run platform:encrypt, start npm run gateway:dev, then call hireme_validate_sealed_harness with hire_receipt_object_id='hire_receipt_local_paid_demo'.",
         privacy:
           "Creator AGENTS.md and skills folders must never be shipped as Codex skills/plugins to hirers. The installed plugin is only a public connector to the protected MCP gateway.",
       });
@@ -959,6 +1090,10 @@ function inferAgentId(request) {
     return aliases.some((alias) => normalized.includes(alias));
   });
   if (directMatch) return directMatch.id;
+
+  if (/aster\s*x1|preorder|프리오더|사전\s*예약|런칭|launch/.test(normalized)) {
+    return "example-aster-x1-launcher";
+  }
 
   if (
     /랜딩|landing|상세\s*페이지|상세\s*랜딩|페이지\s*만들|홈페이지|hero|cta|핸드폰|휴대폰|phone|mobile/.test(

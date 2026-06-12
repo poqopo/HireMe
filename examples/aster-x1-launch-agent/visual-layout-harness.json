@@ -1,0 +1,62 @@
+{
+  "name": "Aster X1 Visual Layout Harness",
+  "intent": "Make the protected Agent output visually distinct from a generic landing page, especially on mobile.",
+  "compositionRules": {
+    "hero": {
+      "pattern": "device-stage-plus-preorder-panel",
+      "desktopGrid": "7/5 split with device stage on the right",
+      "mobileOrder": [
+        "campaign eyebrow",
+        "headline",
+        "preorder economics chips",
+        "device mockup",
+        "primary CTA",
+        "secondary model link"
+      ],
+      "requiredAboveFold": [
+        "floating product mockup",
+        "72-hour countdown",
+        "$49 deposit chip",
+        "trade-in value chip",
+        "single filled preorder CTA"
+      ]
+    },
+    "mobileStickyCta": {
+      "required": true,
+      "safeArea": true,
+      "content": [
+        "starting price",
+        "deposit",
+        "primary preorder CTA"
+      ]
+    },
+    "sections": [
+      "offer rail",
+      "model selector cards",
+      "camera/battery proof strip",
+      "repair transparency table",
+      "final preorder panel"
+    ]
+  },
+  "visualRules": {
+    "radiusPx": 8,
+    "headlineWeight": 300,
+    "letterSpacing": 0,
+    "numbers": "tabular",
+    "primaryCtaShape": "pill",
+    "avoid": [
+      "generic three-card feature section as the main proof",
+      "abstract gradient-only hero",
+      "stock photo placeholder",
+      "multiple filled primary CTAs in one viewport",
+      "desktop-only composition"
+    ]
+  },
+  "mobileChecks": [
+    "No text overlaps the product mockup at 375px width.",
+    "Sticky preorder bar stays visible without covering section headings.",
+    "Hero headline, deposit, countdown, and CTA fit in the first mobile viewport.",
+    "Model cards become a horizontal snap rail or single-column cards.",
+    "All tap targets are at least 44px tall."
+  ]
+}

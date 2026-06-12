@@ -1,0 +1,48 @@
+{
+  "productName": "Aster X1",
+  "tagline": "Pocket cinema, pro-grade signal, two-day confidence.",
+  "positioning": "A premium Android flagship for creators, travelers, and preorder buyers who care about camera reliability, battery endurance, and repair transparency.",
+  "heroDeviceAngle": "three-quarter floating phone with visible camera island and titanium rail",
+  "colors": {
+    "primary": "#2537ff",
+    "ink": "#07111f",
+    "canvas": "#f4f8ff",
+    "night": "#10153d",
+    "signal": "#21d0a2",
+    "solar": "#ffb545"
+  },
+  "safeClaims": [
+    "48-hour adaptive battery target",
+    "1-inch class main sensor",
+    "6.9 inch 120Hz LTPO OLED",
+    "29 minute fast-charge target",
+    "5 years OS updates and 7 years security updates",
+    "screen and battery repair price shown before preorder"
+  ],
+  "models": [
+    {
+      "name": "X1 Core",
+      "storage": "256GB",
+      "price": "$899",
+      "bestFor": "buyers upgrading from a two-year-old flagship"
+    },
+    {
+      "name": "X1 Studio",
+      "storage": "512GB",
+      "price": "$1099",
+      "bestFor": "mobile creators and travel camera users"
+    },
+    {
+      "name": "X1 Vault",
+      "storage": "1TB",
+      "price": "$1299",
+      "bestFor": "video-heavy creators and offline-first travelers"
+    }
+  ],
+  "avoid": [
+    "unverified benchmark comparisons",
+    "AI phone clichés",
+    "generic lifestyle stock photography",
+    "claims that imply medical, emergency, or guaranteed satellite availability"
+  ]
+}

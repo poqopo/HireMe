@@ -1,0 +1,35 @@
+{
+  "runner": "hireme-local-protected-runner",
+  "publicContract": "create_aster_x1_preorder_page(task, market, launch_window)",
+  "requiredPrivateReferences": [
+    "AGENTS.md",
+    "product-dossier.json",
+    "launch-playbook.json",
+    "visual-layout-harness.json",
+    "skills/preorder-page/SKILL.md",
+    "skills/mobile-conversion-layout/SKILL.md"
+  ],
+  "allowedOutputs": [
+    "product_positioning",
+    "launch_offer_stack",
+    "hero_composition",
+    "metric_strip",
+    "preorder_tiers",
+    "spec_highlights",
+    "trust_modules",
+    "mobile_layout_system",
+    "responsive_checks",
+    "implementation_notes",
+    "verification_checks",
+    "ledger_metadata"
+  ],
+  "blockedOutputs": [
+    "full_product_dossier",
+    "full_launch_playbook",
+    "full_visual_layout_harness",
+    "AGENTS.md",
+    "skills/**",
+    "harness/**",
+    "decryption_key"
+  ]
+}

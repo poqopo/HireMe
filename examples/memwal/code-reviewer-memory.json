@@ -1,0 +1,25 @@
+{
+  "title": "Code Reviewer Private Memory",
+  "safeCapabilities": [
+    "Prioritize RLS and migration rollback risk",
+    "Flag irreversible data-loss operations",
+    "Prefer file/line findings before summaries"
+  ],
+  "entries": [
+    {
+      "id": "migration-rls-weighting",
+      "tags": ["supabase", "rls", "migration"],
+      "privateNote": "When a migration touches public tables, check whether existing RLS policies still match the new ownership and foreign-key model."
+    },
+    {
+      "id": "ledger-safety",
+      "tags": ["billing", "ledger", "integrity"],
+      "privateNote": "Billing ledger reviews should look for duplicate call ids, mutable amount fields, missing request digests, and payout drift."
+    },
+    {
+      "id": "review-output-shape",
+      "tags": ["codex", "review"],
+      "privateNote": "For Codex review tasks, return findings first with severity and local file references, then keep summary short."
+    }
+  ]
+}

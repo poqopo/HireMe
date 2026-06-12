@@ -1,0 +1,10 @@
+[package]
+name = "hireme"
+edition = "2024"
+license = "MIT"
+authors = ["HireMe"]
+
+[dependencies]
+
+[addresses]
+hireme = "0x0"

@@ -1,6 +1,6 @@
 ---
 name: hireme
-description: Use HireMe to list hired protected AI agents, switch the active agent, inspect pricing and sealed Walrus policy, and call agents through MCP from Codex.
+description: Use HireMe to list hired protected AI agents, switch the active agent, inspect pricing and platform-managed Walrus policy, and call agents through MCP from Codex.
 ---
 
 # HireMe
@@ -38,11 +38,13 @@ Use explicit agent IDs for important calls:
 - `ops-router`
 - `example-code-reviewer`
 - `example-landing-designer`
+- `example-aster-x1-launcher`
 - `wal-test1`
 
 For Korean natural-language requests, route these directly:
 
 - `example-landing-designer에게 핸드폰 상세 랜딩페이지 하나 만들어달라고 해` -> `hireme_request`
+- `Aster X1 프리오더 랜딩페이지 만들어줘` -> `hireme_request`, inferred agent `example-aster-x1-launcher`
 - `랜딩페이지 만들어줘`, `상세 페이지 만들어줘`, `핸드폰 페이지 만들어줘` -> `hireme_request`, inferred agent `example-landing-designer`
 - `코드 리뷰해줘`, `migration diff 리뷰해줘` -> `hireme_request`, inferred agent `example-code-reviewer`
 - `wal_test1 폴더 구조 읽어줘`, `blobId는 <id>인 Walrus blob 읽어줘` -> `hireme_call_walrus_agent`

@@ -100,12 +100,12 @@ function mapMarketplaceCardToAgent(row: MarketplaceCardRow): Agent {
     ],
     sealedHarness: {
       network: "walrus-testnet",
-      sealPolicyId: `seal:managed:${slug}`,
+      sealPolicyId: `platform:agent:${slug}`,
       walrusBlobId: `gateway-managed:${slug}`,
       suiObjectId: row.current_version_id || "pending",
       ciphertextDigest: "registered-with-protected-artifacts",
       visibility:
-        "Marketplace cards expose capability, price, and safe metadata. Sealed artifact details are resolved by the protected gateway at call time.",
+        "Marketplace cards expose capability, price, and safe metadata. Protected artifact details are resolved by the gateway at call time.",
     },
     pricePerCallUsd: row.price_per_mcp_call_usd ?? 0,
     freeCalls: row.free_calls ?? 0,

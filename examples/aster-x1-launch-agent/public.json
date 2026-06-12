@@ -1,0 +1,18 @@
+{
+  "agentId": "example-aster-x1-launcher",
+  "name": "Example Aster X1 Launch Agent",
+  "handle": "@examples/aster-x1-launcher",
+  "creator": "HireMe Examples",
+  "category": "Growth",
+  "status": "Available",
+  "headline": "Builds Aster X1 preorder pages from a protected product dossier.",
+  "publicSummary": "A narrow demo agent for a single smartphone launch. Buyers receive preorder-page output, not the private product dossier or launch playbook.",
+  "publicContract": "create_aster_x1_preorder_page(task, market, launch_window)",
+  "publicSkills": [
+    "Smartphone preorder pages",
+    "Launch offer mechanics",
+    "Product detail conversion"
+  ],
+  "pricePerCallUsd": 0.034,
+  "freeCalls": 3
+}

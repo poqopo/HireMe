@@ -110,7 +110,7 @@ function LandingPage() {
               Hire AI agents without exposing how they work.
             </h1>
             <p className="mt-6 max-w-2xl text-base font-light leading-7 text-[#273951] md:text-lg">
-              HireMe lets creators publish useful Agent capability while Seal,
+              HireMe lets creators publish useful Agent capability while platform encryption,
               Walrus, and memWal protect private Skills, Harness logic, and
               memory. Buyers call the Agent from Codex through MCP and pay by
               metered usage.
@@ -182,7 +182,7 @@ function LandingPage() {
             <p className="mt-5 text-base font-light leading-7 text-muted-foreground">
               The web app only exposes Agent profiles, public capability tags,
               pricing, and hire state. The gateway handles authorization,
-              Seal key-share approval, protected artifact access, call metering,
+              Platform decrypt approval, protected artifact access, call metering,
               and ledger writes.
             </p>
           </div>
@@ -196,7 +196,7 @@ function LandingPage() {
               <Badge variant="cream">$0.018 / call</Badge>
             </div>
             <div className="grid gap-3 md:grid-cols-3">
-              {["Auth", "Seal", "Walrus"].map((step, index) => (
+              {["Auth", "Platform", "Walrus"].map((step, index) => (
                 <div
                   className="rounded-xl border border-white/10 bg-white/7 p-4"
                   key={step}
@@ -217,7 +217,7 @@ function LandingPage() {
             <div className="mt-4 rounded-xl bg-[#0d253d] p-4 font-mono text-xs leading-6 text-[#c6d4ff]">
               <div>{">"} hireme.call(agent, input, budget)</div>
               <div>{">"} verify_hire: ok</div>
-              <div>{">"} seal_policy: approved</div>
+              <div>{">"} platform_access: approved</div>
               <div>{">"} walrus_blob: encrypted</div>
               <div>{">"} ledger.write(call_id, usd_amount)</div>
             </div>
@@ -473,7 +473,7 @@ function AgentDetail({ agent }: { agent: Agent }) {
         <InfoLine icon={Code2} label="Public MCP contract" value={agent.publicContract} />
         <InfoLine
           icon={DatabaseZap}
-          label="Sealed storage"
+          label="Protected storage"
           value={`${agent.sealedHarness.network} / ${agent.sealedHarness.walrusBlobId}`}
         />
         <InfoLine icon={EyeOff} label="Hidden from hirer" value="Private skills, plugin code, prompts, eval sets, and tool-routing logic." />
@@ -492,11 +492,11 @@ function AgentDetail({ agent }: { agent: Agent }) {
       <div className="mt-5 rounded-xl border border-[#ea2261]/20 bg-[#fff8fb] p-4">
         <div className="mb-2 flex items-center gap-2 text-sm font-medium text-[#9f1239]">
           <FileLock2 className="size-4" />
-          Sealed Agent folder
+          Protected Agent folder
         </div>
         <div className="space-y-2 text-xs leading-5 text-[#573144]">
           <div className="flex items-center justify-between gap-3">
-            <span>Seal policy</span>
+            <span>Access policy</span>
             <span className="max-w-44 truncate font-mono">{agent.sealedHarness.sealPolicyId}</span>
           </div>
           <div className="flex items-center justify-between gap-3">
@@ -606,19 +606,19 @@ function CreatorConsole() {
         <div>
           <Badge variant="dark">Creator publish flow</Badge>
           <h2 className="mt-4 text-3xl font-light leading-tight">
-            Upload AGENTS.md and skills as a sealed Walrus artifact.
+            Upload AGENTS.md and skills as an encrypted Walrus artifact.
           </h2>
           <p className="mt-4 text-sm leading-6 text-muted-foreground">
             The Codex plugin stays as a public HireMe connector. Creator-owned
             Skills, plugin code, prompts, eval sets, and Harness bundles are
             encrypted before Walrus storage and only opened by the MCP gateway
-            after Seal policy approval.
+            after platform access approval.
           </p>
 
           <div className="mt-6 space-y-3">
             <BoundaryStep
               icon={KeyRound}
-              title="Seal before storage"
+              title="Encrypt before storage"
               copy="Plaintext never becomes a public Walrus blob."
             />
             <BoundaryStep
@@ -651,7 +651,7 @@ function CreatorConsole() {
                 onChange={updateDraft("publicCapability")}
               />
             </Field>
-            <Field className="md:col-span-2" label="Seal access policy">
+            <Field className="md:col-span-2" label="Platform access policy">
               <textarea
                 className="min-h-20 w-full rounded-md border border-input bg-white px-3 py-2 text-sm text-foreground shadow-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
                 onChange={updateDraft("policyRule")}
@@ -687,14 +687,14 @@ function CreatorConsole() {
               />
               <span className="mt-2 block text-xs leading-5 text-muted-foreground">
                 Expected folder shape: AGENTS.md, skills/**, optional tool
-                adapters. The folder is sealed before Walrus storage.
+                adapters. The folder is encrypted before Walrus storage.
               </span>
             </Field>
           </div>
 
           <div className="mt-5 flex flex-wrap items-center gap-3">
             <Button disabled={isSealing} onClick={sealHarness} type="button">
-              <UploadCloud /> {isSealing ? "Sealing..." : "Create sealed record"}
+              <UploadCloud /> {isSealing ? "Encrypting..." : "Create protected record"}
             </Button>
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <AlertTriangle className="size-4 text-[#ea2261]" />
@@ -752,7 +752,7 @@ function SealedRecordPreview({ record }: { record: SealedHarnessRecord }) {
   const artifactName = `${record.fileName
     .toLowerCase()
     .replace(/[^a-z0-9._-]+/g, "-")
-    .replace(/^-|-$/g, "")}.seal.bin`;
+    .replace(/^-|-$/g, "")}.seal.json`;
   const walrusCommand = `walrus store ${artifactName} --epochs ${record.epochs} --context testnet`;
 
   return (
@@ -760,15 +760,20 @@ function SealedRecordPreview({ record }: { record: SealedHarnessRecord }) {
       <div className="mb-4 flex items-center justify-between gap-3">
         <div className="flex items-center gap-2 text-sm font-medium">
           <CheckCircle2 className="size-4 text-primary" />
-          Sealed public record
+          Protected public record
         </div>
         <Badge variant="outline">{record.network}</Badge>
       </div>
 
-      <div className="grid gap-3 md:grid-cols-3">
-        <RecordCell label="Seal policy" value={record.sealPolicyId} />
+      <div className="grid gap-3 md:grid-cols-4">
+        <RecordCell label="Provider" value={record.sealProvider} />
+        <RecordCell label="KMS key" value={record.platformKmsKeyId} />
+        <RecordCell label="Policy" value={record.sealPolicyId} />
+        <RecordCell label="Identity" value={record.encryptionId} />
         <RecordCell label="Walrus blob" value={record.walrusBlobId} />
         <RecordCell label="Sui object" value={record.suiObjectId} />
+        <RecordCell label="Ciphertext" value={record.sealCiphertextFormat} />
+        <RecordCell label="Digest" value={record.ciphertextDigest} />
       </div>
 
       <div className="mt-4 rounded-lg bg-secondary p-3">
@@ -792,7 +797,7 @@ function SealedRecordPreview({ record }: { record: SealedHarnessRecord }) {
 
       <div className="mt-3 rounded-lg border border-border bg-white p-3">
         <div className="mb-2 text-xs font-medium text-muted-foreground">
-          Folder entries sealed in preview
+          Folder entries protected in preview
         </div>
         <div className="flex flex-wrap gap-2">
           {record.entryPreview.map((entry) => (

@@ -18,7 +18,7 @@ export const agents: Agent[] = [
     creator: "Han Labs",
     category: "Research",
     status: "Available",
-    headline: "Finds protocol evidence, cites sources, and keeps private notes sealed.",
+    headline: "Finds protocol evidence, cites sources, and keeps private notes protected.",
     publicSummary:
       "A research agent for Sui, Walrus, and storage-market analysis. It exposes source-backed briefs while keeping private heuristics and scoring prompts protected.",
     publicContract: "research_brief(input, citation_policy, max_sources)",
@@ -27,11 +27,11 @@ export const agents: Agent[] = [
     protectedAssets: ["ranking prompt", "source scoring harness", "private memory"],
     sealedHarness: {
       network: "walrus-testnet",
-      sealPolicyId: "seal:testnet:walrus-researcher-policy",
+      sealPolicyId: "platform:agent:walrus-researcher",
       walrusBlobId: "walrus_researcher_encrypted_bundle",
       suiObjectId: "0x9f1d4c739f6f3c9b72c8d2c64ad93f459081dfe2aa49c881d2df0672b591021a",
       ciphertextDigest: "sha256:2b5a8d1f84d83a9a8d33270c0a7fdc3d5d48f7d72f184a35a18f2453ff4fb01d",
-      visibility: "Only MCP gateway can request Seal key shares after hire proof.",
+      visibility: "Only the MCP gateway can decrypt this platform-managed artifact after hire proof.",
     },
     pricePerCallUsd: 0.018,
     freeCalls: 25,
@@ -57,7 +57,7 @@ export const agents: Agent[] = [
     protectedAssets: ["patch templates", "review heuristics", "tool routing"],
     sealedHarness: {
       network: "walrus-testnet",
-      sealPolicyId: "seal:testnet:codex-builder-policy",
+      sealPolicyId: "platform:agent:codex-builder",
       walrusBlobId: "walrus_codex_builder_encrypted_bundle",
       suiObjectId: "0xa8079bf1aa4b4b1d4f54d685247d8b38a9825bd7ac5f2858e2ebf142c40a9194",
       ciphertextDigest: "sha256:1d5465a8cce681cc0a26bf232e09df94f7a4cc6d44e2d2294de402cefa64e21c",
@@ -87,7 +87,7 @@ export const agents: Agent[] = [
     protectedAssets: ["red-team set", "grader rubric", "blocked examples"],
     sealedHarness: {
       network: "walrus-testnet",
-      sealPolicyId: "seal:testnet:agent-evaluator-policy",
+      sealPolicyId: "platform:agent:agent-evaluator",
       walrusBlobId: "walrus_agent_evaluator_encrypted_bundle",
       suiObjectId: "0xd4a0a275d16511311bde94f9fa56e796f9336cc62df1b802257d1084be7ca31d",
       ciphertextDigest: "sha256:66df8b95591f28aefb4c99ed7f8b376a8bf8f0db0b67adcb4ef1b456de9f002d",
@@ -117,11 +117,11 @@ export const agents: Agent[] = [
     protectedAssets: ["fraud rules", "tier optimizer", "SQL templates"],
     sealedHarness: {
       network: "walrus-testnet",
-      sealPolicyId: "seal:testnet:data-ledger-policy",
+      sealPolicyId: "platform:agent:data-ledger",
       walrusBlobId: "walrus_data_ledger_encrypted_bundle",
       suiObjectId: "0x68d0e7470f6b46a431e24c71fa027ca912f78e8c4d13f12963a6e29ea9f65232",
       ciphertextDigest: "sha256:d3148e56f4ce8421117767af8a00d3c4c870f3c9bff232a766a9053571f2cc40",
-      visibility: "Fraud heuristics stay sealed behind metered execution.",
+      visibility: "Fraud heuristics stay protected behind metered execution.",
     },
     pricePerCallUsd: 0.015,
     freeCalls: 50,
@@ -147,7 +147,7 @@ export const agents: Agent[] = [
     protectedAssets: ["positioning vault", "channel memory", "copy variants"],
     sealedHarness: {
       network: "walrus-testnet",
-      sealPolicyId: "seal:testnet:launch-operator-policy",
+      sealPolicyId: "platform:agent:launch-operator",
       walrusBlobId: "walrus_launch_operator_encrypted_bundle",
       suiObjectId: "0x6d21d957b50a94d6ec0fc69dfdd603452193562a99d25d90605b1522d7a6b994",
       ciphertextDigest: "sha256:0ae4d2050733295ad7ca8af0ee429456f631941a4756b69ba3ff0e828a2f6515",
@@ -177,7 +177,7 @@ export const agents: Agent[] = [
     protectedAssets: ["routing graph", "approval matrix", "budget heuristics"],
     sealedHarness: {
       network: "walrus-testnet",
-      sealPolicyId: "seal:testnet:ops-router-policy",
+      sealPolicyId: "platform:agent:ops-router",
       walrusBlobId: "walrus_ops_router_encrypted_bundle",
       suiObjectId: "0xf1a7862f9f45a45d7ed931ea390dd8c34ca8237412b747fbc2ac74cf4a82fb26",
       ciphertextDigest: "sha256:ed297905f5d1e98ce7057a0d0a8ad69f71b17a8457fe65150b8d76e5e8876519",

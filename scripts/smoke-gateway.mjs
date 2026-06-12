@@ -18,6 +18,12 @@ await sealAgentFolder({
   pricePerCallUsd: 0.026,
   epochs: 3,
 });
+await sealAgentFolder({
+  folderPath: "examples/aster-x1-launch-agent",
+  agentId: "example-aster-x1-launcher",
+  pricePerCallUsd: 0.034,
+  epochs: 3,
+});
 
 const gateway = spawn("node", ["server/gateway/index.mjs"], {
   env: {
@@ -56,7 +62,18 @@ try {
   });
 
   if (!exampleCall.sealedValidation?.gatewayOnlyDecrypt) {
-    throw new Error("Gateway example agent call did not validate the sealed artifact");
+    throw new Error("Gateway example agent call did not validate the protected artifact");
+  }
+
+  if (
+    exampleCall.sealEncryption?.provider !== "platform-managed-envelope" ||
+    !exampleCall.sealEncryption?.platformKmsKeyId ||
+    !exampleCall.sealEncryption?.packageId ||
+    !exampleCall.sealedArtifact?.sealPackageId ||
+    exampleCall.jsonOutput?.proof?.walrusStoresCiphertextOnly !== true ||
+    exampleCall.jsonOutput?.harness?.artifact?.plaintextInWalrus !== false
+  ) {
+    throw new Error("Gateway example agent call did not preserve platform encryption metadata");
   }
 
   if (
@@ -72,6 +89,24 @@ try {
     exampleCall.jsonOutput?.harness?.rawHarnessReturned !== false
   ) {
     throw new Error("Gateway example agent call did not return harness-based JSON output");
+  }
+
+  const asterCall = await postJson(`${gatewayUrl}/v1/agent-call`, gatewayKey, {
+    agent_id: "example-aster-x1-launcher",
+    task: "Create an Aster X1 preorder landing page",
+    budget_calls: 1,
+    hire_receipt_object_id: "hire_receipt_local_paid_demo",
+  });
+
+  if (
+    asterCall.jsonOutput?.payload?.type !== "aster_x1_preorder_landing" ||
+    asterCall.jsonOutput?.payload?.privateReferencesApplied?.productDossier !== true ||
+    asterCall.jsonOutput?.payload?.privateReferencesApplied?.launchPlaybook !== true ||
+    asterCall.jsonOutput?.payload?.privateReferencesApplied?.visualLayoutHarness !== true ||
+    asterCall.jsonOutput?.payload?.mobileLayoutSystem?.stickyPreorderBar?.required !== true ||
+    asterCall.runner?.privateFolderReturnedToCodex !== false
+  ) {
+    throw new Error("Gateway Aster X1 launch agent did not return specialized protected output");
   }
 
   const pluginOutput = await runPluginThroughGateway(gatewayUrl, gatewayKey);
@@ -110,6 +145,10 @@ try {
     !naturalText.includes('"shouldAct": true')
   ) {
     throw new Error("Plugin MCP natural request did not route to the landing designer");
+  }
+
+  if (!naturalText.includes('"walrusStoresCiphertextOnly": true')) {
+    throw new Error("Plugin MCP protected request did not expose ciphertext proof metadata");
   }
 
   console.log("HireMe gateway smoke test passed.");

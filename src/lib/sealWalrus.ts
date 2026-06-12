@@ -12,10 +12,15 @@ export type SealedHarnessRecord = {
   id: string;
   agentName: string;
   network: "walrus-testnet";
+  sealProvider: string;
+  platformKmsKeyId: string;
   sealPolicyId: string;
   walrusBlobId: string;
   suiObjectId: string;
   encryptionId: string;
+  sealCiphertextFormat: string;
+  sealThreshold: number;
+  sealKeyServerIds: string[];
   ciphertextDigest: string;
   fileName: string;
   fileSize: number;
@@ -71,10 +76,15 @@ export async function createLocalSealedHarnessRecord(
     id: `sealed_${Date.now().toString(36)}`,
     agentName: draft.agentName,
     network: "walrus-testnet",
-    sealPolicyId: `seal:testnet:${randomHex(12)}`,
+    sealProvider: "platform-managed-envelope",
+    platformKmsKeyId: "platform:local-dev-key",
+    sealPolicyId: `platform:agent:${randomHex(12)}`,
     walrusBlobId: `walrus_${shortDigest}`,
     suiObjectId: `0x${objectHex}`,
     encryptionId: `hireme::harness::${shortDigest}`,
+    sealCiphertextFormat: "hireme.platform-ciphertext-envelope.v1",
+    sealThreshold: 0,
+    sealKeyServerIds: [],
     ciphertextDigest: `sha256:${digest}`,
     fileName: folderName,
     fileSize:
