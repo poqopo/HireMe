@@ -23,7 +23,7 @@ const admin = createClient(supabaseUrl, serviceRoleKey, {
 });
 
 const creatorIds = new Map();
-for (const creator of unique(agents.map((agent) => agent.creator))) {
+for (const creator of unique(agents.flatMap((agent) => [agent.creator, agent.team.owner]))) {
   const user = await findOrCreateCreatorUser(creator);
   creatorIds.set(creator, user.id);
 
@@ -41,9 +41,62 @@ for (const creator of unique(agents.map((agent) => agent.creator))) {
   );
 }
 
+const teamIds = new Map();
+for (const team of uniqueBy(agents.map((agent) => agent.team), (team) => team.id)) {
+  const ownerId = creatorIds.get(team.owner);
+  const teamAgents = agents.filter((agent) => agent.team.id === team.id);
+  const teamRow = await mustSingle(
+    admin
+      .from("agent_teams")
+      .upsert(
+        {
+          owner_id: ownerId,
+          slug: team.id,
+          name: team.name,
+          handle: team.handle,
+          status: "listed",
+          headline: team.headline,
+          public_summary: team.publicSummary,
+          public_skills: unique(teamAgents.flatMap((agent) => agent.skills)),
+          accent: team.accent,
+          rating: average(teamAgents.map((agent) => agent.rating)),
+          historical_calls: teamAgents.reduce((total, agent) => total + agent.calls, 0),
+          median_latency_ms: Math.round(
+            average(teamAgents.map((agent) => agent.latencyMs)),
+          ),
+        },
+        { onConflict: "slug" },
+      )
+      .select("id")
+      .single(),
+    `upsert team ${team.id}`,
+  );
+
+  teamIds.set(team.id, teamRow.id);
+
+  await must(
+    admin.from("agent_team_pricing").delete().eq("team_id", teamRow.id),
+    `clear team pricing for ${team.id}`,
+  );
+
+  await must(
+    admin.from("agent_team_pricing").insert({
+      team_id: teamRow.id,
+      billing_unit: team.billing.unit,
+      base_price_usd: team.billing.basePriceUsd,
+      included_calls: team.billing.includedCalls,
+      overage_price_per_call_usd: team.billing.overagePricePerCallUsd,
+      billing_note: team.billing.note,
+      active: true,
+    }),
+    `insert team pricing for ${team.id}`,
+  );
+}
+
 let seededAgents = 0;
 for (const agent of agents) {
   const creatorId = creatorIds.get(agent.creator);
+  const teamId = teamIds.get(agent.team.id);
   const slug = agent.id;
 
   const agentRow = await mustSingle(
@@ -52,6 +105,9 @@ for (const agent of agents) {
       .upsert(
         {
           creator_id: creatorId,
+          team_id: teamId,
+          team_role: agent.teamRole,
+          listed_individually: agent.listedIndividually,
           slug,
           name: agent.name,
           handle: agent.handle,
@@ -148,7 +204,7 @@ for (const agent of agents) {
 }
 
 console.log(
-  `Supabase demo seed complete: ${seededAgents} agents, ${creatorIds.size} creators.`,
+  `Supabase demo seed complete: ${teamIds.size} teams, ${seededAgents} agents, ${creatorIds.size} creators.`,
 );
 
 async function findOrCreateCreatorUser(creator) {
@@ -221,6 +277,20 @@ function slugify(value) {
 
 function unique(values) {
   return [...new Set(values)];
+}
+
+function uniqueBy(values, getKey) {
+  const found = new Map();
+  for (const value of values) {
+    const key = getKey(value);
+    if (!found.has(key)) found.set(key, value);
+  }
+  return [...found.values()];
+}
+
+function average(values) {
+  if (!values.length) return 0;
+  return values.reduce((total, value) => total + value, 0) / values.length;
 }
 
 function requiredEnv(name) {

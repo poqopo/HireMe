@@ -70,12 +70,15 @@ MVP에서는 HireMe gateway를 trusted executor로 두고 plaintext user task를
 | Table | Purpose |
 | --- | --- |
 | `profiles` | Creator/Hirer 프로필과 지갑, 정산 정보 |
-| `agents` | 공개 Agent 카드 정보, 카테고리, 공개 skill summary |
+| `agent_teams` | marketplace에 노출되는 팀 단위 상품, owner, 공개 설명 |
+| `agent_team_pricing` | 팀 bundle 가격, pooled call, overage 정책 |
+| `agents` | 팀 안에서 실제 실행되는 Agent, 공개 skill summary |
 | `agent_versions` | Harness 버전, MCP manifest 버전, 배포 상태 |
 | `protected_artifacts` | encryption provider, policy id, Walrus blob id, Sui object id, encrypted metadata |
-| `agent_pricing` | call 단가, free quota, volume tier |
-| `hires` | 고용 상태, 권한 범위, 만료 시간 |
-| `mcp_call_ledger` | call id, token/call count, latency, billable amount |
+| `agent_pricing` | Agent별 실행 call 단가, free quota, volume tier |
+| `agent_team_hires` | 팀 단위 고용 상태, pooled quota, Codex installation |
+| `hires` | 단일 Agent 직접 고용 상태, 권한 범위, 만료 시간 |
+| `mcp_call_ledger` | call id, token/call count, latency, team/agent split amount |
 | `payouts` | Creator 정산 기록 |
 
 보안 원칙:
@@ -104,11 +107,12 @@ supabase db push --db-url "$SUPABASE_DB_URL"
 
 현재 schema는 다음 원칙으로 설계했습니다.
 
-- `agents`, `agent_versions`, `agent_pricing`은 marketplace 공개 정보와 가격을 담당합니다.
+- `agent_teams`, `agent_team_pricing`, `agent_team_hires`는 팀 단위 상품, bundle 가격, pooled usage를 담당합니다.
+- `agents`, `agent_versions`, `agent_pricing`은 팀 안의 실행 Agent와 Agent별 metered execution 가격을 담당합니다.
 - `protected_artifacts`는 platform-managed encryption/Walrus metadata만 저장합니다. `AGENTS.md`, `skills/`, Harness 원문은 저장하지 않습니다.
 - `hires`는 고용 상태, Codex installation, access identity를 추적합니다.
 - `agent_sessions`는 Codex에서 여러 Agent를 바꿔 쓰기 위한 active Agent 상태를 저장합니다.
-- `mcp_call_ledger`는 call id, digest, latency, billable amount만 저장합니다. raw prompt/response는 저장하지 않습니다.
+- `mcp_call_ledger`는 call id, digest, latency, billable amount와 team access/agent execution split을 저장합니다. raw prompt/response는 저장하지 않습니다.
 - `payouts`는 creator 정산 단위입니다.
 
 ## 필요한 환경 변수
@@ -140,14 +144,14 @@ supabase db push --db-url "$SUPABASE_DB_URL"
 
 ## MCP 실행 흐름
 
-1. Hirer가 웹에서 Agent를 고용합니다.
-2. 플랫폼이 해당 Hirer에게 MCP endpoint 또는 manifest를 발급합니다.
+1. Hirer가 웹에서 Agent Team을 고용합니다.
+2. 플랫폼이 해당 Hirer에게 team hire receipt와 MCP endpoint 또는 manifest를 발급합니다.
 3. Codex가 MCP tool call을 보냅니다.
-4. MCP gateway가 hire 권한과 call budget을 검증합니다.
+4. MCP gateway가 team hire 권한, pooled call budget, agent routing 권한을 검증합니다.
 5. gateway가 platform-managed KMS key로 Walrus ciphertext를 복호화합니다.
-6. gateway가 복호화된 `AGENTS.md`와 `skills/` 폴더를 격리 실행 환경에서 사용해 Agent Harness를 실행합니다.
+6. gateway가 선택된 Agent의 복호화된 `AGENTS.md`와 `skills/` 폴더를 격리 실행 환경에서 사용해 Agent Harness를 실행합니다.
 7. 결과만 Hirer에게 반환하고, 내부 Skills/Harness는 노출하지 않습니다.
-8. `mcp_call_ledger`에 call 단위 과금 이벤트를 기록합니다.
+8. `mcp_call_ledger`에 team access amount와 agent execution amount를 분리한 과금 이벤트를 기록합니다.
 
 ## 로컬 Protected Gateway
 
