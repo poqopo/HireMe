@@ -75,10 +75,11 @@ MVP에서는 HireMe gateway를 trusted executor로 두고 plaintext user task를
 | `agents` | 팀 안에서 실제 실행되는 Agent, 공개 skill summary |
 | `agent_versions` | Harness 버전, MCP manifest 버전, 배포 상태 |
 | `protected_artifacts` | encryption provider, policy id, Walrus blob id, Sui object id, encrypted metadata |
-| `agent_pricing` | Agent별 실행 call 단가, free quota, volume tier |
+| `agent_pricing` | Agent별 실행 call 단가, budget cap, volume tier |
 | `agent_team_hires` | 팀 단위 고용 상태, pooled quota, Codex installation |
 | `hires` | 단일 Agent 직접 고용 상태, 권한 범위, 만료 시간 |
 | `mcp_call_ledger` | call id, token/call count, latency, team/agent split amount |
+| `user_memwal_results` | Hirer별 encrypted result artifact와 safe summary |
 | `payouts` | Creator 정산 기록 |
 
 보안 원칙:
@@ -113,6 +114,7 @@ supabase db push --db-url "$SUPABASE_DB_URL"
 - `hires`는 고용 상태, Codex installation, access identity를 추적합니다.
 - `agent_sessions`는 Codex에서 여러 Agent를 바꿔 쓰기 위한 active Agent 상태를 저장합니다.
 - `mcp_call_ledger`는 call id, digest, latency, billable amount와 team access/agent execution split을 저장합니다. raw prompt/response는 저장하지 않습니다.
+- `user_memwal_results`는 Agent 실행 결과를 Hirer별 encrypted memWal artifact로 저장합니다. RLS는 owning Hirer만 읽을 수 있게 제한합니다.
 - `payouts`는 creator 정산 단위입니다.
 
 ## 필요한 환경 변수
@@ -123,6 +125,10 @@ supabase db push --db-url "$SUPABASE_DB_URL"
 | --- | --- | --- |
 | `VITE_SUPABASE_URL` | Browser | React 앱에서 Supabase에 접속할 URL |
 | `VITE_SUPABASE_ANON_KEY` | Browser | RLS가 적용되는 public anon key |
+| `VITE_ENOKI_PUBLIC_API_KEY` | Browser | Enoki zkLogin wallet registration에 쓰는 public API key |
+| `VITE_GOOGLE_CLIENT_ID` | Browser | Enoki Google zkLogin OAuth client id |
+| `VITE_SUI_NETWORK` | Browser | Enoki/dApp Kit network. 로컬 데모는 `testnet` |
+| `VITE_SUI_FULLNODE_URL` | Browser | dApp Kit JSON-RPC fullnode endpoint |
 | `SUPABASE_URL` | Server | MCP gateway/worker에서 쓰는 Supabase URL |
 | `SUPABASE_SERVICE_ROLE_KEY` | Server secret | Gateway가 ledger, protected artifact를 기록할 때 쓰는 service role key |
 | `SUPABASE_PROJECT_REF` | Local CLI | `supabase link`에 쓰는 project ref |
@@ -150,8 +156,9 @@ supabase db push --db-url "$SUPABASE_DB_URL"
 4. MCP gateway가 team hire 권한, pooled call budget, agent routing 권한을 검증합니다.
 5. gateway가 platform-managed KMS key로 Walrus ciphertext를 복호화합니다.
 6. gateway가 선택된 Agent의 복호화된 `AGENTS.md`와 `skills/` 폴더를 격리 실행 환경에서 사용해 Agent Harness를 실행합니다.
-7. 결과만 Hirer에게 반환하고, 내부 Skills/Harness는 노출하지 않습니다.
-8. `mcp_call_ledger`에 team access amount와 agent execution amount를 분리한 과금 이벤트를 기록합니다.
+7. 결과는 Hirer에게 반환하면서 동시에 Hirer 전용 encrypted memWal result artifact로 저장합니다.
+8. 내부 Skills/Harness는 노출하지 않고, public record에는 result ciphertext digest와 safe summary만 남깁니다.
+9. `mcp_call_ledger`에 team access amount와 agent execution amount를 분리한 과금 이벤트를 기록합니다.
 
 ## 로컬 Protected Gateway
 
@@ -176,6 +183,7 @@ http://localhost:8787
 | `GET /health` | gateway 상태 확인 |
 | `POST /v1/agents/list` | hired Agent 목록 조회 |
 | `POST /v1/agents/get` | Agent 공개 프로필 조회 |
+| `POST /v1/agents/register` | MCP에서 paid protected Agent 공개 메타데이터와 encrypted artifact 참조 등록 |
 | `POST /v1/sessions/select` | Codex installation별 active Agent 선택 |
 | `POST /v1/sessions/current` | 현재 active Agent 조회 |
 | `POST /v1/agent-call` | protected Agent 호출. example agent는 trusted gateway runner를 사용 |
@@ -183,8 +191,29 @@ http://localhost:8787
 | `POST /v1/sealed-harness/register` | platform encryption/Walrus public metadata 등록 |
 | `POST /v1/sealed-harness/validate` | paid receipt가 있을 때 gateway runner가 protected artifact를 복호화 검증 |
 | `POST /v1/memwal/read` | protected memWal snapshot을 gateway에서만 복호화하고 safe summary 반환 |
+| user memWal result write | `POST /v1/agent-call` 내부에서 call 결과를 Hirer 전용 encrypted memWal result로 저장 |
 
 Codex plugin MCP 서버는 `HIREME_MCP_GATEWAY_URL`로 이 gateway를 먼저 호출합니다. gateway가 꺼져 있으면 로컬 demo fallback을 사용하고, 반드시 gateway를 거치게 만들고 싶으면 `HIREME_MCP_GATEWAY_REQUIRED=1`을 설정합니다.
+
+Creator가 Codex에서 “이 Agent 등록할래”라고 요청하는 경우에는 MCP가 `hireme_register_agent`를 호출합니다. 이 tool은 공개 카드 정보와 가격, 이미 암호화되어 Walrus에 올라간 artifact 참조만 받습니다. `AGENTS.md`, `skills/**` 원문, private prompt, Harness source는 MCP 등록 payload에 넣지 않습니다.
+
+```json
+{
+  "agent_id": "private-code-reviewer",
+  "name": "Private Code Reviewer",
+  "creator": "Han Labs",
+  "category": "Code",
+  "headline": "Reviews migration diffs with a protected rubric.",
+  "public_summary": "A paid protected code review agent. Buyers receive findings and memWal result records, not the creator folder.",
+  "public_mcp_contract": "review_pull_request(diff, repo_context, risk_level)",
+  "skills": ["Code review", "Migration risk", "Test planning"],
+  "protected_asset_classes": ["AGENTS.md", "skills/**", "harness/**"],
+  "price_per_call_usd": 0.005,
+  "walrus_blob_id": "walrus_private_code_reviewer_ciphertext",
+  "sui_object_id": "0x...",
+  "ciphertext_digest": "sha256:..."
+}
+```
 
 검증:
 
@@ -372,7 +401,7 @@ npm run platform:publish:walrus -- examples/aster-x1-launch-agent
 
 ## memWal
 
-memWal은 Agent의 private memory snapshot을 같은 방식으로 보호합니다.
+memWal은 Agent의 private memory snapshot과 Hirer별 Agent call result를 같은 방식으로 보호합니다.
 
 ```bash
 npm run memwal:publish
@@ -380,6 +409,8 @@ npm run memwal:read
 ```
 
 `memwal:publish`는 `examples/memwal/code-reviewer-memory.json`을 platform-managed envelope로 암호화해 Walrus에 올립니다. `memwal:read`는 gateway 경계에서만 복호화하고 `entryCount`, `tags`, `safeCapabilities` 같은 safe summary만 반환합니다. raw memory entry와 private notes는 hirer/Codex 응답으로 반환하지 않습니다.
+
+Agent call 결과는 `server/gateway/memWal.mjs`의 `writeUserMemWalResult`를 통해 Hirer별 ciphertext로 저장됩니다. Public record와 DB에는 raw result 대신 digest, encryption id, safe summary만 남기며, `user_memwal_results` RLS는 owning Hirer만 조회할 수 있게 제한합니다.
 
 참고 문서:
 
@@ -410,7 +441,7 @@ plugins/hireme/
 .agents/plugins/marketplace.json
 ```
 
-로컬 설치 절차:
+개발 중에는 메인 repo를 local marketplace로 바로 설치할 수 있습니다.
 
 ```bash
 codex plugin marketplace add /Users/hanlab/Desktop/HireMe
@@ -419,10 +450,83 @@ codex plugin add hireme --marketplace hireme-local
 
 그 다음 Codex를 새로 시작하고 `/mcp`로 `hireme` 서버가 잡혔는지 확인합니다.
 
+사용자 배포용으로는 메인 repo 전체를 marketplace로 쓰지 않습니다. 웹 앱, gateway, Supabase migration, Walrus scripts, examples를 제외하고 Codex plugin bundle만 별도 repo로 export합니다.
+
+```bash
+npm run plugin:export -- ../hireme-codex-plugin \
+  --repository-url https://github.com/poqopo/hireme-codex-plugin \
+  --gateway-url https://your-gateway.example
+```
+
+생성되는 별도 repo 구조:
+
+```txt
+../hireme-codex-plugin/
+  .agents/plugins/marketplace.json
+  plugins/hireme/
+    .codex-plugin/plugin.json
+    .mcp.json
+    mcp/server.mjs
+    skills/hireme/SKILL.md
+    assets/
+```
+
+사용자는 plugin 전용 repo만 추가합니다.
+
+```bash
+codex plugin marketplace add poqopo/hireme-codex-plugin --ref main
+codex plugin add hireme --marketplace hireme
+```
+
+Plugin으로 배포되는 `hireme` MCP는 Codex 안에서 실행되는 얇은 connector입니다. 실제 protected Agent 실행, OAuth session 검증, entitlement 확인, memWal 저장은 public HireMe gateway가 처리합니다.
+
+OAuth 연결을 테스트하려면 gateway를 HTTP MCP 서버로 등록합니다. 이 경로는 Codex가 `codex mcp login`으로 authorization code + PKCE flow를 실행하고, 이후 `/mcp` 호출에 bearer token을 붙이는 구조입니다. `/oauth/authorize`는 먼저 HireMe 웹 로그인 세션을 확인합니다. 로그인되어 있지 않으면 `/login?return_to=...`로 보내고, 웹에서 Google 로그인 후 다시 Codex consent 화면으로 돌아옵니다.
+
+```bash
+npm run gateway:dev
+codex mcp add hireme --url http://localhost:8787/mcp --oauth-resource http://localhost:8787/mcp
+codex mcp login --scopes hireme:agents,hireme:call,hireme:manage hireme
+```
+
+웹 로그인은 Supabase Auth Google provider를 사용합니다. Supabase Auth redirect URL에는 로컬 기준 `http://localhost:5173/auth/callback`을 허용해야 합니다. gateway 자체 demo approval은 기본적으로 꺼져 있으며, smoke test에서만 `HIREME_OAUTH_ALLOW_DEMO_LOGIN=1`로 켭니다.
+
+OAuth client, Google login session, authorization code, bearer token hash는 Supabase의 `oauth_mcp_*` 테이블에 저장됩니다. 새 migration을 적용해야 gateway 재시작 후에도 Codex bearer token 검증이 유지됩니다.
+
+### Enoki zkLogin address linking
+
+Enoki는 MVP에서 wallet/address linking까지만 사용합니다. Sponsored transaction은 아직 구현하지 않았습니다. 웹 로그인은 Google 버튼 하나로 시작하고, Enoki Google zkLogin session에서 받은 ID token으로 Supabase session을 만든 뒤 Sui address를 profile과 gateway session에 같이 연결합니다.
+
+1. Enoki Portal에서 Google provider와 public API key를 설정합니다.
+2. Google OAuth redirect URI에 로컬 callback을 추가합니다.
+
+```txt
+http://localhost:5173/auth/enoki/callback
+```
+
+3. Browser env를 채웁니다.
+
+```env
+VITE_ENOKI_PUBLIC_API_KEY=enoki_public_...
+VITE_GOOGLE_CLIENT_ID=...
+VITE_SUI_NETWORK=testnet
+VITE_SUI_FULLNODE_URL=https://fullnode.testnet.sui.io:443
+```
+
+4. 새 wallet/profile migration을 적용합니다.
+
+```bash
+supabase db push
+```
+
+5. 웹에서 Google 로그인을 누릅니다.
+
+성공하면 Enoki Google zkLogin address가 Supabase `profiles.sui_address`, `oauth_mcp_*` session/token metadata, Try/Hire entitlement의 `owner_sui_address`에 연결됩니다. Supabase Google provider와 Enoki `VITE_GOOGLE_CLIENT_ID`는 같은 Google OAuth client를 사용해야 ID token 검증이 통과합니다. Codex에서는 `hireme_whoami`로 `suiAddress`를 확인할 수 있습니다. 권한 판단의 안정성을 위해 MVP authorization key는 계속 email 기반 `hirer_id`이고, Sui address는 결제/receipt 연결용 보조 식별자로 저장합니다. 기존 계정에 Sui address가 비어 있으면 `/my` 페이지에서 fallback 연결 버튼을 사용할 수 있습니다.
+
 현재 HireMe plugin MCP 서버가 제공하는 tool:
 
 | Tool | Purpose |
 | --- | --- |
+| `hireme_whoami` | Codex가 현재 어떤 HireMe hirer identity로 연결되어 있는지 확인. token/secret은 반환하지 않음 |
 | `hireme_request` | 자연어 요청을 agent/task/receipt로 라우팅해서 protected gateway 호출 |
 | `hireme_list_hired_agents` | 현재 사용자가 고용한 Agent 목록, 가격, memWal 보호 요약 조회 |
 | `hireme_get_agent` | 특정 Agent의 공개 프로필과 MCP 가격 조회 |
@@ -431,6 +535,7 @@ codex plugin add hireme --marketplace hireme-local
 | `hireme_call_agent` | 명시된 Agent 또는 active Agent를 호출하고 ledger 이벤트 반환. protected example agent는 trusted gateway runner 사용 |
 | `hireme_prepare_sealed_harness_upload` | Creator의 `AGENTS.md` + `skills/` 폴더를 platform encryption + Walrus로 올리기 위한 등록 경계 안내 |
 | `hireme_register_sealed_harness` | 암호화되어 Walrus에 올라간 Harness metadata만 등록 |
+| `hireme_register_agent` | 공개 Agent 프로필, `$0.005/call` 같은 call 단가, encrypted Walrus artifact 참조를 gateway/Supabase에 등록 |
 | `hireme_validate_sealed_harness` | paid receipt가 있을 때 gateway runner를 통해 protected example artifact를 검증 |
 | `hireme_read_memwal` | gateway를 통해 protected memWal snapshot을 읽고 safe summary만 반환 |
 | `hireme_connection_help` | 플러그인 설치와 Agent 전환 안내 반환 |
@@ -440,6 +545,7 @@ codex plugin add hireme --marketplace hireme-local
 Agent 전환 방식:
 
 ```txt
+hireme_whoami()
 hireme_request(request: "example-landing-designer에게 핸드폰 상세 랜딩페이지 하나 만들어달라고 해")
 hireme_list_hired_agents()
 hireme_select_agent(agent_id: "codex-builder")

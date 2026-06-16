@@ -17,7 +17,7 @@ const protocolIntelligenceTeam: AgentTeam = {
   owner: "Han Labs",
   headline: "Research, evidence, and usage-ledger agents for Sui and Walrus teams.",
   publicSummary:
-    "A coordinated team for protocol research and metered data exports. Buyers hire the team pass, then route individual MCP calls to the best specialist.",
+    "A coordinated catalog for protocol research and metered data exports. Buyers pay per routed MCP call to the selected Agent.",
   agentCount: 3,
   accent: "from-[#665efd] to-[#70e1c8]",
   billing: {
@@ -25,7 +25,7 @@ const protocolIntelligenceTeam: AgentTeam = {
     basePriceUsd: 0.049,
     includedCalls: 40,
     overagePricePerCallUsd: 0.014,
-    note: "Team pass includes pooled calls. Overage is charged by the executing agent ledger.",
+    note: "Agent calls are charged by the executing Agent ledger.",
   },
 };
 
@@ -36,7 +36,7 @@ const buildOpsTeam: AgentTeam = {
   owner: "Build Guild",
   headline: "Implementation, routing, and operations agents for product teams.",
   publicSummary:
-    "A builder-facing bundle that combines repo implementation, operational routing, and spend control behind one hire receipt.",
+    "A builder-facing catalog that combines repo implementation, operational routing, and spend control behind Agent-level hires.",
   agentCount: 3,
   accent: "from-[#533afd] to-[#6ee7f9]",
   billing: {
@@ -44,7 +44,7 @@ const buildOpsTeam: AgentTeam = {
     basePriceUsd: 0.058,
     includedCalls: 25,
     overagePricePerCallUsd: 0.018,
-    note: "One team hire receipt unlocks the router and specialist agents. Codex still calls one agent at a time.",
+    note: "Each Agent is hired and metered independently. Codex calls one Agent at a time.",
   },
 };
 
@@ -55,7 +55,7 @@ const launchSafetyTeam: AgentTeam = {
   owner: "Go To Market AI",
   headline: "Launch planning with safety checks before public release.",
   publicSummary:
-    "Growth output and eval checks are packaged as a team so buyers can plan, test, and ship from one MCP surface.",
+    "Growth output and eval checks are packaged as Agent-level MCP capabilities so buyers can plan, test, and ship from one marketplace.",
   agentCount: 3,
   accent: "from-[#ea2261] to-[#f5a15d]",
   billing: {
@@ -63,116 +63,11 @@ const launchSafetyTeam: AgentTeam = {
     basePriceUsd: 0.063,
     includedCalls: 20,
     overagePricePerCallUsd: 0.021,
-    note: "Team bundle covers launch drafts and preflight evals. High-cost eval calls remain visible in the ledger.",
-  },
-};
-
-const openAgentTeam: AgentTeam = {
-  id: "open-agent-starters",
-  name: "Open Agent Starters",
-  handle: "@teams/open-agent-starters",
-  owner: "Open Agents Guild",
-  headline: "Free local agents for lightweight review and implementation checks.",
-  publicSummary:
-    "A free starter team for public, local-first agents. These agents are meant to install into the buyer's existing coding assistant without protected gateway metering.",
-  agentCount: 2,
-  accent: "from-[#0d253d] to-[#70e1c8]",
-  billing: {
-    unit: "per_agent",
-    basePriceUsd: 0,
-    includedCalls: 0,
-    overagePricePerCallUsd: 0,
-    note: "Free local agents do not use protected gateway billing. Buyers run them with their existing AI subscription.",
+    note: "Launch drafts and preflight evals are priced per executing Agent call.",
   },
 };
 
 export const agents: Agent[] = [
-  {
-    id: "landing-qa-lite",
-    name: "Landing QA Lite",
-    handle: "@open/landing-qa-lite",
-    creator: "Open Agents Guild",
-    team: openAgentTeam,
-    teamRole: "Free local reviewer",
-    listedIndividually: true,
-    category: "Growth",
-    status: "Available",
-    headline: "Checks landing pages for structure, mobile readability, and missing conversion basics.",
-    publicSummary:
-      "A free local checklist agent for landing page reviews. It is useful for basic polish checks before hiring a protected specialist.",
-    publicContract: "landing_page_check(url_or_files, device_scope, severity_floor)",
-    memwalPolicy: "Open checklist; no protected memory",
-    skills: ["Landing QA", "Mobile review", "Conversion basics"],
-    protectedAssets: ["none"],
-    sealedHarness: {
-      network: "walrus-testnet",
-      sealPolicyId: "public:agent:landing-qa-lite",
-      walrusBlobId: "public_landing_qa_lite_manifest",
-      suiObjectId: "public-local-agent",
-      ciphertextDigest: "sha256:public-open-agent",
-      visibility:
-        "Open local agent. No protected creator bundle is required for the free tier.",
-    },
-    pricePerCallUsd: 0,
-    freeCalls: 0,
-    rating: 4.3,
-    calls: 6410,
-    latencyMs: 520,
-    avgInputTokens: 540,
-    avgOutputTokens: 360,
-    resultPreview: {
-      title: "Landing page QA checklist",
-      summary:
-        "Returns mobile layout issues, missing proof points, CTA clarity notes, and quick fixes.",
-      sample:
-        "Homepage QA notes with priority labels, mobile viewport concerns, and copy gaps.",
-    },
-    mcpPackage: "mcp://hireme/landing-qa-lite",
-    accent: "from-[#0d253d] to-[#70e1c8]",
-  },
-  {
-    id: "readme-polisher",
-    name: "README Polisher",
-    handle: "@open/readme-polisher",
-    creator: "Open Agents Guild",
-    team: openAgentTeam,
-    teamRole: "Documentation helper",
-    listedIndividually: false,
-    category: "Code",
-    status: "Available",
-    headline: "Improves setup docs, quickstart flow, and command examples for small repos.",
-    publicSummary:
-      "A free local documentation helper that stays inside the Open Agent Starters team.",
-    publicContract: "polish_readme(files, audience, command_style)",
-    memwalPolicy: "Open checklist; no protected memory",
-    skills: ["Docs polish", "Quickstarts", "Command review"],
-    protectedAssets: ["none"],
-    sealedHarness: {
-      network: "walrus-testnet",
-      sealPolicyId: "public:agent:readme-polisher",
-      walrusBlobId: "public_readme_polisher_manifest",
-      suiObjectId: "public-local-agent",
-      ciphertextDigest: "sha256:public-readme-polisher",
-      visibility:
-        "Open local agent. No protected creator bundle is required for the free tier.",
-    },
-    pricePerCallUsd: 0,
-    freeCalls: 0,
-    rating: 4.1,
-    calls: 2810,
-    latencyMs: 480,
-    avgInputTokens: 620,
-    avgOutputTokens: 410,
-    resultPreview: {
-      title: "README polish checklist",
-      summary:
-        "Returns clearer setup steps, missing prerequisites, and command wording fixes.",
-      sample:
-        "Quickstart rewrite notes with install, env, and local run command improvements.",
-    },
-    mcpPackage: "mcp://hireme/readme-polisher",
-    accent: "from-[#0d253d] to-[#70e1c8]",
-  },
   {
     id: "walrus-researcher",
     name: "Walrus Researcher",
@@ -225,9 +120,9 @@ export const agents: Agent[] = [
     listedIndividually: false,
     category: "Research",
     status: "Available",
-    headline: "Collects relevant protocol sources and prepares citation candidates for the team.",
+    headline: "Collects relevant protocol sources and prepares citation candidates.",
     publicSummary:
-      "A team-only research support agent that gathers sources before the lead researcher writes a brief.",
+      "A research support agent that gathers sources before a protocol brief is written.",
     publicContract: "source_scan(topic, source_policy, max_candidates)",
     memwalPolicy: "Protected source ranking weights and citation heuristics",
     skills: ["Source discovery", "Citation prep", "Protocol docs"],
@@ -311,7 +206,7 @@ export const agents: Agent[] = [
     status: "Available",
     headline: "Plans Supabase schema changes, RLS updates, and migration verification steps.",
     publicSummary:
-      "A database-focused agent in the Build Ops team that can also be hired directly for migration work.",
+      "A database-focused agent that can be hired directly for migration work.",
     publicContract: "schema_change_plan(goal, current_schema, safety_level)",
     memwalPolicy: "Protected migration recipes and RLS review heuristics",
     skills: ["Supabase", "RLS", "Migrations"],
@@ -479,7 +374,7 @@ export const agents: Agent[] = [
     status: "Available",
     headline: "Drafts offer-aware copy variants for landing pages, emails, and launch ads.",
     publicSummary:
-      "A team-only copy specialist that supports Launch Operator with protected positioning memory.",
+      "A copy specialist that drafts from protected positioning memory.",
     publicContract: "copy_variants(offer, audience, channel, tone)",
     memwalPolicy: "Protected positioning library and copy performance memory",
     skills: ["Landing copy", "Email copy", "Offer framing"],

@@ -98,6 +98,41 @@ const requests = [
       },
     },
   },
+  {
+    jsonrpc: "2.0",
+    id: 9,
+    method: "tools/call",
+    params: {
+      name: "hireme_register_agent",
+      arguments: {
+        agent_id: "plugin-local-registrar",
+        name: "Plugin Local Registrar",
+        creator: "HireMe Smoke",
+        category: "Code",
+        headline: "Registers a protected Agent in local MCP fallback mode.",
+        public_summary:
+          "A plugin-only smoke registration that does not expose creator plaintext.",
+        public_mcp_contract: "plugin_local_register(task)",
+        skills: ["Registration", "Local fallback", "MCP metadata"],
+        protected_asset_classes: ["AGENTS.md", "skills/**", "harness/**"],
+        price_per_call_usd: 0.005,
+        walrus_blob_id: "walrus_plugin_local_registrar_ciphertext",
+        sui_object_id:
+          "0xcb8c3f72c5b1459b830f4efb7f8fa3451ac682a66d9848f71149af79aca721ab",
+        ciphertext_digest:
+          "sha256:8bf5774be175515698a2842fddc3fbda8176272ccbb03a341168fa998245c3af",
+      },
+    },
+  },
+  {
+    jsonrpc: "2.0",
+    id: 10,
+    method: "tools/call",
+    params: {
+      name: "hireme_whoami",
+      arguments: {},
+    },
+  },
 ];
 
 let stdout = "";
@@ -127,6 +162,12 @@ const validateResult = responses.find((response) => response.id === 5);
 const naturalResult = responses.find((response) => response.id === 6);
 const walrusResult = responses.find((response) => response.id === 7);
 const memwalResult = responses.find((response) => response.id === 8);
+const registerResult = responses.find((response) => response.id === 9);
+const whoamiResult = responses.find((response) => response.id === 10);
+
+if (!toolList?.result?.tools?.some((tool) => tool.name === "hireme_whoami")) {
+  throw new Error("hireme_whoami was not advertised by tools/list");
+}
 
 if (!toolList?.result?.tools?.some((tool) => tool.name === "hireme_call_agent")) {
   throw new Error("hireme_call_agent was not advertised by tools/list");
@@ -134,6 +175,10 @@ if (!toolList?.result?.tools?.some((tool) => tool.name === "hireme_call_agent"))
 
 if (!toolList?.result?.tools?.some((tool) => tool.name === "hireme_request")) {
   throw new Error("hireme_request was not advertised by tools/list");
+}
+
+if (!toolList?.result?.tools?.some((tool) => tool.name === "hireme_list_my_agents")) {
+  throw new Error("hireme_list_my_agents was not advertised by tools/list");
 }
 
 if (
@@ -154,6 +199,10 @@ if (
 
 if (!toolList?.result?.tools?.some((tool) => tool.name === "hireme_read_memwal")) {
   throw new Error("hireme_read_memwal was not advertised by tools/list");
+}
+
+if (!toolList?.result?.tools?.some((tool) => tool.name === "hireme_register_agent")) {
+  throw new Error("hireme_register_agent was not advertised by tools/list");
 }
 
 if (!callResult?.result?.content?.[0]?.text?.includes('"agent"')) {
@@ -196,6 +245,25 @@ if (
   )
 ) {
   throw new Error("hireme_read_memwal did not preserve gateway-only read boundary");
+}
+
+if (
+  !registerResult?.result?.content?.[0]?.text?.includes(
+    '"registrationMode": "mcp_local_fallback"',
+  ) ||
+  !registerResult?.result?.content?.[0]?.text?.includes('"display": "$0.005/call"')
+) {
+  throw new Error("hireme_register_agent did not register through local fallback");
+}
+
+if (
+  !whoamiResult?.result?.content?.[0]?.text?.includes(
+    '"mode": "stdio_plugin_local"',
+  ) ||
+  !whoamiResult?.result?.content?.[0]?.text?.includes('"hirerId": "local-hirer"') ||
+  !whoamiResult?.result?.content?.[0]?.text?.includes('"tokenReturned": false')
+) {
+  throw new Error("hireme_whoami did not return the local safe identity");
 }
 
 console.log("HireMe plugin MCP smoke test passed.");

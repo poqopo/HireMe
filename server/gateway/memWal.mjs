@@ -152,6 +152,137 @@ export async function readMemWalSnapshot({
   };
 }
 
+export async function writeUserMemWalResult({
+  agentId,
+  hirerId,
+  callId,
+  requestDigest,
+  responseDigest,
+  hireReceiptObjectId,
+  result,
+  jsonOutput,
+  outDir = join(defaultOutDir, "results"),
+}) {
+  const safeHirerId = safePathSegment(hirerId || "local-hirer");
+  const resultDir = join(outDir, safeHirerId);
+  const encryptionId = `hireme::user-result::${safeHirerId}::${callId}`;
+  const policyId = `platform:memwal-result:${safeHirerId}:${agentId}`;
+  const createdAt = new Date().toISOString();
+  const plaintextObject = {
+    format: "hireme.user-memwal-result.v1",
+    kind: "user_result",
+    agentId,
+    hirerId: safeHirerId,
+    callId,
+    hireReceiptObjectId,
+    requestDigest,
+    responseDigest,
+    createdAt,
+    result,
+    jsonOutput,
+  };
+  const plaintext = Buffer.from(JSON.stringify(plaintextObject), "utf8");
+  const { encryptedBytes, sealMetadata } = await encryptWithSealEnvelope({
+    plaintext,
+    agentId,
+    encryptionId,
+    sealPolicyId: policyId,
+  });
+
+  assertCiphertextDoesNotContainPlaintext({
+    encryptedBytes,
+    blockedPlaintextMarkers: extractResultLeakMarkers({ result, jsonOutput }),
+  });
+
+  await mkdir(resultDir, { recursive: true });
+  const localCiphertextPath = join(resultDir, `${callId}.memwal-result.json`);
+  const recordPath = join(resultDir, `${callId}.memwal-result-record.json`);
+  await writeFile(localCiphertextPath, encryptedBytes);
+
+  const record = {
+    format: "hireme.user-memwal-result-record.v1",
+    kind: "user_result",
+    agentId,
+    hirerId: safeHirerId,
+    callId,
+    storageProvider: "local-file",
+    encryptionProvider: sealMetadata.provider,
+    platformKmsKeyId: sealMetadata.kmsKeyId,
+    encryptionId,
+    policyId,
+    ciphertextFormat: "hireme.platform-ciphertext-envelope.v1",
+    ciphertextDigest: `sha256:${sha256Hex(encryptedBytes)}`,
+    ciphertextSizeBytes: encryptedBytes.length,
+    requestDigest,
+    responseDigest,
+    localCiphertextPath,
+    visibility: "hirer-only",
+    plaintextStoredInDb: false,
+    plaintextReturnedInRecord: false,
+    creatorCanReadPlaintext: false,
+    publicCanReadPlaintext: false,
+    safeSummary: summarizeUserResult({ result, jsonOutput }),
+    createdAt,
+  };
+
+  await writeFile(recordPath, JSON.stringify(record, null, 2));
+
+  return {
+    status: "stored",
+    recordPath,
+    localCiphertextPath,
+    publicRecord: record,
+  };
+}
+
+export async function readUserMemWalResult({
+  recordPath,
+  requesterId,
+  hireReceiptObjectId,
+  runnerIdentity = process.env.HIREME_GATEWAY_RUNNER_ID || defaultRunnerIdentity,
+}) {
+  const publicRecord = JSON.parse(await readFile(resolve(recordPath), "utf8"));
+  const safeRequesterId = safePathSegment(requesterId || "");
+
+  if (!safeRequesterId || safeRequesterId !== publicRecord.hirerId) {
+    throw userError("memWal result is visible only to the owning hirer");
+  }
+
+  const { encryptedBytes, ciphertextSource } = await loadMemWalCiphertext(publicRecord);
+  const ciphertextDigest = `sha256:${sha256Hex(encryptedBytes)}`;
+
+  if (ciphertextDigest !== publicRecord.ciphertextDigest) {
+    throw userError("memWal result ciphertext digest mismatch; refusing to decrypt");
+  }
+
+  const envelopeMetadata = readSealEnvelopeMetadata(encryptedBytes);
+  const approval = approveSealAccess({
+    agentId: publicRecord.agentId,
+    hireReceiptObjectId,
+    runnerIdentity,
+    sealEncryptionId: publicRecord.encryptionId,
+    sealPolicyId: publicRecord.policyId,
+    sealMetadata: envelopeMetadata,
+  });
+  const plaintext = decryptSealEnvelope({
+    encryptedBytes,
+    encryptionId: publicRecord.encryptionId,
+    approval,
+  });
+
+  return {
+    status: "validated",
+    agentId: publicRecord.agentId,
+    hirerId: publicRecord.hirerId,
+    callId: publicRecord.callId,
+    kind: "user_result",
+    userOnly: true,
+    ciphertextSource,
+    result: JSON.parse(plaintext.toString("utf8")),
+    approval,
+  };
+}
+
 async function loadMemWalCiphertext(publicRecord) {
   if (
     publicRecord.storageProvider === "walrus" &&
@@ -207,6 +338,15 @@ function summarizeMemory(memory) {
   };
 }
 
+function summarizeUserResult({ result, jsonOutput }) {
+  return {
+    type: jsonOutput?.type || result?.type || "protected_agent_guidance",
+    resultKeys: result && typeof result === "object" ? Object.keys(result).slice(0, 12) : [],
+    jsonOutputSchema: jsonOutput?.schema || null,
+    rawResultReturnedInRecord: false,
+  };
+}
+
 function extractMemoryLeakMarkers(memory) {
   const markers = [];
   if (memory.title) markers.push(String(memory.title));
@@ -215,6 +355,23 @@ function extractMemoryLeakMarkers(memory) {
     if (entry.text) markers.push(String(entry.text));
   }
   return markers.filter((marker) => marker.length >= 16);
+}
+
+function extractResultLeakMarkers({ result, jsonOutput }) {
+  const markers = [];
+  const summary = result?.summary || jsonOutput?.payload?.summary;
+  const instruction = jsonOutput?.localCodex?.instruction;
+  if (summary) markers.push(String(summary));
+  if (instruction) markers.push(String(instruction));
+  return markers.filter((marker) => marker.length >= 16);
+}
+
+function safePathSegment(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9_.-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80);
 }
 
 function sha256Hex(value) {

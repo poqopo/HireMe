@@ -203,9 +203,32 @@ for (const agent of agents) {
   seededAgents += 1;
 }
 
+await archiveStaleDemoRows();
+
 console.log(
   `Supabase demo seed complete: ${teamIds.size} teams, ${seededAgents} agents, ${creatorIds.size} creators.`,
 );
+
+async function archiveStaleDemoRows() {
+  const staleAgentSlugs = ["landing-qa-lite", "readme-polisher"];
+  const staleTeamSlugs = ["open-agent-starters"];
+
+  await must(
+    admin
+      .from("agents")
+      .update({ status: "archived", listed_individually: false })
+      .in("slug", staleAgentSlugs),
+    "archive stale free demo agents",
+  );
+
+  await must(
+    admin
+      .from("agent_teams")
+      .update({ status: "archived" })
+      .in("slug", staleTeamSlugs),
+    "archive stale free demo teams",
+  );
+}
 
 async function findOrCreateCreatorUser(creator) {
   const email = `${slugify(creator)}@hireme.demo`;

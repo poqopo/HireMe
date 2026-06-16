@@ -88,7 +88,7 @@ function mapMarketplaceCardToAgent(row: MarketplaceCardRow): Agent {
   const avgOutputTokens = estimateOutputTokens(row, skills, latencyMs);
 
   return {
-    id: row.id,
+    id: slug,
     name: row.name,
     handle: row.handle,
     creator: row.creator_name || "Unknown creator",

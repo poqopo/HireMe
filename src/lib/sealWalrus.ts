@@ -1,8 +1,13 @@
 export type HarnessUploadDraft = {
   agentName: string;
+  description?: string;
+  modelId?: string;
+  modelLabel?: string;
   publicCapability: string;
   creatorAddress: string;
   policyRule: string;
+  basePricePerCallUsd?: number;
+  creatorFeePerCallUsd?: number;
   pricePerCallUsd: number;
   epochs: number;
   files?: File[];
@@ -11,6 +16,9 @@ export type HarnessUploadDraft = {
 export type SealedHarnessRecord = {
   id: string;
   agentName: string;
+  description?: string;
+  modelId?: string;
+  modelLabel?: string;
   network: "walrus-testnet";
   sealProvider: string;
   platformKmsKeyId: string;
@@ -27,6 +35,8 @@ export type SealedHarnessRecord = {
   fileCount: number;
   entryPreview: string[];
   epochs: number;
+  basePricePerCallUsd?: number;
+  creatorFeePerCallUsd?: number;
   pricePerCallUsd: number;
   policyRule: string;
   createdAt: string;
@@ -52,9 +62,14 @@ export async function createLocalSealedHarnessRecord(
 ): Promise<SealedHarnessRecord> {
   const fallbackPayload = JSON.stringify({
     agentName: draft.agentName,
+    description: draft.description,
+    modelId: draft.modelId,
+    modelLabel: draft.modelLabel,
     publicCapability: draft.publicCapability,
     creatorAddress: draft.creatorAddress,
     policyRule: draft.policyRule,
+    basePricePerCallUsd: draft.basePricePerCallUsd,
+    creatorFeePerCallUsd: draft.creatorFeePerCallUsd,
     createdAt: new Date().toISOString(),
   });
   const files = draft.files ?? [];
@@ -75,6 +90,9 @@ export async function createLocalSealedHarnessRecord(
   return {
     id: `sealed_${Date.now().toString(36)}`,
     agentName: draft.agentName,
+    description: draft.description,
+    modelId: draft.modelId,
+    modelLabel: draft.modelLabel,
     network: "walrus-testnet",
     sealProvider: "platform-managed-envelope",
     platformKmsKeyId: "platform:local-dev-key",
@@ -95,6 +113,8 @@ export async function createLocalSealedHarnessRecord(
         ? fileDigests.slice(0, 5).map((item) => item.path)
         : ["local-harness-preview.json"],
     epochs: draft.epochs,
+    basePricePerCallUsd: draft.basePricePerCallUsd,
+    creatorFeePerCallUsd: draft.creatorFeePerCallUsd,
     pricePerCallUsd: draft.pricePerCallUsd,
     policyRule: draft.policyRule,
     createdAt: new Date().toISOString(),

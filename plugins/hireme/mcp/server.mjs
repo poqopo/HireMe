@@ -244,8 +244,22 @@ const gatewayUrl =
 const gatewayApiKey = process.env.HIREME_GATEWAY_API_KEY || "";
 const codexInstallationId =
   process.env.HIREME_CODEX_INSTALLATION_ID || "local-codex";
+const defaultHirerId =
+  process.env.HIREME_HIRER_ID ||
+  process.env.HIREME_WALLET_ADDRESS ||
+  "local-hirer";
 
 const inputSchemas = {
+  hireme_whoami: {
+    type: "object",
+    properties: {
+      hirer_id: {
+        type: "string",
+        description:
+          "Optional hirer identity override. Defaults to HIREME_HIRER_ID or local-hirer.",
+      },
+    },
+  },
   hireme_request: {
     type: "object",
     properties: {
@@ -271,6 +285,11 @@ const inputSchemas = {
         description:
           "Optional paid hire receipt. Local protected example agents default to hire_receipt_local_paid_demo.",
       },
+      hirer_id: {
+        type: "string",
+        description:
+          "Optional hirer identity. Defaults to HIREME_HIRER_ID or local-hirer.",
+      },
     },
     required: ["request"],
   },
@@ -282,6 +301,16 @@ const inputSchemas = {
         enum: ["Research", "Code", "Data", "Security", "Growth", "Ops"],
       },
       query: { type: "string" },
+    },
+  },
+  hireme_list_my_agents: {
+    type: "object",
+    properties: {
+      hirer_id: {
+        type: "string",
+        description:
+          "Optional hirer identity. Defaults to HIREME_HIRER_ID or local-hirer.",
+      },
     },
   },
   hireme_get_agent: {
@@ -335,6 +364,11 @@ const inputSchemas = {
         type: "string",
         description:
           "Optional paid hire receipt object id for protected example agents.",
+      },
+      hirer_id: {
+        type: "string",
+        description:
+          "Optional hirer identity. Defaults to HIREME_HIRER_ID or local-hirer.",
       },
     },
     required: ["task"],
@@ -421,6 +455,98 @@ const inputSchemas = {
       "price_per_call_usd",
     ],
   },
+  hireme_register_agent: {
+    type: "object",
+    properties: {
+      agent_id: {
+        type: "string",
+        description: "Stable marketplace slug, for example private-code-reviewer.",
+      },
+      name: { type: "string" },
+      handle: {
+        type: "string",
+        description: "Optional public handle. Defaults to @agents/<agent_id>.",
+      },
+      creator: {
+        type: "string",
+        description: "Creator display name used for the public marketplace card.",
+      },
+      category: {
+        type: "string",
+        enum: ["Research", "Code", "Data", "Security", "Growth", "Ops"],
+      },
+      status: {
+        type: "string",
+        enum: ["Available", "Private Beta", "Busy"],
+      },
+      headline: {
+        type: "string",
+        description: "Short public card headline.",
+      },
+      public_summary: {
+        type: "string",
+        description: "Public description. Do not include private prompts or AGENTS.md content.",
+      },
+      public_mcp_contract: {
+        type: "string",
+        description: "Public callable contract, for example review_pull_request(diff, repo_context).",
+      },
+      skills: {
+        type: "array",
+        items: { type: "string" },
+        description: "Public skill labels only, not skill source files.",
+      },
+      protected_asset_classes: {
+        type: "array",
+        items: { type: "string" },
+        description: "Public labels such as AGENTS.md, skills/**, harness/**.",
+      },
+      memwal_policy: { type: "string" },
+      team_id: { type: "string" },
+      team_name: { type: "string" },
+      team_handle: { type: "string" },
+      team_role: { type: "string" },
+      listed_individually: { type: "boolean" },
+      price_per_call_usd: {
+        type: "number",
+        minimum: 0,
+        description: "MVP per-call price, displayed as $0.005/call.",
+      },
+      max_budget_calls: { type: "integer", minimum: 1 },
+      encryption_provider: { type: "string" },
+      platform_kms_key_id: { type: "string" },
+      ciphertext_format: { type: "string" },
+      policy_id: { type: "string" },
+      seal_policy_id: { type: "string" },
+      seal_package_id: { type: "string" },
+      seal_approve_target: { type: "string" },
+      seal_encryption_id: { type: "string" },
+      walrus_blob_id: { type: "string" },
+      sui_object_id: { type: "string" },
+      ciphertext_digest: { type: "string" },
+      folder_manifest_digest: { type: "string" },
+      storage_network: {
+        type: "string",
+        enum: ["walrus-testnet", "walrus-mainnet"],
+      },
+      release_notes: { type: "string" },
+      version_number: { type: "integer", minimum: 1 },
+    },
+    required: [
+      "agent_id",
+      "name",
+      "creator",
+      "category",
+      "headline",
+      "public_summary",
+      "public_mcp_contract",
+      "skills",
+      "price_per_call_usd",
+      "walrus_blob_id",
+      "sui_object_id",
+      "ciphertext_digest",
+    ],
+  },
   hireme_validate_sealed_harness: {
     type: "object",
     properties: {
@@ -454,6 +580,13 @@ const inputSchemas = {
 
 const tools = [
   {
+    name: "hireme_whoami",
+    title: "Show connected HireMe identity",
+    description:
+      "Show which HireMe hirer identity this Codex MCP connection is using for Agent access.",
+    inputSchema: inputSchemas.hireme_whoami,
+  },
+  {
     name: "hireme_request",
     title: "Route a plain-language HireMe request",
     description:
@@ -466,6 +599,13 @@ const tools = [
     description:
       "List the current user's hired protected agents with public skills, pricing, and memWal protection summaries.",
     inputSchema: inputSchemas.hireme_list_hired_agents,
+  },
+  {
+    name: "hireme_list_my_agents",
+    title: "List my usable HireMe agents",
+    description:
+      "List agents this hirer can actually call, based on Try/Hire entitlements stored by the gateway.",
+    inputSchema: inputSchemas.hireme_list_my_agents,
   },
   {
     name: "hireme_get_agent",
@@ -521,6 +661,13 @@ const tools = [
     description:
       "Register only public metadata for an encrypted Harness already protected with platform-managed encryption and stored on Walrus.",
     inputSchema: inputSchemas.hireme_register_sealed_harness,
+  },
+  {
+    name: "hireme_register_agent",
+    title: "Register a paid protected HireMe agent",
+    description:
+      "Register a creator Agent profile plus encrypted Walrus artifact metadata through the gateway. Do not pass plaintext AGENTS.md, skills source, private prompts, or Harness source.",
+    inputSchema: inputSchemas.hireme_register_agent,
   },
   {
     name: "hireme_validate_sealed_harness",
@@ -688,9 +835,58 @@ function listAgents(args = {}) {
   });
 }
 
+function localWhoami(args = {}) {
+  const hirerId = args.hirer_id || defaultHirerId;
+  return {
+    gatewayCall: false,
+    auth: {
+      mode: "stdio_plugin_local",
+      authenticated: false,
+      reason:
+        "This stdio plugin has no OAuth user session. Start the gateway or use the HTTP MCP OAuth server for Google-backed identity.",
+      apiKeyReturned: false,
+      tokenReturned: false,
+    },
+    user: {
+      hirerId,
+      source:
+        process.env.HIREME_HIRER_ID
+          ? "HIREME_HIRER_ID"
+          : process.env.HIREME_WALLET_ADDRESS
+            ? "HIREME_WALLET_ADDRESS"
+            : "local-default",
+    },
+    codex: {
+      mcpServer: "hireme",
+      transport: "stdio",
+      installationId: codexInstallationId,
+      activeAgentId,
+    },
+    gateway: {
+      configuredUrl: gatewayUrl,
+      connected: false,
+      retry: "npm run gateway:dev",
+    },
+  };
+}
+
 async function callTool(name, args = {}) {
   switch (name) {
+    case "hireme_whoami": {
+      const gateway = await callGateway("/v1/whoami", {
+        hirer_id: args.hirer_id || defaultHirerId,
+        codex_installation_id: codexInstallationId,
+        gateway_url: gatewayUrl,
+      });
+      if (gateway) return textResult(gateway);
+      return textResult(localWhoami(args));
+    }
     case "hireme_request": {
+      const registrationRequest = routeRegistrationNaturalRequest(args.request);
+      if (registrationRequest) {
+        return textResult(registrationRequest);
+      }
+
       const walrusRequest = routeWalrusNaturalRequest(
         args.request,
         args.agent_id,
@@ -723,6 +919,7 @@ async function callTool(name, args = {}) {
         agent_id: routed.agentId,
         task: routed.task,
         budget_calls: args.budget_calls || 1,
+        hirer_id: args.hirer_id || defaultHirerId,
         hire_receipt_object_id:
           args.hire_receipt_object_id || defaultHireReceiptFor(routed.agentId),
       };
@@ -752,6 +949,20 @@ async function callTool(name, args = {}) {
       const gateway = await callGateway("/v1/agents/list", args);
       if (gateway) return textResult(gateway);
       return listAgents(args);
+    }
+    case "hireme_list_my_agents": {
+      const gateway = await callGateway("/v1/my/agents", {
+        hirer_id: args.hirer_id || defaultHirerId,
+        ...args,
+      });
+      if (gateway) return textResult(gateway);
+      return textResult({
+        status: "gateway_required",
+        hirerId: args.hirer_id || defaultHirerId,
+        reason:
+          "My Agent entitlements are stored in the HireMe gateway/Supabase, not in the local Codex plugin.",
+        runGateway: "npm run gateway:dev",
+      });
     }
     case "hireme_get_agent": {
       const gateway = await callGateway("/v1/agents/get", args);
@@ -786,6 +997,7 @@ async function callTool(name, args = {}) {
     case "hireme_call_agent": {
       const gateway = await callGateway("/v1/agent-call", {
         agent_id: args.agent_id || activeAgentId,
+        hirer_id: args.hirer_id || defaultHirerId,
         ...args,
       });
       if (gateway) {
@@ -995,6 +1207,13 @@ async function callTool(name, args = {}) {
         returnedCreatorSecrets: false,
       });
     }
+    case "hireme_register_agent": {
+      const gateway = await callGateway("/v1/agents/register", args, {
+        timeoutMs: Number(process.env.HIREME_MCP_REGISTER_TIMEOUT_MS || 10_000),
+      });
+      if (gateway) return textResult(gateway);
+      return textResult(registerAgentLocally(args));
+    }
     case "hireme_validate_sealed_harness": {
       const agentId = args.agent_id || "example-code-reviewer";
       const payload = {
@@ -1024,18 +1243,272 @@ async function callTool(name, args = {}) {
         verify: "Start a new Codex session and run /mcp.",
         naturalRequests:
           "For plain user wording, call hireme_request. Example: request='example-landing-designer에게 핸드폰 상세 랜딩페이지 하나 만들어달라고 해'.",
+        identity:
+          "Use hireme_whoami to confirm which HireMe hirer identity Codex is using.",
         walrusAgent:
           "For the plaintext Walrus storage demo, call hireme_call_walrus_agent with agent_id='wal-test1' or a direct blob_id. The gateway reads Supabase and Walrus; Codex does not download the creator folder.",
         switching:
-          "Use hireme_list_hired_agents, then hireme_select_agent, then hireme_call_agent. For high-stakes calls, pass agent_id explicitly.",
+          "Use hireme_list_my_agents to see callable Try/Hire entitlements, then hireme_select_agent, then hireme_call_agent. For marketplace discovery, use hireme_list_hired_agents.",
         protectedExample:
           "Run npm run platform:encrypt, start npm run gateway:dev, then call hireme_validate_sealed_harness with hire_receipt_object_id='hire_receipt_local_paid_demo'.",
+        registerAgent:
+          "To publish a working Agent, encrypt/upload the Agent folder first, then call hireme_register_agent with public metadata, price_per_call_usd=0.005, walrus_blob_id, sui_object_id, and ciphertext_digest. The gateway writes local registry and Supabase when configured.",
         privacy:
           "Creator AGENTS.md and skills folders must never be shipped as Codex skills/plugins to hirers. The installed plugin is only a public connector to the protected MCP gateway.",
       });
     default:
       throw new Error(`Unknown tool: ${name}`);
   }
+}
+
+function routeRegistrationNaturalRequest(request) {
+  const text = String(request || "").trim();
+  if (!text) return null;
+  if (!/(등록|publish|register|마켓플레이스|marketplace)/i.test(text)) {
+    return null;
+  }
+
+  return {
+    status: "registration_fields_required",
+    routedBy: "hireme_request",
+    naturalRequest: text,
+    retryTool: "hireme_register_agent",
+    requiredFields: inputSchemas.hireme_register_agent.required,
+    priceFormat: "$0.005/call",
+    flow: [
+      "Encrypt the working Agent folder with the platform-managed envelope.",
+      "Upload the ciphertext to Walrus and keep only blob/object/digest metadata.",
+      "Call hireme_register_agent with public card metadata, price_per_call_usd, and the encrypted artifact references.",
+    ],
+    exampleArguments: {
+      agent_id: "private-code-reviewer",
+      name: "Private Code Reviewer",
+      creator: "Han Labs",
+      category: "Code",
+      headline: "Reviews migration diffs with a protected rubric.",
+      public_summary:
+        "A paid protected code review agent. Buyers see findings and memWal result records, not the creator folder.",
+      public_mcp_contract: "review_pull_request(diff, repo_context, risk_level)",
+      skills: ["Code review", "Migration risk", "Test planning"],
+      protected_asset_classes: ["AGENTS.md", "skills/**", "harness/**"],
+      price_per_call_usd: 0.005,
+      walrus_blob_id: "walrus_private_code_reviewer_ciphertext",
+      sui_object_id: "0x...",
+      ciphertext_digest: "sha256:...",
+    },
+  };
+}
+
+function registerAgentLocally(args = {}) {
+  rejectPlaintextRegistrationFields(args);
+  assertRequiredRegistrationFields(args);
+
+  const agentId = normalizeSlug(args.agent_id, "agent");
+  const pricePerCallUsd = readRegistrationPrice(args.price_per_call_usd);
+  const skills = normalizeStringList(args.skills);
+  const protectedAssets =
+    normalizeStringList(args.protected_asset_classes || args.protected_assets)
+      .length > 0
+      ? normalizeStringList(args.protected_asset_classes || args.protected_assets)
+      : ["AGENTS.md", "skills/**", "harness/**", "private prompts"];
+  const now = new Date().toISOString();
+  const agent = {
+    id: agentId,
+    name: String(args.name).trim(),
+    handle: normalizeHandle(args.handle, agentId),
+    creator: String(args.creator).trim(),
+    category: normalizeDisplayCategory(args.category),
+    status: normalizeDisplayStatus(args.status),
+    headline: String(args.headline).trim(),
+    publicSummary: String(args.public_summary).trim(),
+    harnessSummary: String(args.public_mcp_contract).trim(),
+    memwalPolicy:
+      String(args.memwal_policy || "").trim() ||
+      "Hirer-visible results are stored in hirer-scoped memWal records. Creator private files stay behind the gateway.",
+    skills,
+    protectedAssets,
+    pricePerCallUsd,
+    freeCalls: 0,
+    rating: Number(args.rating || 0),
+    calls: Number(args.historical_calls || 0),
+    latencyMs: Number(args.median_latency_ms || 0),
+  };
+
+  const existingAgentIndex = agents.findIndex((item) => item.id === agentId);
+  if (existingAgentIndex === -1) {
+    agents.push(agent);
+  } else {
+    agents[existingAgentIndex] = {
+      ...agents[existingAgentIndex],
+      ...agent,
+    };
+  }
+
+  const record = {
+    agentId,
+    network: args.storage_network || "walrus-testnet",
+    encryptionProvider: args.encryption_provider || "platform-managed-envelope",
+    platformKmsKeyId:
+      args.platform_kms_key_id ||
+      process.env.HIREME_PLATFORM_KMS_KEY_ID ||
+      "platform:local-dev-key",
+    ciphertextFormat:
+      args.ciphertext_format || "hireme.platform-ciphertext-envelope.v1",
+    policyId: args.policy_id || args.seal_policy_id || `platform:agent:${agentId}`,
+    sealPolicyId: args.seal_policy_id || args.policy_id || `platform:agent:${agentId}`,
+    walrusBlobId: String(args.walrus_blob_id).trim(),
+    suiObjectId: String(args.sui_object_id).trim(),
+    ciphertextDigest: String(args.ciphertext_digest).trim(),
+    pricePerCallUsd,
+    registeredAt: now,
+  };
+
+  const existingRecordIndex = sealedHarnessRegistry.findIndex(
+    (item) => item.agentId === agentId,
+  );
+  if (existingRecordIndex === -1) {
+    sealedHarnessRegistry.push(record);
+  } else {
+    sealedHarnessRegistry[existingRecordIndex] = {
+      ...sealedHarnessRegistry[existingRecordIndex],
+      ...record,
+    };
+  }
+
+  return {
+    status: "registered",
+    registrationMode: "mcp_local_fallback",
+    publicAgent: publicAgent(agent),
+    protectedArtifact: record,
+    pricing: {
+      unit: "mcp_call",
+      display: `$${pricePerCallUsd.toFixed(3)}/call`,
+      pricePerCallUsd,
+      freeCalls: 0,
+    },
+    mcpPackage: `mcp://hireme/${agentId}`,
+    storedPlaintextHarness: false,
+    returnedCreatorSecrets: false,
+    supabase: {
+      status: "skipped",
+      reason: "Gateway was unavailable; local MCP fallback cannot write Supabase.",
+    },
+  };
+}
+
+function assertRequiredRegistrationFields(args) {
+  const missing = inputSchemas.hireme_register_agent.required.filter((field) => {
+    const value = args[field];
+    return value === undefined || value === null || value === "" ||
+      (Array.isArray(value) && value.length === 0);
+  });
+  if (missing.length) {
+    throw new Error(`Missing required registration field(s): ${missing.join(", ")}`);
+  }
+  if (!normalizeStringList(args.skills).length) {
+    throw new Error("skills must include at least one public skill label");
+  }
+}
+
+function rejectPlaintextRegistrationFields(args) {
+  const blockedFields = [
+    "plaintext",
+    "agents_md",
+    "agentsMd",
+    "skills_source",
+    "skillsSource",
+    "harness_source",
+    "harnessSource",
+    "private_prompt",
+    "privatePrompt",
+    "backup_key",
+    "backupKey",
+  ];
+  const found = blockedFields.filter((field) => args[field] !== undefined);
+  if (found.length) {
+    throw new Error(
+      `Do not send creator plaintext through MCP registration: ${found.join(", ")}`,
+    );
+  }
+}
+
+function normalizeStringList(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item).trim()).filter(Boolean);
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return [];
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) {
+        return parsed.map((item) => String(item).trim()).filter(Boolean);
+      }
+    } catch {
+      // Fall through to comma-separated parsing.
+    }
+    return trimmed
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+  return [];
+}
+
+function normalizeSlug(value, fallback) {
+  const slug = String(value || fallback || "agent")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .replace(/-{2,}/g, "-")
+    .slice(0, 64)
+    .replace(/-+$/g, "");
+  const safe = slug || fallback || "agent";
+  if (safe.length >= 3) return safe;
+  return `${safe}-agent`.slice(0, 64).replace(/-+$/g, "");
+}
+
+function normalizeHandle(value, fallbackSlug) {
+  const raw = String(value || `@agents/${fallbackSlug}`).trim();
+  const prefixed = raw.startsWith("@") ? raw : `@${raw}`;
+  const handle = prefixed
+    .toLowerCase()
+    .replace(/[^@a-z0-9_./-]+/g, "-")
+    .replace(/-{2,}/g, "-")
+    .slice(0, 81)
+    .replace(/-+$/g, "");
+  if (/^@[a-z0-9_./-]{2,80}$/.test(handle)) return handle;
+  return `@agents/${normalizeSlug(fallbackSlug, "agent")}`.slice(0, 81);
+}
+
+function normalizeDisplayCategory(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  const categories = {
+    research: "Research",
+    code: "Code",
+    data: "Data",
+    security: "Security",
+    growth: "Growth",
+    ops: "Ops",
+  };
+  return categories[normalized] || "Ops";
+}
+
+function normalizeDisplayStatus(value) {
+  const normalized = String(value || "Available").trim().toLowerCase();
+  if (["private_beta", "private beta", "beta"].includes(normalized)) {
+    return "Private Beta";
+  }
+  if (["busy", "paused"].includes(normalized)) return "Busy";
+  return "Available";
+}
+
+function readRegistrationPrice(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number < 0) {
+    throw new Error("price_per_call_usd must be a non-negative number");
+  }
+  return number;
 }
 
 function routeNaturalRequest(request, explicitAgentId) {
@@ -1173,7 +1646,7 @@ async function handleRequest(message) {
             version: "0.1.0",
           },
           instructions:
-            "HireMe exposes hired protected AI agents. For plain-language delegation such as 'example-landing-designer에게 핸드폰 상세 랜딩페이지 하나 만들어달라고 해', call hireme_request with the user's sentence as request. Use hireme_call_agent only when you already have structured agent_id/task arguments. Never request or reveal creator AGENTS.md files, private skills folders, design.md, Harness internals, plugin source, or protected memWal/Walrus artifacts.",
+            "HireMe exposes hired protected AI agents. For '내가 누구로 로그인되어 있어?' or identity checks, call hireme_whoami. For '내가 쓸 수 있는 agent 보여줘', call hireme_list_my_agents. For plain-language delegation such as 'example-landing-designer에게 핸드폰 상세 랜딩페이지 하나 만들어달라고 해', call hireme_request with the user's sentence as request. Use hireme_register_agent when the user wants to publish/register a working Agent; pass only public metadata plus encrypted Walrus artifact references and price_per_call_usd such as 0.005. Use hireme_call_agent only when you already have structured agent_id/task arguments. Never request or reveal creator AGENTS.md files, private skills folders, design.md, Harness internals, plugin source, or protected memWal/Walrus artifacts.",
         });
         break;
       case "tools/list":
