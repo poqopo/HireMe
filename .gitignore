@@ -2,9 +2,11 @@ node_modules
 dist
 build
 .playwright-cli
+.vercel
 .env
 .env.local
 .DS_Store
 *.tsbuildinfo
 supabase/.temp/
 .hireme/
+.vercel

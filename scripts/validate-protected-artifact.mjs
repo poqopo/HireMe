@@ -1,4 +1,4 @@
-import { validateSealedArtifact } from "../server/gateway/localSealedArtifact.mjs";
+import { validateSealedArtifact } from "../apps/gateway/src/localSealedArtifact.mjs";
 
 const recordPath =
   process.argv[2] || ".hireme/artifacts/example-code-reviewer.public-record.json";

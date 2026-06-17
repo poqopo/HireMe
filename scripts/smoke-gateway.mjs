@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { once } from "node:events";
-import { sealAgentFolder } from "../server/gateway/localSealedArtifact.mjs";
+import { sealAgentFolder } from "../apps/gateway/src/localSealedArtifact.mjs";
 
 const port = 18787;
 const gatewayUrl = `http://localhost:${port}`;
@@ -10,23 +10,23 @@ const gatewayKey = "smoke-test-key";
 await sealAgentFolder({
   folderPath: "examples/code-reviewer-agent",
   agentId: "example-code-reviewer",
-  pricePerCallUsd: 0.028,
+  pricePerCallUsd: 28,
   epochs: 3,
 });
 await sealAgentFolder({
   folderPath: "examples/landing-page-designer-agent",
   agentId: "example-landing-designer",
-  pricePerCallUsd: 0.026,
+  pricePerCallUsd: 26,
   epochs: 3,
 });
 await sealAgentFolder({
   folderPath: "examples/aster-x1-launch-agent",
   agentId: "example-aster-x1-launcher",
-  pricePerCallUsd: 0.034,
+  pricePerCallUsd: 34,
   epochs: 3,
 });
 
-const gateway = spawn("node", ["server/gateway/index.mjs"], {
+const gateway = spawn("node", ["apps/gateway/src/index.mjs"], {
   env: {
     ...process.env,
     HIREME_GATEWAY_PORT: String(port),
@@ -78,7 +78,7 @@ try {
     public_mcp_contract: "smoke_register(task)",
     skills: ["Registration", "Gateway smoke", "MCP metadata"],
     protected_asset_classes: ["AGENTS.md", "skills/**", "harness/**"],
-    price_per_call_usd: 0.005,
+    price_per_1m_tokens_sui: 5,
     walrus_blob_id: "walrus_smoke_mcp_registrar_ciphertext",
     sui_object_id: "0x7c0ab0e58ef6d2f0f1340c9fa6b77175aa828d332bd4e30ed87189f0910f0aac",
     ciphertext_digest:
@@ -88,7 +88,7 @@ try {
   if (
     registeredAgent.status !== "registered" ||
     registeredAgent.publicAgent?.id !== "smoke-mcp-registrar" ||
-    registeredAgent.pricing?.display !== "$0.005/call" ||
+    registeredAgent.pricing?.display !== "5 SUI/1M tokens" ||
     registeredAgent.storedPlaintextHarness !== false
   ) {
     throw new Error("Gateway did not register a paid protected Agent");
@@ -121,10 +121,10 @@ try {
   }
 
   if (
-    exampleCall.sealEncryption?.provider !== "platform-managed-envelope" ||
-    !exampleCall.sealEncryption?.platformKmsKeyId ||
-    !exampleCall.sealEncryption?.packageId ||
-    !exampleCall.sealedArtifact?.sealPackageId ||
+    exampleCall.platformEncryption?.provider !== "platform_encryption" ||
+    !exampleCall.platformEncryption?.platformKmsKeyId ||
+    !exampleCall.platformEncryption?.packageId ||
+    !exampleCall.sealedArtifact?.platformEncryptionId ||
     exampleCall.jsonOutput?.proof?.walrusStoresCiphertextOnly !== true ||
     exampleCall.jsonOutput?.harness?.artifact?.plaintextInWalrus !== false
   ) {
@@ -260,7 +260,7 @@ try {
   if (
     !registerText.includes('"status": "registered"') ||
     !registerText.includes('"id": "smoke-plugin-registrar"') ||
-    !registerText.includes('"display": "$0.005/call"')
+    !registerText.includes('"display": "5 SUI/1M tokens"')
   ) {
     throw new Error("Plugin MCP register Agent call did not route through the gateway");
   }
@@ -596,7 +596,7 @@ async function runPluginThroughGateway(gatewayUrl, gatewayKey) {
           public_mcp_contract: "smoke_plugin_register(task)",
           skills: ["Registration", "Plugin smoke", "MCP metadata"],
           protected_asset_classes: ["AGENTS.md", "skills/**", "harness/**"],
-          price_per_call_usd: 0.005,
+          price_per_1m_tokens_sui: 5,
           walrus_blob_id: "walrus_smoke_plugin_registrar_ciphertext",
           sui_object_id:
             "0xa2bd50242720676b86c4394109ad19cccf42d17eea7b2a765d0d281d732d74d4",

@@ -1,4 +1,4 @@
-import { validateAgentFolder } from "../server/gateway/localSealedArtifact.mjs";
+import { validateAgentFolder } from "../apps/gateway/src/localSealedArtifact.mjs";
 
 const folderPath = process.argv[2] || "examples/code-reviewer-agent";
 const validation = await validateAgentFolder(folderPath);

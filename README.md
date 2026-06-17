@@ -23,6 +23,22 @@ Agent 제작자는 보호된 Skills/Harness를 등록하고 MCP call 단가를 �
 
 지금 데모의 UI, 결제, ledger는 mock 데이터로 동작합니다. 보호 artifact 경로는 platform-managed encryption으로 암호화한 ciphertext를 Walrus에 올리고 gateway가 다시 읽어 복호화하는 형태까지 테스트할 수 있게 나눠 두었습니다.
 
+## 현재 프로젝트 구조
+
+배포 단위는 웹, gateway, Codex plugin으로 나눴습니다. 웹은 정적 프론트엔드로 배포하고, gateway는 secret을 가진 별도 Node service로 배포하며, Codex plugin은 사용자가 설치하는 MCP client package로 유지합니다.
+
+| Path | Role |
+| --- | --- |
+| `apps/web` | React/Vite 웹 앱. 랜딩, docs, marketplace, My page UI |
+| `apps/gateway` | MCP/HTTP gateway. Agent 실행, 권한 확인, 결제/정산, Walrus/memWal 처리 |
+| `plugins/hireme` | Codex에서 설치하는 HireMe MCP plugin |
+| `scripts` | smoke test, artifact publish, plugin export, Supabase seed script |
+| `supabase` | DB migrations and local Supabase assets |
+| `move` | Sui Move package experiments |
+| `docs` | `/docs` 페이지의 Markdown source draft |
+
+배포 절차는 [DEPLOYMENT.md](DEPLOYMENT.md)에 정리했습니다.
+
 ## 핵심 보호 원칙
 
 등록자가 올리는 실제 Agent 폴더(`AGENTS.md`, `skills/`, 선택적인 adapter/plugin 코드)를 고용자의 로컬 Codex plugin으로 배포하면 보호가 불가능합니다. 로컬에 파일이 내려오는 순간 사용자는 원문을 볼 수 있기 때문입니다.
@@ -41,6 +57,8 @@ Agent 제작자는 보호된 Skills/Harness를 등록하고 MCP call 단가를 �
 10. Hirer에게는 최종 결과, 공개 로그, 과금 ledger만 반환합니다.
 
 MVP에서는 HireMe gateway를 trusted executor로 두고 plaintext user task를 처리합니다. 즉, 먼저 검증할 가치는 “creator의 `AGENTS.md`, `skills/**`, harness를 hirer에게 노출하지 않고 결과만 반환하는 marketplace loop”입니다. 이 판단은 [Roadmap.md](Roadmap.md)에 정리했습니다.
+
+Team 단위 Hire에서는 여러 protected Agent가 같은 프로젝트 맥락을 이어받을 수 있도록 `memWal`을 encrypted shared project memory로 적극 활용합니다. 자세한 전략은 [TeamMemWal.md](TeamMemWal.md)에 정리했습니다.
 
 ## 정보 구조
 
@@ -162,7 +180,7 @@ supabase db push --db-url "$SUPABASE_DB_URL"
 
 ## 로컬 Protected Gateway
 
-로컬 gateway는 `server/gateway/index.mjs`에 있습니다. 지금 단계에서는 Supabase/Walrus를 일부 실제로 호출하고, 암호화는 platform-managed envelope로 동작합니다. API 경계는 production 구조에 맞춰 두었습니다.
+로컬 gateway는 `apps/gateway/src/index.mjs`에 있습니다. 지금 단계에서는 Supabase/Walrus를 일부 실제로 호출하고, 암호화는 platform-managed envelope로 동작합니다. API 경계는 production 구조에 맞춰 두었습니다.
 
 실행:
 
@@ -410,7 +428,7 @@ npm run memwal:read
 
 `memwal:publish`는 `examples/memwal/code-reviewer-memory.json`을 platform-managed envelope로 암호화해 Walrus에 올립니다. `memwal:read`는 gateway 경계에서만 복호화하고 `entryCount`, `tags`, `safeCapabilities` 같은 safe summary만 반환합니다. raw memory entry와 private notes는 hirer/Codex 응답으로 반환하지 않습니다.
 
-Agent call 결과는 `server/gateway/memWal.mjs`의 `writeUserMemWalResult`를 통해 Hirer별 ciphertext로 저장됩니다. Public record와 DB에는 raw result 대신 digest, encryption id, safe summary만 남기며, `user_memwal_results` RLS는 owning Hirer만 조회할 수 있게 제한합니다.
+Agent call 결과는 `apps/gateway/src/memWal.mjs`의 `writeUserMemWalResult`를 통해 Hirer별 ciphertext로 저장됩니다. Public record와 DB에는 raw result 대신 digest, encryption id, safe summary만 남기며, `user_memwal_results` RLS는 owning Hirer만 조회할 수 있게 제한합니다.
 
 참고 문서:
 

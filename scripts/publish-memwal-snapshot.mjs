@@ -1,4 +1,4 @@
-import { publishMemWalSnapshot } from "../server/gateway/memWal.mjs";
+import { publishMemWalSnapshot } from "../apps/gateway/src/memWal.mjs";
 
 const memoryPath = process.argv[2] || "examples/memwal/code-reviewer-memory.json";
 const agentId = process.argv[3] || process.env.HIREME_MEMWAL_AGENT_ID || "example-code-reviewer";

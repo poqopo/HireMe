@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { sealAgentFolder } from "../server/gateway/localSealedArtifact.mjs";
+import { sealAgentFolder } from "../apps/gateway/src/localSealedArtifact.mjs";
 
 const port = Number(process.env.HIREME_AGENT_IMPACT_PORT || 19881);
 const gatewayUrl = `http://localhost:${port}`;
@@ -15,11 +15,11 @@ const task =
 await sealAgentFolder({
   folderPath: "examples/aster-x1-launch-agent",
   agentId: "example-aster-x1-launcher",
-  pricePerCallUsd: 0.034,
+  pricePerCallUsd: 34,
   epochs: 3,
 });
 
-const gateway = spawn("node", ["server/gateway/index.mjs"], {
+const gateway = spawn("node", ["apps/gateway/src/index.mjs"], {
   env: {
     ...process.env,
     HIREME_GATEWAY_PORT: String(port),

@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { sealAgentFolder } from "../server/gateway/localSealedArtifact.mjs";
+import { sealAgentFolder } from "../apps/gateway/src/localSealedArtifact.mjs";
 
 const port = 19879;
 const gatewayUrl = `http://localhost:${port}`;
@@ -9,11 +9,11 @@ const gatewayKey = "landing-designer-smoke-key";
 await sealAgentFolder({
   folderPath: "examples/landing-page-designer-agent",
   agentId: "example-landing-designer",
-  pricePerCallUsd: 0.026,
+  pricePerCallUsd: 26,
   epochs: 3,
 });
 
-const gateway = spawn("node", ["server/gateway/index.mjs"], {
+const gateway = spawn("node", ["apps/gateway/src/index.mjs"], {
   env: {
     ...process.env,
     HIREME_GATEWAY_PORT: String(port),

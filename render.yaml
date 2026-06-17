@@ -1,0 +1,51 @@
+services:
+  - type: web
+    name: hireme-gateway
+    runtime: node
+    plan: free
+    region: oregon
+    buildCommand: npm install
+    startCommand: npm run gateway:start
+    healthCheckPath: /health
+    autoDeployTrigger: commit
+    envVars:
+      - key: NODE_VERSION
+        value: 24.14.0
+      - key: HIREME_WEB_APP_URL
+        value: https://hire-me-bice.vercel.app
+      - key: HIREME_GATEWAY_API_KEY
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SUI_NETWORK
+        value: testnet
+      - key: SUI_FULLNODE_URL
+        value: https://fullnode.testnet.sui.io:443
+      - key: HIREME_PLATFORM_TREASURY_SUI_ADDRESS
+        sync: false
+      - key: HIREME_DEFAULT_CREATOR_SUI_ADDRESS
+        sync: false
+      - key: HIREME_DEFAULT_HIRE_PRICE_SUI
+        value: "0.05"
+      - key: HIREME_PLATFORM_FEE_BPS
+        value: "0"
+      - key: WALRUS_NETWORK
+        value: testnet
+      - key: WALRUS_CONTEXT
+        value: testnet
+      - key: WALRUS_UPLOAD_RELAY_URL
+        sync: false
+      - key: HIREME_PLATFORM_KMS_KEY
+        sync: false
+      - key: HIREME_PLATFORM_KMS_KEY_ID
+        value: platform:render
+      - key: HIREME_SEAL_PACKAGE_ID
+        sync: false
+      - key: HIREME_SEAL_KEY_SERVER_IDS
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: HIREME_OPENAI_MODEL
+        sync: false

@@ -1,4 +1,4 @@
-import { readWalrusAgentArtifact } from "../server/gateway/walrusAgentArtifact.mjs";
+import { readWalrusAgentArtifact } from "../apps/gateway/src/walrusAgentArtifact.mjs";
 
 const options = parseArgs(process.argv.slice(2));
 const result = await readWalrusAgentArtifact({

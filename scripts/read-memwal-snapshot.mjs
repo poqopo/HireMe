@@ -1,4 +1,4 @@
-import { readMemWalSnapshot } from "../server/gateway/memWal.mjs";
+import { readMemWalSnapshot } from "../apps/gateway/src/memWal.mjs";
 
 const recordPath = process.argv[2] || ".hireme/memwal/example-code-reviewer.memwal-record.json";
 const hireReceiptObjectId = process.argv[3] || "hire_receipt_local_paid_demo";

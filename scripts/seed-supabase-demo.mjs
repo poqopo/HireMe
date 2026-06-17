@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { createClient } from "@supabase/supabase-js";
-import { agents } from "../src/lib/agents.ts";
+import { agents } from "../apps/web/src/lib/agents.ts";
 
 loadEnvFile(".env");
 loadEnvFile(".env.local");
@@ -121,6 +121,14 @@ for (const agent of agents) {
           rating: agent.rating,
           historical_calls: agent.calls,
           median_latency_ms: agent.latencyMs,
+          avg_input_tokens: agent.avgInputTokens,
+          avg_output_tokens: agent.avgOutputTokens,
+          active_user_count: Math.max(1, Math.round(agent.calls / 42)),
+          result_title: agent.resultPreview.title,
+          result_summary: agent.resultPreview.summary,
+          result_sample: agent.resultPreview.sample,
+          result_media_url: agent.resultPreview.mediaUrl || null,
+          result_media_type: agent.resultPreview.mediaType || null,
         },
         { onConflict: "slug" },
       )
@@ -192,7 +200,10 @@ for (const agent of agents) {
     admin.from("agent_pricing").insert({
       agent_id: agentRow.id,
       agent_version_id: versionRow.id,
+      billing_unit: "token_1m",
       price_per_mcp_call_usd: agent.pricePerCallUsd,
+      price_per_1m_tokens_usd: agent.pricePerCallUsd,
+      price_per_1m_tokens_sui: agent.pricePer1MTokensSui ?? agent.pricePerCallUsd,
       free_calls: agent.freeCalls,
       max_budget_calls: 100,
       active: true,

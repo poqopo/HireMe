@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { readFile } from "node:fs/promises";
-import { sealAgentFolder } from "../server/gateway/localSealedArtifact.mjs";
+import { sealAgentFolder } from "../apps/gateway/src/localSealedArtifact.mjs";
 
 const port = 18788;
 const gatewayUrl = `http://localhost:${port}`;
@@ -10,12 +10,12 @@ const gatewayKey = "protected-artifact-smoke-key";
 const sealed = await sealAgentFolder({
   folderPath: "examples/code-reviewer-agent",
   agentId: "example-code-reviewer",
-  pricePerCallUsd: 0.028,
+  pricePerCallUsd: 28,
   epochs: 3,
 });
 const walrusCiphertext = await readFile(sealed.walrusPath, "utf8");
 
-if (!walrusCiphertext.includes('"format": "hireme.platform-ciphertext-envelope.v1"')) {
+if (!walrusCiphertext.includes('"format": "hireme.platform_encryption.v1"')) {
   throw new Error("Protected Walrus object did not use the platform ciphertext envelope");
 }
 if (
@@ -26,7 +26,7 @@ if (
   throw new Error("Protected Walrus object leaked protected plaintext");
 }
 
-const gateway = spawn("node", ["server/gateway/index.mjs"], {
+const gateway = spawn("node", ["apps/gateway/src/index.mjs"], {
   env: {
     ...process.env,
     HIREME_GATEWAY_PORT: String(port),
@@ -48,9 +48,9 @@ try {
     throw new Error("Gateway did not validate through the protected runner boundary");
   }
   if (
-    valid.sealEncryption?.provider !== "platform-managed-envelope" ||
+    valid.sealEncryption?.provider !== "platform_encryption" ||
     !valid.sealEncryption?.platformKmsKeyId ||
-    valid.sealEncryption?.ciphertextFormat !== "hireme.platform-ciphertext-envelope.v1" ||
+    valid.sealEncryption?.ciphertextFormat !== "hireme.platform_encryption.v1" ||
     valid.sealEncryption?.plaintextInWalrus !== false
   ) {
     throw new Error("Gateway validation did not report platform-managed encryption metadata");

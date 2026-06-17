@@ -115,7 +115,7 @@ const requests = [
         public_mcp_contract: "plugin_local_register(task)",
         skills: ["Registration", "Local fallback", "MCP metadata"],
         protected_asset_classes: ["AGENTS.md", "skills/**", "harness/**"],
-        price_per_call_usd: 0.005,
+        price_per_1m_tokens_sui: 5,
         walrus_blob_id: "walrus_plugin_local_registrar_ciphertext",
         sui_object_id:
           "0xcb8c3f72c5b1459b830f4efb7f8fa3451ac682a66d9848f71149af79aca721ab",
@@ -251,7 +251,7 @@ if (
   !registerResult?.result?.content?.[0]?.text?.includes(
     '"registrationMode": "mcp_local_fallback"',
   ) ||
-  !registerResult?.result?.content?.[0]?.text?.includes('"display": "$0.005/call"')
+  !registerResult?.result?.content?.[0]?.text?.includes('"display": "5 SUI/1M tokens"')
 ) {
   throw new Error("hireme_register_agent did not register through local fallback");
 }
