@@ -1141,7 +1141,7 @@ async function handleWebOAuthSession(req, res) {
       oauthLoginSessions.delete(sessionId);
       await deleteStoredOAuthLoginSession(sessionId);
     }
-    res.setHeader("set-cookie", clearOAuthSessionCookies());
+    res.setHeader("set-cookie", clearOAuthSessionCookies(req));
     sendWebSessionJson(req, res, 200, { authenticated: false });
     return;
   }
@@ -1194,7 +1194,7 @@ async function handleWebOAuthSession(req, res) {
   };
   oauthLoginSessions.set(sessionId, loginSession);
   await persistOAuthLoginSession(loginSession);
-  res.setHeader("set-cookie", oauthSessionCookies(sessionId, 7 * 24 * 60 * 60));
+  res.setHeader("set-cookie", oauthSessionCookies(sessionId, 7 * 24 * 60 * 60, req));
   sendWebSessionJson(req, res, 200, {
     authenticated: true,
     user: {
@@ -1498,7 +1498,7 @@ async function finishGoogleOAuth(req, res, url) {
   res.statusCode = 302;
   res.setHeader(
     "set-cookie",
-    oauthSessionCookies(sessionId, 86_400),
+    oauthSessionCookies(sessionId, 86_400, req),
   );
   res.setHeader("location", stateRecord.returnTo);
   res.end();
@@ -7451,18 +7451,50 @@ function sendHtml(res, statusCode, html) {
   res.end(html);
 }
 
-function oauthSessionCookies(sessionId, maxAgeSeconds) {
+function oauthSessionCookies(sessionId, maxAgeSeconds, req) {
+  const attributes = oauthCookieAttributes(maxAgeSeconds, req);
   return [
-    `hireme_oauth_session=${sessionId}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${maxAgeSeconds}`,
-    `hireme_web_session=${sessionId}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${maxAgeSeconds}`,
+    `hireme_oauth_session=${sessionId}; ${attributes}`,
+    `hireme_web_session=${sessionId}; ${attributes}`,
   ];
 }
 
-function clearOAuthSessionCookies() {
+function clearOAuthSessionCookies(req) {
+  const attributes = oauthCookieAttributes(0, req);
   return [
-    "hireme_oauth_session=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0",
-    "hireme_web_session=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0",
+    `hireme_oauth_session=; ${attributes}`,
+    `hireme_web_session=; ${attributes}`,
   ];
+}
+
+function oauthCookieAttributes(maxAgeSeconds, req) {
+  const sameSite =
+    isHttpsGatewayRequest(req) && !isLocalGatewayRequest(req)
+      ? "SameSite=None; Secure"
+      : "SameSite=Lax";
+  return `HttpOnly; Path=/; ${sameSite}; Max-Age=${maxAgeSeconds}`;
+}
+
+function isHttpsGatewayRequest(req) {
+  const forwardedProto = String(req?.headers?.["x-forwarded-proto"] || "")
+    .split(",")[0]
+    .trim()
+    .toLowerCase();
+  if (forwardedProto === "https") return true;
+  try {
+    return new URL(gatewayBaseUrl(req)).protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function isLocalGatewayRequest(req) {
+  try {
+    const hostname = new URL(gatewayBaseUrl(req)).hostname;
+    return ["localhost", "127.0.0.1", "::1"].includes(hostname);
+  } catch {
+    return false;
+  }
 }
 
 function sha256Hex(value) {
