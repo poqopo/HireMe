@@ -133,6 +133,8 @@ const authCallbackSteps = [
   { label: "Saving your profile", progress: 82 },
   { label: "Opening your dashboard", progress: 100 },
 ] as const;
+const authCallbackStepDurationMs = 2_000;
+const authCallbackFinalDelayMs = 900;
 const typicalOutputStorageBucket =
   import.meta.env.VITE_HIREME_TYPICAL_OUTPUT_BUCKET || "hireme-agent-media";
 const gatewayUrl = (
@@ -1728,10 +1730,21 @@ function AuthCallbackPage({
 
   useEffect(() => {
     let cancelled = false;
+    let stepStartedAt = Date.now();
     function moveToStep(index: number) {
       if (cancelled) return;
+      stepStartedAt = Date.now();
       setActiveStep(index);
       setProgress(authCallbackSteps[index].progress);
+    }
+    async function holdCurrentStep(minDurationMs = authCallbackStepDurationMs) {
+      const elapsedMs = Date.now() - stepStartedAt;
+      const remainingMs = Math.max(0, minDurationMs - elapsedMs);
+      if (remainingMs > 0) {
+        await new Promise<void>((resolve) => {
+          window.setTimeout(resolve, remainingMs);
+        });
+      }
     }
 
     async function completeLogin() {
@@ -1751,6 +1764,8 @@ function AuthCallbackPage({
         throw new Error("No Supabase session was returned.");
       }
 
+      await holdCurrentStep();
+      if (cancelled) return;
       moveToStep(1);
       const user = authUserFromSupabaseSession(data.session);
       await syncGatewayWebSession(
@@ -1759,13 +1774,19 @@ function AuthCallbackPage({
         user.displayName,
       );
 
+      await holdCurrentStep();
+      if (cancelled) return;
       moveToStep(2);
       onLogin(user);
       writeStoredAuthUser(user);
 
       const params = new URLSearchParams(locationSearch);
       const returnTo = safeReturnTo(params.get("return_to"));
+      await holdCurrentStep();
+      if (cancelled) return;
       moveToStep(3);
+      await holdCurrentStep(authCallbackFinalDelayMs);
+      if (cancelled) return;
       if (returnTo) {
         window.location.assign(returnTo);
         return;
@@ -1813,7 +1834,7 @@ function AuthCallbackPage({
             role={error ? "presentation" : "progressbar"}
           >
             <div
-              className={`h-full rounded-full transition-all duration-500 ease-out ${
+              className={`h-full rounded-full transition-all duration-1000 ease-out ${
                 error
                   ? "bg-[#ea2261]"
                   : "bg-[#635bff] shadow-[0_0_18px_rgba(99,91,255,0.28)]"
