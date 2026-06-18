@@ -4,7 +4,7 @@
   <defs>
     <linearGradient id="hero" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="#ffffff"/>
-      <stop offset="1" stop-color="#eef4ff"/>
+      <stop offset="1" stop-color="#f8f5ff"/>
     </linearGradient>
     <linearGradient id="phone" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="#1c1e54"/>
@@ -19,30 +19,31 @@
   <rect x="563" y="86" width="58" height="16" rx="8" fill="#94a8bd"/>
   <rect x="637" y="86" width="58" height="16" rx="8" fill="#94a8bd"/>
   <rect x="710" y="82" width="42" height="22" rx="11" fill="#533afd"/>
-  <text x="96" y="139" fill="#533afd" font-family="Inter, Arial, sans-serif" font-size="15" font-weight="700">Harness applied</text>
-  <text x="96" y="184" fill="#0d253d" font-family="Inter, Arial, sans-serif" font-size="32" font-weight="300">Indigo CTA. Real mockup.</text>
-  <text x="96" y="222" fill="#0d253d" font-family="Inter, Arial, sans-serif" font-size="32" font-weight="300">Specs, trust, conversion.</text>
+  <text x="96" y="139" fill="#533afd" font-family="Inter, Arial, sans-serif" font-size="15" font-weight="700">Harness applied · mobile ready</text>
+  <text x="96" y="184" fill="#0d253d" font-family="Inter, Arial, sans-serif" font-size="32" font-weight="300">Meet the Nova X1.</text>
+  <text x="96" y="222" fill="#0d253d" font-family="Inter, Arial, sans-serif" font-size="20" font-weight="400">48-hour battery. Pro camera. 3-year warranty.</text>
   <rect x="96" y="252" width="142" height="44" rx="22" fill="#533afd"/>
-  <text x="124" y="280" fill="#ffffff" font-family="Inter, Arial, sans-serif" font-size="14" font-weight="700">Buy now</text>
+  <text x="114" y="280" fill="#ffffff" font-family="Inter, Arial, sans-serif" font-size="14" font-weight="700">Pre-order · $799</text>
   <rect x="254" y="252" width="142" height="44" rx="22" fill="#ffffff" stroke="#cbd7e3"/>
-  <text x="286" y="280" fill="#1c1e54" font-family="Inter, Arial, sans-serif" font-size="14" font-weight="700">View specs</text>
+  <text x="278" y="280" fill="#1c1e54" font-family="Inter, Arial, sans-serif" font-size="14" font-weight="700">Compare specs</text>
   <rect x="520" y="132" width="164" height="250" rx="34" fill="#111827"/>
   <rect x="535" y="150" width="134" height="214" rx="24" fill="url(#phone)"/>
   <circle cx="602" cy="340" r="9" fill="#ffffff" opacity=".9"/>
   <rect x="560" y="182" width="84" height="10" rx="5" fill="#ffffff" opacity=".82"/>
   <rect x="560" y="207" width="64" height="8" rx="4" fill="#ffffff" opacity=".45"/>
   <rect x="560" y="247" width="84" height="52" rx="16" fill="#ffffff" opacity=".16"/>
-  <rect x="96" y="366" width="156" height="82" rx="16" fill="#ffffff" stroke="#e3e8ee"/>
-  <rect x="274" y="366" width="156" height="82" rx="16" fill="#ffffff" stroke="#e3e8ee"/>
-  <rect x="452" y="366" width="156" height="82" rx="16" fill="#ffffff" stroke="#e3e8ee"/>
-  <rect x="630" y="366" width="78" height="82" rx="16" fill="#fff8fb" stroke="#f3b0ca"/>
-  <text x="118" y="397" fill="#1c1e54" font-family="Inter, Arial, sans-serif" font-size="14" font-weight="700">Features</text>
-  <text x="118" y="423" fill="#64748d" font-family="Inter, Arial, sans-serif" font-size="12">battery / camera</text>
-  <text x="296" y="397" fill="#1c1e54" font-family="Inter, Arial, sans-serif" font-size="14" font-weight="700">Specs</text>
-  <text x="296" y="423" fill="#64748d" font-family="Inter, Arial, sans-serif" font-size="12">display / chipset</text>
-  <text x="474" y="397" fill="#1c1e54" font-family="Inter, Arial, sans-serif" font-size="14" font-weight="700">Trust</text>
-  <text x="474" y="423" fill="#64748d" font-family="Inter, Arial, sans-serif" font-size="12">reviews / warranty</text>
-  <text x="648" y="397" fill="#9f1239" font-family="Inter, Arial, sans-serif" font-size="14" font-weight="700">CTA</text>
-  <text x="648" y="423" fill="#9f1239" font-family="Inter, Arial, sans-serif" font-size="12">convert</text>
-  <text x="96" y="482" fill="#64748d" font-family="Inter, Arial, sans-serif" font-size="15">Same prompt, but the Harness adds taste, structure, and requirements.</text>
+  <rect x="96" y="366" width="140" height="82" rx="16" fill="#ffffff" stroke="#e3e8ee"/>
+  <rect x="250" y="366" width="140" height="82" rx="16" fill="#ffffff" stroke="#e3e8ee"/>
+  <rect x="404" y="366" width="140" height="82" rx="16" fill="#ffffff" stroke="#e3e8ee"/>
+  <rect x="558" y="366" width="150" height="82" rx="16" fill="#f0edff" stroke="#a78bfa"/>
+  <text x="112" y="397" fill="#1c1e54" font-family="Inter, Arial, sans-serif" font-size="14" font-weight="700">50 MP camera</text>
+  <text x="112" y="423" fill="#64748d" font-family="Inter, Arial, sans-serif" font-size="11">4K · optical zoom</text>
+  <text x="266" y="397" fill="#1c1e54" font-family="Inter, Arial, sans-serif" font-size="14" font-weight="700">6.7” OLED</text>
+  <text x="266" y="423" fill="#64748d" font-family="Inter, Arial, sans-serif" font-size="11">120 Hz · 2,000 nits</text>
+  <text x="420" y="397" fill="#1c1e54" font-family="Inter, Arial, sans-serif" font-size="14" font-weight="700">4.9 / 5</text>
+  <text x="420" y="423" fill="#64748d" font-family="Inter, Arial, sans-serif" font-size="11">2,184 verified reviews</text>
+  <text x="574" y="393" fill="#533afd" font-family="Inter, Arial, sans-serif" font-size="11" font-weight="700">CONVERSION CHECK</text>
+  <text x="574" y="413" fill="#533afd" font-family="Inter, Arial, sans-serif" font-size="10">✓ CTA  ✓ specs</text>
+  <text x="574" y="431" fill="#533afd" font-family="Inter, Arial, sans-serif" font-size="10">✓ trust  ✓ mobile</text>
+  <text x="96" y="482" fill="#64748d" font-family="Inter, Arial, sans-serif" font-size="15">Clear hierarchy, concrete specs, trust signals, and a conversion checklist.</text>
 </svg>

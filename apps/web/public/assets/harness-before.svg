@@ -24,5 +24,5 @@
   <rect x="534" y="414" width="88" height="12" rx="6" fill="#cbd7e3"/>
   <rect x="534" y="438" width="116" height="10" rx="5" fill="#d8e2ec"/>
   <text x="96" y="138" fill="#64748d" font-family="Inter, Arial, sans-serif" font-size="18" font-weight="600">Same prompt, no Harness</text>
-  <text x="96" y="360" fill="#94a8bd" font-family="Inter, Arial, sans-serif" font-size="15">Vague hero, generic layout, weak product detail</text>
+  <text x="96" y="360" fill="#94a8bd" font-family="Inter, Arial, sans-serif" font-size="15">Vague layout · weak CTA · no specs · no trust block</text>
 </svg>

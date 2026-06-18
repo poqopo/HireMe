@@ -3,7 +3,6 @@ import {
   useMemo,
   useState,
   type ChangeEvent,
-  type MouseEvent as ReactMouseEvent,
   type ReactNode,
 } from "react";
 import type { Session } from "@supabase/supabase-js";
@@ -27,19 +26,24 @@ import {
 } from "@mysten/dapp-kit";
 import { Transaction } from "@mysten/sui/transactions";
 import {
-  AlertTriangle,
+  ArrowRight,
   Bot,
   Braces,
   BriefcaseBusiness,
   CheckCircle2,
+  ChevronDown,
   CircleDollarSign,
   Clock3,
+  Eye,
+  EyeOff,
+  FileCheck2,
   LockKeyhole,
   LogIn,
   LogOut,
   PackageOpen,
   Search,
   ServerCog,
+  ShieldCheck,
   Star,
   Terminal,
   TrendingUp,
@@ -71,23 +75,23 @@ import { Input } from "@/components/ui/input";
 const makeAgentSteps = [
   {
     icon: PackageOpen,
-    title: "Install HireMe",
-    copy: "Download the HireMe Codex plugin and connect it to your local Codex session.",
+    title: "Start with a template",
+    copy: "Choose a proven structure instead of building the Agent from scratch.",
   },
   {
-    icon: Terminal,
-    title: "Ask for a template",
-    copy: "Tell Codex: make me an example Agent template. It creates the starter folder for you.",
+    icon: Braces,
+    title: "Add your know-how",
+    copy: "Add the examples, skills, rubrics, and workflow rules that make your work repeatable.",
   },
   {
-    icon: UploadCloud,
-    title: "Build the Harness",
-    copy: "Add AGENTS.md, skills, examples, prompts, rubrics, and any workflow rules that make it good.",
+    icon: LockKeyhole,
+    title: "Protect the Harness",
+    copy: "Upload the private playbook. HireMe encrypts it before the Agent becomes available.",
   },
   {
-    icon: WalletCards,
-    title: "Upload",
-    copy: "Upload it to HireMe. We register the public card and keep the private Harness protected.",
+    icon: CircleDollarSign,
+    title: "Publish and earn",
+    copy: "Set a price, show a sample result, and earn whenever buyers run the Agent.",
   },
 ];
 
@@ -98,7 +102,7 @@ const creatorIpLayers = [
   },
   {
     label: "What buyers can't see",
-    items: ["AGENTS.md", "Private prompts", "Rubrics", "Harness logic", "Updated versions"],
+    items: ["AGENTS.md", "Private prompts", "Rubrics", "Examples", "Workflow rules", "Hidden checks"],
   },
 ];
 
@@ -136,8 +140,8 @@ const topicFilters = categories.filter(
   (category): category is Agent["category"] => category !== "All",
 );
 const catalogViews = [
-  { id: "teams", label: "Teams" },
-  { id: "agents", label: "Agent" },
+  { id: "agents", label: "Single Agent" },
+  { id: "teams", label: "Agent Team" },
 ] as const;
 const creatorModelOptions = [
   {
@@ -1326,18 +1330,12 @@ function TopNav({
         </Link>
 
         {isLanding ? (
-          <nav className="flex flex-wrap items-center justify-end gap-2">
-            <Button asChild size="sm" type="button" variant="secondary">
-              <Link to="/docs">
-                <Braces /> View Docs
-              </Link>
-            </Button>
-            <Button asChild size="sm" type="button">
-              <Link to="/agents">
-                <Bot /> Explore Agents
-              </Link>
-            </Button>
-          </nav>
+          <Link
+            className="text-xs font-medium text-muted-foreground transition hover:text-primary"
+            to="/docs"
+          >
+            Docs
+          </Link>
         ) : null}
 
         {isAgents ? (
@@ -1777,25 +1775,25 @@ function LandingPage() {
   return (
     <main>
       <section className="hero-visual relative overflow-hidden px-4 py-12 md:px-8 md:py-16 xl:py-20">
-        <div className="mx-auto flex min-h-[calc(100svh-15rem)] max-w-7xl items-center">
-          <div className="max-w-3xl py-10">
+        <div className="mx-auto flex min-h-[calc(100svh-12rem)] max-w-7xl items-center">
+          <div className="max-w-3xl py-8 md:py-12">
             <h1 className="balanced-text max-w-4xl text-5xl font-normal leading-[1.03] text-[#0d253d] md:text-6xl">
               Hire Agents that already know the job.
             </h1>
             <p className="pretty-text mt-6 max-w-2xl text-base font-normal leading-7 text-[#20364f] md:text-lg">
-              Use prepared AI Agents from Codex without rebuilding their
-              playbooks. Creators keep private Harness files protected, buyers
-              get the result, and strong Agents can earn money.
+              Hire protected AI Agents, not copyable prompts. Creators keep
+              private playbooks hidden while buyers get reliable results
+              through secure execution.
             </p>
             <div className="mt-8 flex flex-wrap gap-3">
               <Button asChild size="lg">
                 <Link to="/agents">
-                  <Bot /> Explore Agents
+                  <Bot /> Hire an Agent
                 </Link>
               </Button>
               <Button asChild size="lg" variant="secondary">
-                <Link to="/docs">
-                  <Braces /> View More
+                <Link to="/agents/create">
+                  <UploadCloud /> Publish an Agent
                 </Link>
               </Button>
             </div>
@@ -1803,11 +1801,89 @@ function LandingPage() {
         </div>
       </section>
 
+      <AudienceValueSection />
+      <ProtectedExecutionSection />
+      <CreatorIpSection />
       <AgentPerformanceSection />
       <MakeAgentSection />
-      <CreatorIpSection />
+      <ProofLayerSection />
       <LandingFooter />
     </main>
+  );
+}
+
+function AudienceValueSection() {
+  return (
+    <section className="border-y border-border bg-white px-4 py-12 md:px-8 md:py-16">
+      <div className="mx-auto max-w-7xl">
+        <div className="grid gap-4 md:grid-cols-2">
+          <div className="rounded-2xl border border-[#d9d5ff] bg-[#f8f5ff] p-5 md:p-6">
+            <div className="flex items-center gap-3 text-sm font-semibold text-[#2e2b8c]">
+              <span className="flex size-10 items-center justify-center rounded-xl bg-white text-[#533afd]"><BriefcaseBusiness className="size-5" /></span>
+              For Buyers
+            </div>
+            <p className="mt-4 max-w-lg text-xl font-normal leading-7 text-[#0d253d]">
+              Use expert-built Agents without exposing your private work to the creator.
+            </p>
+          </div>
+          <div className="rounded-2xl border border-[#d9d5ff] bg-[#f8f5ff] p-5 md:p-6">
+            <div className="flex items-center gap-3 text-sm font-semibold text-[#2e2b8c]">
+              <span className="flex size-10 items-center justify-center rounded-xl bg-white text-[#533afd]"><CircleDollarSign className="size-5" /></span>
+              For Creators
+            </div>
+            <p className="mt-4 max-w-lg text-xl font-normal leading-7 text-[#171452]">
+              Monetize Agent know-how without giving away prompts, skills, examples, or rubrics.
+            </p>
+          </div>
+        </div>
+        <div className="mt-5 flex items-center justify-center gap-2 text-center text-sm font-semibold text-[#273951]">
+          <LockKeyhole className="size-4 text-primary" /> Your work and the creator’s playbook stay separate.
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function ProtectedExecutionSection() {
+  const steps = [
+    { icon: UserRound, label: "Buyer sends task", note: "Private input" },
+    { icon: ServerCog, label: "HireMe secure runner", note: "Isolated execution" },
+    { icon: LockKeyhole, label: "Private Harness executes", note: "Encrypted playbook" },
+    { icon: FileCheck2, label: "Buyer gets result", note: "Output + receipt" },
+  ];
+
+  return (
+    <section className="bg-[#17133f] px-4 py-14 text-white md:px-8 md:py-20">
+      <div className="mx-auto max-w-7xl">
+        <div className="max-w-2xl">
+          <div className="text-sm font-semibold text-[#c4b5fd]">Protected execution</div>
+          <h2 className="mt-3 balanced-text text-3xl font-normal leading-tight md:text-5xl">The Agent works. The playbook never leaves.</h2>
+          <p className="mt-4 max-w-xl text-sm leading-6 text-white/70 md:text-base">Buyer input is processed by HireMe, not sent directly to the creator. The private Harness stays protected inside the runner.</p>
+        </div>
+
+        <div className="mt-10 grid gap-3 md:grid-cols-[1fr_auto_1fr_auto_1fr_auto_1fr] md:items-center">
+          {steps.map((step, index) => (
+            <div className="contents" key={step.label}>
+              <div className={`rounded-2xl border p-4 ${index === 2 ? "border-[#a78bfa]/60 bg-[#533afd]/24" : "border-white/15 bg-white/[0.07]"}`}>
+                <step.icon className="size-5 text-[#c4b5fd]" />
+                <div className="mt-4 text-sm font-semibold text-white">{step.label}</div>
+                <div className="mt-1 text-xs text-white/55">{step.note}</div>
+              </div>
+              {index < steps.length - 1 ? <ArrowRight className="mx-auto hidden size-4 text-[#a78bfa] md:block" /> : null}
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-5 grid gap-3 md:grid-cols-2">
+          <div className="flex items-start gap-3 rounded-xl border border-white/12 bg-white/[0.05] p-4 text-sm text-white/76">
+            <EyeOff className="mt-0.5 size-4 shrink-0 text-[#c4b5fd]" /> Creator cannot see the buyer’s task or private work.
+          </div>
+          <div className="flex items-start gap-3 rounded-xl border border-white/12 bg-white/[0.05] p-4 text-sm text-white/76">
+            <ShieldCheck className="mt-0.5 size-4 shrink-0 text-[#c4b5fd]" /> Buyer cannot inspect or copy the creator’s Harness.
+          </div>
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -1816,8 +1892,8 @@ function AgentPerformanceSection() {
     <section id="agent-performance" className="bg-[#fbfdff] px-4 py-14 md:px-8 md:py-20">
       <div className="mx-auto max-w-7xl">
         <div>
-          <div className="mb-5 flex items-center gap-3 text-sm font-semibold text-[#15325c]">
-            <span className="flex size-11 items-center justify-center rounded-xl bg-[#eaf2ff] text-[#2563eb]">
+          <div className="mb-5 flex items-center gap-3 text-sm font-semibold text-[#2e2b8c]">
+            <span className="flex size-11 items-center justify-center rounded-xl bg-[#eeeaff] text-[#533afd]">
               <TrendingUp className="size-5" />
             </span>
             Agent performance
@@ -1826,10 +1902,8 @@ function AgentPerformanceSection() {
             Same prompt. Better output.
           </h2>
           <p className="pretty-text mt-5 max-w-2xl text-base font-normal leading-7 text-[#324a63]">
-            A Harness is the difference between a generic answer and a
-            production-ready result. It carries taste, examples, rubrics,
-            constraints, and repeatable workflow so the Agent knows what good
-            looks like.
+            The prompt stays the same. A private Harness adds the standards,
+            examples, and checks needed for production-ready work.
           </p>
         </div>
 
@@ -1846,14 +1920,14 @@ function AgentPerformanceSection() {
           />
         </div>
 
-        <div className="mt-6 rounded-xl border border-[#93b4ff]/40 bg-[#eef4ff] p-5">
-          <div className="text-sm font-semibold text-[#15325c]">
+        <div className="mt-6 rounded-xl border border-[#d9d5ff] bg-[#f8f5ff] p-5">
+          <div className="text-sm font-semibold text-[#2e2b8c]">
             Why Harness matters
           </div>
           <div className="mt-4 grid gap-3 text-sm leading-6 text-[#273951] md:grid-cols-3">
-            <div>It defines taste and quality standards before generation starts.</div>
-            <div>It gives the Agent reusable examples, structure, and product rules.</div>
-            <div>It makes the same prompt produce a result closer to shipping quality.</div>
+            <div><strong className="block text-[#2e2b8c]">Clear hierarchy</strong> CTA, content, and conversion flow follow a tested structure.</div>
+            <div><strong className="block text-[#2e2b8c]">Real requirements</strong> Specs, trust signals, and mobile rules are not skipped.</div>
+            <div><strong className="block text-[#2e2b8c]">Repeatable quality</strong> Hidden checks catch incomplete work before delivery.</div>
           </div>
         </div>
       </div>
@@ -1930,11 +2004,9 @@ function MakeAgentSection() {
               </div>
             ))}
           </div>
-          <div className="mt-6 rounded-xl border border-[#533afd]/20 bg-[#f0edff] p-4 font-mono text-xs leading-6 text-[#171452]">
-            <div>{">"} codex: HireMe 플러그인 설치</div>
-            <div>{">"} codex: 예시 템플릿 생성해줘</div>
-            <div>{">"} creator: Agent Harness 작성</div>
-            <div>{">"} hireme: upload and publish</div>
+          <div className="mt-6 rounded-xl border border-[#533afd]/20 bg-[#f0edff] p-4 text-xs leading-5 text-[#3f3b6f]">
+            <span className="font-semibold text-[#171452]">Built for existing Agent workflows.</span>{" "}
+            Start from Codex, AGENTS.md, skills, or MCP tools—then package the know-how as a protected Harness.
           </div>
         </div>
       </div>
@@ -1947,20 +2019,18 @@ function CreatorIpSection() {
     <section id="creator-ip" className="bg-[#15133f] px-4 py-14 text-white md:px-8 md:py-20">
       <div className="mx-auto grid max-w-7xl gap-10 lg:grid-cols-[0.86fr_1.14fr] lg:items-center">
         <div>
-          <div className="mb-5 flex items-center gap-3 text-sm font-semibold text-[#d8ddff]">
-            <span className="flex size-11 items-center justify-center rounded-xl bg-white/12 text-[#aebaff]">
+          <div className="mb-5 flex items-center gap-3 text-sm font-semibold text-[#ddd6fe]">
+            <span className="flex size-11 items-center justify-center rounded-xl bg-white/12 text-[#c4b5fd]">
               <LockKeyhole className="size-5" />
             </span>
-            Creator IP
+            Private by design
           </div>
           <h2 className="balanced-text max-w-xl text-3xl font-normal leading-tight md:text-5xl">
-            Protect your Agent IP.
+            Publish the Agent. Keep the recipe.
           </h2>
           <p className="pretty-text mt-5 max-w-2xl text-base font-normal leading-7 text-white/82">
-            Your Agent Harness is the product: prompts, skills, rubrics,
-            examples, and workflow taste. HireMe lets people pay to use it
-            without copying it, and you can keep shipping updated versions as
-            your Agent gets better.
+            Buyers see what the Agent can do and what a result looks like.
+            Everything that makes it work stays behind the execution boundary.
           </p>
         </div>
 
@@ -1968,7 +2038,7 @@ function CreatorIpSection() {
           <div className="grid gap-4 md:grid-cols-[1fr_auto_1fr] md:items-stretch">
             <CreatorIpPanel layer={creatorIpLayers[0]} />
             <div className="flex items-center justify-center">
-              <div className="rounded-full border border-[#8da2ff]/40 bg-[#8da2ff]/10 px-4 py-2 text-xs font-medium text-[#c6d4ff]">
+              <div className="rounded-full border border-[#a78bfa]/40 bg-[#a78bfa]/10 px-4 py-2 text-xs font-medium text-[#ddd6fe]">
                 gateway boundary
               </div>
             </div>
@@ -1987,7 +2057,7 @@ function CreatorIpPanel({
 }) {
   return (
     <div className="rounded-xl border border-white/12 bg-[#202052] p-4">
-      <div className="mb-4 text-sm font-semibold text-[#d8ddff]">
+      <div className="mb-4 text-sm font-semibold text-[#ddd6fe]">
         {layer.label}
       </div>
       <div className="space-y-2">
@@ -2004,13 +2074,46 @@ function CreatorIpPanel({
   );
 }
 
+function ProofLayerSection() {
+  const records = [
+    "Harness version record",
+    "Execution receipt",
+    "Access record",
+    "Usage + payout receipt",
+  ];
+
+  return (
+    <section className="border-t border-border bg-white px-4 py-14 md:px-8 md:py-20">
+      <div className="mx-auto grid max-w-7xl gap-8 lg:grid-cols-[0.85fr_1.15fr] lg:items-center">
+        <div>
+          <div className="text-sm font-semibold text-[#533afd]">Verifiable work</div>
+          <h2 className="mt-3 balanced-text text-3xl font-normal leading-tight text-[#0d253d] md:text-5xl">Proof, not just storage.</h2>
+          <p className="mt-5 max-w-xl text-sm leading-6 text-muted-foreground md:text-base">Walrus stores protected Agent artifacts and execution records, while Sui tracks access, usage, and payout receipts.</p>
+        </div>
+        <div className="rounded-2xl border border-[#d9d5ff] bg-[#f8f5ff] p-5 app-shadow">
+          <div className="grid gap-3 sm:grid-cols-2">
+            {records.map((record) => (
+              <div className="flex items-center gap-3 rounded-xl border border-white bg-white p-4 text-sm font-medium text-[#273951]" key={record}>
+                <CheckCircle2 className="size-4 shrink-0 text-[#533afd]" /> {record}
+              </div>
+            ))}
+          </div>
+          <div className="mt-4 rounded-xl border border-[#533afd]/20 bg-[#ede9ff] px-4 py-3 text-sm font-semibold text-[#2e2b8c]">
+            Proves which Agent version produced each result.
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function LandingFooter() {
   return (
-    <footer className="border-t border-white/10 bg-[#090d24] px-4 py-8 text-white md:px-8">
+    <footer className="border-t border-white/10 bg-[#100d24] px-4 py-8 text-white md:px-8">
       <div className="mx-auto flex max-w-7xl flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div>
           <div className="flex items-center gap-2 text-sm font-medium">
-            <Bot className="size-4 text-[#8da2ff]" />
+            <Bot className="size-4 text-[#a78bfa]" />
             HireMe
           </div>
           <p className="mt-2 max-w-xl text-xs font-medium leading-5 text-white/70">
@@ -2547,6 +2650,8 @@ function ExploreAgentsPage({
 
   function resetFilters() {
     setSelectedTopics(topicFilters);
+    setCatalogView("agents");
+    setQuery("");
   }
 
   async function updateAgentAccess(agent: Agent, accessType: AgentAccessType) {
@@ -2669,42 +2774,26 @@ function ExploreAgentsPage({
                     </button>
                   );
                 })}
-                <Button
-                  className="h-7 px-2.5 text-[11px]"
-                  onClick={resetFilters}
-                  size="sm"
-                  type="button"
-                  variant="ghost"
-                >
-                  Reset
-                </Button>
               </div>
             </div>
 
-            <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
-              <span className="font-medium text-[#1c1e54]">
-                {resultCount} {catalogView === "teams" ? "teams" : "agents"}
-              </span>
-              <span className="text-muted-foreground">·</span>
-              <span className="font-medium text-[#1c1e54]">
-                {dataSource.source === "supabase"
-                  ? "Supabase live"
-                  : "Local demo data"}
-              </span>
-              {localCreatedAgents.length ? (
-                <>
-                  <span className="text-muted-foreground">·</span>
-                  <span className="font-medium text-[#1c1e54]">
-                    {localCreatedAgents.length} web-created agent
-                    {localCreatedAgents.length === 1 ? "" : "s"}
-                  </span>
-                </>
-              ) : null}
-              {dataSource.message ? (
-                <span className="leading-5 text-muted-foreground">
-                  {dataSource.message}
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-3 text-xs">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-medium text-[#1c1e54]">
+                  {resultCount} {catalogView === "teams" ? "teams" : "agents"}
                 </span>
-              ) : null}
+                <span className="text-muted-foreground">·</span>
+                <span className="font-medium text-[#1c1e54]">
+                  {dataSource.source === "supabase" ? "Supabase live" : "Local demo data"}
+                </span>
+                {localCreatedAgents.length ? (
+                  <><span className="text-muted-foreground">·</span><span className="font-medium text-[#1c1e54]">{localCreatedAgents.length} published here</span></>
+                ) : null}
+                {dataSource.message ? <span className="leading-5 text-muted-foreground">{dataSource.message}</span> : null}
+              </div>
+              <button className="font-medium text-muted-foreground underline-offset-4 transition hover:text-primary hover:underline" onClick={resetFilters} type="button">
+                Reset filters
+              </button>
             </div>
           </div>
 
@@ -3986,12 +4075,17 @@ function TeamMarketCard({
   const startingPrice = agents.length
     ? Math.min(...agents.map((agent) => agent.pricePerCallUsd))
     : 0;
+  const averageRating = agents.length
+    ? agents.reduce((total, agent) => total + agent.rating, 0) / agents.length
+    : 0;
+  const [isExpanded, setIsExpanded] = useState(false);
 
   return (
-    <Card className="transition hover:-translate-y-0.5 hover:shadow-[rgba(0,55,112,0.08)_0_8px_24px]">
-      <CardHeader>
-        <div className="flex items-start gap-3">
-          <Avatar className="size-12">
+    <Card className="transition hover:-translate-y-0.5 hover:border-[#533afd]/35 hover:shadow-[rgba(83,58,253,0.10)_0_8px_24px]">
+      <CardHeader className="pb-3">
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex min-w-0 items-center gap-3">
+          <Avatar className="size-11 shrink-0">
             <AvatarFallback className={`bg-gradient-to-br ${team.accent} text-white`}>
               {team.name
                 .split(" ")
@@ -4000,50 +4094,72 @@ function TeamMarketCard({
                 .join("")}
             </AvatarFallback>
           </Avatar>
-          <div>
-            <CardTitle className="text-lg">{team.name}</CardTitle>
-            <CardDescription>{team.handle}</CardDescription>
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <CardTitle className="truncate text-base">{team.name}</CardTitle>
+              <span className="number-cell inline-flex items-center gap-1 rounded-full border border-[#533afd]/20 bg-[#f0edff] px-2 py-0.5 text-[11px] font-medium text-[#2e2b8c]" title="Average rating across this team’s Agents.">
+                <Star className="size-3 fill-[#533afd] text-[#533afd]" />
+                {averageRating.toFixed(1)}
+              </span>
+            </div>
+            <CardDescription className="truncate">{team.handle}</CardDescription>
+          </div>
           </div>
         </div>
       </CardHeader>
 
       <CardContent>
-        <div className="mb-3 text-xs leading-5 text-muted-foreground">
-          {team.owner} · {categories.join(" / ")}
+        <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+          {categories.slice(0, 2).map((category) => (
+            <span className="rounded-full border border-[#533afd]/15 bg-secondary px-2 py-0.5 text-[10px] font-semibold uppercase text-[#273951]" key={category}>{category}</span>
+          ))}
+          <span>{formatRuns(totalRuns)} runs</span>
         </div>
 
-        <p className="min-h-14 text-sm leading-relaxed text-[#273951]">
+        <p className="mt-3 line-clamp-2 min-h-10 text-sm leading-5 text-[#273951]">
           {team.headline}
         </p>
 
-        <div className="mt-4 rounded-lg border border-border bg-secondary p-3 text-xs leading-5 text-muted-foreground">
-          {team.publicSummary}
+        <div className="mt-4 border-t border-border pt-4">
+          <div>
+            <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">From</div>
+            <div className="number-cell mt-0.5 text-base font-semibold text-[#0d253d]">{formatAgentPriceShort(startingPrice)}<span className="text-xs font-normal text-muted-foreground"> / 1M tokens</span></div>
+          </div>
         </div>
 
-        <div className="mt-5 grid grid-cols-3 gap-3">
-          <Metric
-            icon={BriefcaseBusiness}
-            label="Agents"
-            value={(agents.length || team.agentCount).toString()}
-          />
-          <Metric
-            icon={CircleDollarSign}
-            label="From"
-            value={formatAgentPriceShort(startingPrice)}
-          />
-          <Metric icon={TrendingUp} label="Runs" value={formatRuns(totalRuns)} />
+        <div className="mt-4 grid grid-cols-[1fr_auto] gap-2">
+          <Button className="w-full" onClick={() => setIsExpanded(true)} type="button" variant="secondary">
+            <BriefcaseBusiness /> View {agents.length || team.agentCount} Agents
+          </Button>
+          <Button aria-expanded={isExpanded} className="px-3" onClick={() => setIsExpanded((value) => !value)} type="button" variant="ghost">
+            <ChevronDown className={`transition ${isExpanded ? "rotate-180" : ""}`} />
+            <span className="text-xs">Details</span>
+          </Button>
         </div>
 
-        <div className="mt-4 flex flex-wrap gap-2">
-          {agents.slice(0, 4).map((agent) => (
-            <span
-              className="rounded-full border border-border bg-white px-3 py-1 text-xs font-medium text-[#273951]"
-              key={agent.id}
-            >
-              {agent.name}
-            </span>
-          ))}
-        </div>
+        {isExpanded ? (
+          <div className="mt-4 rounded-xl border border-[#d9d5ff] bg-[#f8f5ff] p-4">
+            <p className="text-xs leading-5 text-muted-foreground">{team.publicSummary}</p>
+            <div className="mt-4 grid grid-cols-2 gap-x-4 gap-y-4 border-t border-[#d9d5ff] pt-4 text-sm">
+              <Metric icon={BriefcaseBusiness} label="Agents" value={(agents.length || team.agentCount).toString()} />
+              <Metric icon={TrendingUp} label="Total runs" value={formatRuns(totalRuns)} />
+            </div>
+            <div className="mt-4 grid gap-2 border-t border-[#d9d5ff] pt-4">
+              {agents.map((agent) => (
+                <Button asChild className="w-full justify-between" key={agent.id} size="sm" type="button" variant="secondary">
+                  <Link to={`/agents/${agent.id}`}>
+                    <span className="truncate">{agent.name}</span>
+                    <span className="number-cell text-xs text-muted-foreground">{formatAgentPriceShort(agent.pricePerCallUsd)}</span>
+                  </Link>
+                </Button>
+              ))}
+            </div>
+            <div className="mt-4 flex items-center justify-between gap-3 border-t border-[#d9d5ff] pt-4 text-xs">
+              <span className="text-muted-foreground">Creator</span>
+              <span className="font-medium text-[#273951]">{team.owner}</span>
+            </div>
+          </div>
+        ) : null}
       </CardContent>
     </Card>
   );
@@ -4065,23 +4181,15 @@ function AgentMarketCard({
   const isHired = access?.accessType === "hired";
   const isTrying = access?.accessType === "trial";
   const hasGatewayAccess = access?.source === "gateway";
-  const navigate = useNavigate();
-
-  function openDetails(event: ReactMouseEvent<HTMLDivElement>) {
-    const target = event.target as HTMLElement;
-    if (target.closest("button,a,summary,details")) return;
-    navigate(`/agents/${agent.id}`);
-  }
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [showSample, setShowSample] = useState(false);
 
   return (
-    <Card
-      className="cursor-pointer transition hover:-translate-y-0.5 hover:border-[#533afd]/35 hover:shadow-[rgba(0,55,112,0.08)_0_8px_24px]"
-      onClick={openDetails}
-    >
-      <CardHeader>
+    <Card className="transition hover:-translate-y-0.5 hover:border-[#533afd]/35 hover:shadow-[rgba(0,55,112,0.08)_0_8px_24px]">
+      <CardHeader className="pb-3">
         <div className="flex items-start justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <Avatar className="size-12">
+          <div className="flex min-w-0 items-center gap-3">
+            <Avatar className="size-11 shrink-0">
               <AvatarFallback
                 className={`bg-gradient-to-br ${agent.accent} text-white`}
               >
@@ -4091,60 +4199,40 @@ function AgentMarketCard({
                   .join("")}
               </AvatarFallback>
             </Avatar>
-            <div>
+            <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
-                <CardTitle className="text-lg">{agent.name}</CardTitle>
-                <span className="number-cell inline-flex items-center gap-1 rounded-full border border-[#f5c451]/40 bg-[#fff9e8] px-2 py-0.5 text-xs font-medium text-[#7c5800]">
-                  <Star className="size-3 fill-[#f5c451] text-[#f5c451]" />
+                <CardTitle className="truncate text-base">{agent.name}</CardTitle>
+                <span className="number-cell inline-flex items-center gap-1 rounded-full border border-[#533afd]/20 bg-[#f0edff] px-2 py-0.5 text-[11px] font-medium text-[#2e2b8c]" title="Based on buyer feedback, repeat usage, and completed runs.">
+                  <Star className="size-3 fill-[#533afd] text-[#533afd]" />
                   {agent.rating.toFixed(1)}
                 </span>
               </div>
-              <CardDescription>{agent.handle}</CardDescription>
+              <CardDescription className="truncate">{agent.handle}</CardDescription>
             </div>
           </div>
         </div>
       </CardHeader>
 
       <CardContent>
-        <div className="mb-3 text-xs leading-5 text-muted-foreground">
-          <div className="flex flex-wrap items-center gap-1.5">
-            {agentCategories(agent).map((category) => (
-              <span
-                className="rounded-full border border-[#533afd]/15 bg-secondary px-2 py-0.5 text-[10px] font-semibold uppercase tracking-normal text-[#273951]"
-                key={category}
-              >
-                {category}
-              </span>
-            ))}
-            <span className="ml-1 text-xs text-muted-foreground">
-              {formatRuns(agent.calls)} runs
-            </span>
-          </div>
+        <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+          {agentCategories(agent).slice(0, 2).map((category) => (
+            <span className="rounded-full border border-[#533afd]/15 bg-secondary px-2 py-0.5 text-[10px] font-semibold uppercase text-[#273951]" key={category}>{category}</span>
+          ))}
+          <span>{formatRuns(agent.calls)} runs</span>
         </div>
 
-        <p className="min-h-16 text-sm leading-relaxed text-[#273951]">
+        <p className="mt-3 line-clamp-2 min-h-10 text-sm leading-5 text-[#273951]">
           {agent.headline}
         </p>
 
-        <div className="mt-5 grid grid-cols-3 gap-3 border-t border-border pt-5 text-sm">
-          <Metric
-            icon={CircleDollarSign}
-            label="Token(per 1M)"
-            value={formatAgentPriceShort(agent.pricePerCallUsd)}
-          />
-          <Metric
-            icon={Clock3}
-            label="Average Time"
-            value={formatDuration(agent.latencyMs)}
-          />
-          <Metric
-            icon={Braces}
-            label="Average Usage"
-            value={formatTokenUsage(totalAverageTokens(agent))}
-          />
+        <div className="mt-4 border-t border-border pt-4">
+          <div>
+            <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">From</div>
+            <div className="number-cell mt-0.5 text-base font-semibold text-[#0d253d]">{formatAgentPriceShort(agent.pricePerCallUsd)}<span className="text-xs font-normal text-muted-foreground"> / 1M tokens</span></div>
+          </div>
         </div>
 
-        <div className="mt-4 grid grid-cols-2 gap-3">
+        <div className="mt-4 grid grid-cols-[1fr_1fr_auto] gap-2">
           <Button
             className="w-full"
             disabled={isBusy || (hasGatewayAccess && (isTrying || isHired))}
@@ -4152,7 +4240,7 @@ function AgentMarketCard({
             type="button"
             variant="secondary"
           >
-            <Terminal /> Try!
+            <Terminal /> Try
           </Button>
           <Button
             className="w-full"
@@ -4160,9 +4248,38 @@ function AgentMarketCard({
             onClick={onHire}
             type="button"
           >
-            <PackageOpen /> Hire!
+            <PackageOpen /> Hire
+          </Button>
+          <Button aria-expanded={isExpanded} className="px-3" onClick={() => setIsExpanded((value) => !value)} type="button" variant="ghost">
+            <ChevronDown className={`transition ${isExpanded ? "rotate-180" : ""}`} />
+            <span className="text-xs">Details</span>
           </Button>
         </div>
+
+        {isExpanded ? (
+          <div className="mt-4 rounded-xl border border-[#d9d5ff] bg-[#f8f5ff] p-4">
+            <div className="grid grid-cols-2 gap-x-4 gap-y-4 text-sm">
+              <Metric icon={Clock3} label="Average time" value={formatDuration(agent.latencyMs)} />
+              <Metric icon={Braces} label="Average usage" value={formatTokenUsage(totalAverageTokens(agent))} />
+              <Metric icon={CircleDollarSign} label="Token price" value={formatAgentPriceShort(agent.pricePerCallUsd)} />
+              <Metric icon={Clock3} label="Last updated" value="Current release" />
+            </div>
+            <div className="mt-4 grid gap-2 border-t border-[#d9d5ff] pt-4 text-xs">
+              <div className="flex items-center justify-between gap-3"><span className="text-muted-foreground">Harness status</span><span className="inline-flex items-center gap-1 font-semibold text-[#533afd]"><ShieldCheck className="size-3" /> Protected</span></div>
+              <div className="flex items-center justify-between gap-3"><span className="text-muted-foreground">Creator</span><span className="font-medium text-[#273951]">{agent.creator || agent.handle}</span></div>
+            </div>
+            <Button className="mt-4 w-full" onClick={() => setShowSample((value) => !value)} size="sm" type="button" variant="secondary">
+              <Eye /> {showSample ? "Hide sample result" : "View sample result"}
+            </Button>
+            {showSample ? (
+              <div className="mt-3 rounded-lg border border-border bg-white p-3 text-xs leading-5 text-[#273951]">
+                <strong className="block text-[#1c1e54]">{agent.resultPreview.title}</strong>
+                <span className="mt-1 block text-muted-foreground">{agent.resultPreview.summary}</span>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
         {access ? (
           <div className="mt-3 rounded-lg border border-border bg-white px-3 py-2 text-xs leading-5 text-muted-foreground">
             <div className="flex items-center justify-between gap-3">
@@ -4613,205 +4730,68 @@ function CreateAgentPage({ user }: { user: AuthUser | null }) {
       </section>
 
       <section className="px-4 py-8 md:px-8">
-        <div className="mx-auto grid max-w-7xl gap-6 lg:grid-cols-[1fr_360px] lg:items-start">
-          <div className="space-y-5">
-            <Card>
-              <CardHeader>
-                <CardTitle>Profile</CardTitle>
-                <CardDescription>
-                  Start with the short public explanation buyers see first.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="grid gap-4 md:grid-cols-2">
-                <Field label="Agent name">
-                  <Input value={draft.agentName} onChange={updateDraft("agentName")} />
-                </Field>
-                <Field label="One-line description">
-                  <Input value={draft.headline} onChange={updateDraft("headline")} />
-                </Field>
-                <Field className="md:col-span-2" label="Description">
-                  <textarea
-                    className="min-h-28 w-full rounded-md border border-input bg-white px-3 py-2 text-sm text-foreground shadow-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
-                    onChange={updateDraft("description")}
-                    placeholder="What does this Agent do, and why should someone hire it?"
-                    value={draft.description}
-                  />
-                </Field>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>How to use</CardTitle>
-                <CardDescription>
-                  Tell buyers what to ask for, what context to provide, and
-                  what kind of result they can expect.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="grid gap-4">
-                <textarea
-                  className="min-h-28 w-full rounded-md border border-input bg-white px-3 py-2 text-sm text-foreground shadow-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
-                  onChange={updateDraft("howToUse")}
-                  value={draft.howToUse}
-                />
-                <Field label="Result title">
-                  <Input
-                    value={draft.typicalOutputTitle}
-                    onChange={updateDraft("typicalOutputTitle")}
-                  />
-                </Field>
-                <Field label="Result summary">
-                  <Input
-                    value={draft.typicalOutputSummary}
-                    onChange={updateDraft("typicalOutputSummary")}
-                  />
-                </Field>
-                <Field label="Sample result">
-                  <textarea
-                    className="min-h-28 w-full rounded-md border border-input bg-white px-3 py-2 text-sm text-foreground shadow-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
-                    onChange={updateDraft("typicalOutputSample")}
-                    value={draft.typicalOutputSample}
-                  />
-                </Field>
-                <Field label="Result image or video">
-                  <input
-                    accept=".jpg,.jpeg,video/*"
-                    className="block w-full rounded-md border border-dashed border-input bg-white px-3 py-3 text-sm text-muted-foreground file:mr-4 file:rounded-full file:border-0 file:bg-secondary file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-primary"
-                    onChange={handleTypicalOutputMediaChange}
-                    type="file"
-                  />
-                  <span className="mt-2 block text-xs leading-5 text-muted-foreground">
-                    Stored in Supabase Storage when you create the Agent.
-                  </span>
-                </Field>
-                {currentTypicalOutputMediaUrl ? (
-                  <div className="overflow-hidden rounded-xl border border-border bg-secondary">
-                    {currentTypicalOutputMediaType === "video" ? (
-                      <video
-                        className="aspect-video w-full bg-black object-contain"
-                        controls
-                        src={currentTypicalOutputMediaUrl}
-                      />
-                    ) : (
-                      <img
-                        alt="Result preview"
-                        className="aspect-video w-full object-cover"
-                        src={currentTypicalOutputMediaUrl}
-                      />
-                    )}
-                    {uploadedTypicalOutputMedia ? (
-                      <div className="border-t border-border px-3 py-2 text-xs text-muted-foreground">
-                        Stored at {uploadedTypicalOutputMedia.path}
-                      </div>
-                    ) : null}
-                  </div>
-                ) : null}
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Harness files</CardTitle>
-                <CardDescription>
-                  Upload the private Harness archive.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="grid gap-4">
-                <Field label="Agent file">
-                  <input
-                    accept=".zip,.gz,.tgz,.tar.gz,application/zip,application/gzip"
-                    className="block w-full rounded-md border border-dashed border-input bg-white px-3 py-3 text-sm text-muted-foreground file:mr-4 file:rounded-full file:border-0 file:bg-secondary file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-primary"
-                    onChange={(event) =>
-                      setAgentFiles(Array.from(event.target.files ?? []))
-                    }
-                    type="file"
-                  />
-                  <span className="mt-2 block text-xs leading-5 text-muted-foreground">
-                    Upload a zipped or gzipped Agent Harness.
-                  </span>
-                </Field>
-              </CardContent>
-            </Card>
+        <div className="mx-auto max-w-5xl">
+          <div className="mb-6 grid grid-cols-2 gap-2 md:grid-cols-4">
+            {["Public Profile", "Private Harness", "Pricing", "Contract + Sample"].map((label, index) => (
+              <div className={`rounded-xl border px-3 py-3 text-xs font-semibold ${index === 1 ? "border-[#533afd] bg-[#ede9ff] text-[#2e2b8c]" : "border-border bg-white text-[#52637a]"}`} key={label}>
+                <span className="mr-2 text-primary">{index + 1}</span>{label}
+              </div>
+            ))}
           </div>
 
-          <aside className="top-24 h-fit space-y-5 lg:sticky">
+          <div className="space-y-5">
             <Card>
-              <CardHeader>
-                <CardTitle>Pricing</CardTitle>
-                <CardDescription>
-                  Fees are charged per million tokens used by this Agent.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <Field label="Model">
-                  <select
-                    className="h-10 w-full rounded-md border border-input bg-white px-3 py-2 text-sm text-foreground shadow-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring"
-                    onChange={updateDraft("modelId")}
-                    value={draft.modelId}
-                  >
-                    {creatorModelOptions.map((model) => (
-                      <option key={model.id} value={model.id}>
-                        {model.label}
-                      </option>
-                    ))}
-                  </select>
-                  <span className="mt-2 block text-xs leading-5 text-muted-foreground">
-                    {selectedModel.description}
-                  </span>
-                </Field>
-                <div className="grid grid-cols-2 gap-3">
-                  <Field label="Base fee">
-                    <div className="rounded-md border border-border bg-white px-3 py-2 text-sm text-[#1c1e54]">
-                      {formatAgentPrice(selectedModel.basePricePerCallUsd)}
-                    </div>
-                  </Field>
-                  <Field label="Your fee">
-                    <Input
-                      min="0"
-                      step="0.001"
-                      type="number"
-                      value={draft.creatorFeePerCallUsd}
-                      onChange={updateDraft("creatorFeePerCallUsd")}
-                    />
-                  </Field>
-                </div>
-                <div className="rounded-lg border border-[#533afd]/20 bg-secondary p-3">
-                  <div className="text-xs font-medium text-muted-foreground">
-                    Final token fee
-                  </div>
-                  <div className="mt-1 number-cell text-2xl font-light text-[#1c1e54]">
-                    {formatAgentPrice(totalPricePerCallUsd)}
-                  </div>
-                  <div className="mt-1 text-xs leading-5 text-muted-foreground">
-                    {formatAgentPrice(selectedModel.basePricePerCallUsd)} base +{" "}
-                    {formatAgentPrice(creatorFeePerCallUsd)} creator fee
-                  </div>
-                </div>
-                <div className="rounded-lg border border-border bg-white px-3 py-2 text-xs leading-5 text-muted-foreground">
-                  Statistics are calculated later by the gateway from real usage
-                  logs and saved to the marketplace database.
-                </div>
-                <Button
-                  className="w-full"
-                  disabled={isSealing}
-                  onClick={sealHarness}
-                  type="button"
-                >
-                  <UploadCloud /> {isSealing ? "Creating..." : "Create Agent"}
-                </Button>
-                <div className="flex items-start gap-2 text-xs leading-5 text-muted-foreground">
-                  <AlertTriangle className="mt-0.5 size-4 shrink-0 text-[#ea2261]" />
-                  Gateway validates AGENTS.md, encrypts the archive, stores the
-                  protected artifact, and registers the Agent.
-                </div>
-                {createError ? (
-                  <div className="rounded-lg border border-[#ea2261]/20 bg-[#fff8fb] px-3 py-2 text-xs leading-5 text-[#9f1239]">
-                    {createError}
-                  </div>
-                ) : null}
+              <CardHeader><CreateStepTitle number="1" title="Public Profile" /><CardDescription>What buyers see before they try the Agent.</CardDescription></CardHeader>
+              <CardContent className="grid gap-4 md:grid-cols-2">
+                <Field label="Agent name"><Input value={draft.agentName} onChange={updateDraft("agentName")} /></Field>
+                <Field label="One-line description"><Input value={draft.headline} onChange={updateDraft("headline")} /></Field>
+                <Field className="md:col-span-2" label="Description"><textarea className="min-h-24 w-full rounded-md border border-input bg-white px-3 py-2 text-sm text-foreground shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring" onChange={updateDraft("description")} value={draft.description} /></Field>
               </CardContent>
             </Card>
-          </aside>
+
+            <Card className="border-[#533afd]/45 bg-[#fbfaff] shadow-[rgba(83,58,253,0.10)_0_12px_36px]">
+              <CardHeader>
+                <div className="flex flex-wrap items-center justify-between gap-3"><CreateStepTitle number="2" title="Private Harness Upload" /><span className="inline-flex items-center gap-1.5 rounded-full bg-[#e7f8ee] px-3 py-1 text-xs font-semibold text-[#166534]"><LockKeyhole className="size-3" /> Encrypted on upload</span></div>
+                <CardDescription>The private playbook is never shown on the marketplace or sent to buyers.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <label className="flex min-h-36 cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-[#8f7dff] bg-white p-6 text-center transition hover:bg-[#f8f5ff]">
+                  <UploadCloud className="size-7 text-primary" />
+                  <span className="mt-3 text-sm font-semibold text-[#1c1e54]">Upload private Harness archive</span>
+                  <span className="mt-1 text-xs text-muted-foreground">ZIP, TAR.GZ, or GZ · prompts, skills, examples, rubrics</span>
+                  <input accept=".zip,.gz,.tgz,.tar.gz,application/zip,application/gzip" className="sr-only" onChange={(event) => setAgentFiles(Array.from(event.target.files ?? []))} type="file" />
+                  {agentFiles[0] ? <span className="mt-3 rounded-full bg-[#edfff4] px-3 py-1 text-xs font-semibold text-[#166534]">{agentFiles[0].name}</span> : null}
+                </label>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader><CreateStepTitle number="3" title="Pricing" /><CardDescription>Set the model cost and your creator fee.</CardDescription></CardHeader>
+              <CardContent className="grid gap-4 md:grid-cols-[1fr_1fr_1.2fr] md:items-end">
+                <Field label="Model"><select className="h-10 w-full rounded-md border border-input bg-white px-3 py-2 text-sm shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring" onChange={updateDraft("modelId")} value={draft.modelId}>{creatorModelOptions.map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}</select></Field>
+                <Field label="Your fee / 1M tokens"><Input min="0" step="0.001" type="number" value={draft.creatorFeePerCallUsd} onChange={updateDraft("creatorFeePerCallUsd")} /></Field>
+                <div className="rounded-lg border border-[#533afd]/20 bg-secondary px-4 py-2"><div className="text-[10px] font-medium uppercase text-muted-foreground">Buyer price</div><div className="number-cell mt-0.5 text-xl font-semibold text-[#1c1e54]">{formatAgentPrice(totalPricePerCallUsd)}</div></div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader><CreateStepTitle number="4" title="Execution Contract / Sample Output" /><CardDescription>Define the request and show the result—not the private method.</CardDescription></CardHeader>
+              <CardContent className="grid gap-4 md:grid-cols-2">
+                <Field className="md:col-span-2" label="How buyers should use it"><textarea className="min-h-24 w-full rounded-md border border-input bg-white px-3 py-2 text-sm shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring" onChange={updateDraft("howToUse")} value={draft.howToUse} /></Field>
+                <Field label="Sample result title"><Input value={draft.typicalOutputTitle} onChange={updateDraft("typicalOutputTitle")} /></Field>
+                <Field label="Sample result summary"><Input value={draft.typicalOutputSummary} onChange={updateDraft("typicalOutputSummary")} /></Field>
+                <Field className="md:col-span-2" label="Sample result"><textarea className="min-h-24 w-full rounded-md border border-input bg-white px-3 py-2 text-sm shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring" onChange={updateDraft("typicalOutputSample")} value={draft.typicalOutputSample} /></Field>
+                <Field className="md:col-span-2" label="Result image or video"><input accept=".jpg,.jpeg,video/*" className="block w-full rounded-md border border-dashed border-input bg-white px-3 py-3 text-sm text-muted-foreground file:mr-4 file:rounded-full file:border-0 file:bg-secondary file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-primary" onChange={handleTypicalOutputMediaChange} type="file" /></Field>
+                {currentTypicalOutputMediaUrl ? <div className="overflow-hidden rounded-xl border border-border bg-secondary md:col-span-2">{currentTypicalOutputMediaType === "video" ? <video className="aspect-video w-full bg-black object-contain" controls src={currentTypicalOutputMediaUrl} /> : <img alt="Result preview" className="aspect-video w-full object-cover" src={currentTypicalOutputMediaUrl} />}</div> : null}
+              </CardContent>
+            </Card>
+
+            <div className="rounded-2xl border border-[#d9d5ff] bg-[#f0edff] p-5 md:flex md:items-center md:justify-between md:gap-6">
+              <div><div className="text-sm font-semibold text-[#171452]">Ready to protect and publish?</div><p className="mt-1 text-xs leading-5 text-[#4e5d77]">HireMe validates AGENTS.md, encrypts the Harness, and registers the execution contract.</p></div>
+              <Button className="mt-4 w-full md:mt-0 md:w-auto" disabled={isSealing} onClick={sealHarness} size="lg" type="button"><ShieldCheck /> {isSealing ? "Protecting..." : "Protect & Publish"}</Button>
+            </div>
+            {createError ? <div className="rounded-lg border border-[#ea2261]/20 bg-[#fff8fb] px-4 py-3 text-sm text-[#9f1239]">{createError}</div> : null}
+          </div>
         </div>
 
         {sealedRecord ? (
@@ -4821,6 +4801,15 @@ function CreateAgentPage({ user }: { user: AuthUser | null }) {
         ) : null}
       </section>
     </main>
+  );
+}
+
+function CreateStepTitle({ number, title }: { number: string; title: string }) {
+  return (
+    <CardTitle className="flex items-center gap-3">
+      <span className="flex size-7 items-center justify-center rounded-full bg-[#533afd] text-xs font-semibold text-white">{number}</span>
+      {title}
+    </CardTitle>
   );
 }
 
