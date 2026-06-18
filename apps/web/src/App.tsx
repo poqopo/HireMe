@@ -4814,7 +4814,30 @@ async function uploadTypicalOutputMedia({
 function CreateAgentPage({ user }: { user: AuthUser | null }) {
   const navigate = useNavigate();
   const stepRefs = useRef<(HTMLElement | null)[]>([]);
+  const stepNavRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const [activeStep, setActiveStep] = useState(0);
+  const stepItems = [
+    {
+      label: "Public Profile",
+      id: "public-profile",
+      description: "What buyers see before they try the Agent.",
+    },
+    {
+      label: "Private Harness",
+      id: "private-harness",
+      description: "Upload the protected playbook and keep it private.",
+    },
+    {
+      label: "Pricing",
+      id: "pricing",
+      description: "Set the model cost and your creator fee.",
+    },
+    {
+      label: "Contract + Sample",
+      id: "contract-sample",
+      description: "Define the request and show the result.",
+    },
+  ] as const;
   const [draft, setDraft] = useState({
     agentName: "Private Code Reviewer",
     headline: "Reviews pull requests and returns concrete risks, fixes, and verification steps.",
@@ -4889,12 +4912,12 @@ function CreateAgentPage({ user }: { user: AuthUser | null }) {
         );
         const target = visibleEntries[0].target as HTMLElement;
         const stepIndex = Number(target.dataset.stepIndex || 0);
-        setActiveStep(stepIndex);
+        setActiveStep((current) => (current === stepIndex ? current : stepIndex));
       },
       {
         root: null,
-        rootMargin: "-18% 0px -40% 0px",
-        threshold: [0.2, 0.35, 0.5],
+        rootMargin: "-22% 0px -45% 0px",
+        threshold: [0.18, 0.3, 0.45, 0.6],
       },
     );
 
@@ -4904,6 +4927,28 @@ function CreateAgentPage({ user }: { user: AuthUser | null }) {
       observer.disconnect();
     };
   }, []);
+
+  useEffect(() => {
+    const activeButton = stepNavRefs.current[activeStep];
+    if (!activeButton) return;
+    if (window.matchMedia("(min-width: 768px)").matches) return;
+
+    activeButton.scrollIntoView({
+      behavior: prefersReducedMotion() ? "auto" : "smooth",
+      block: "nearest",
+      inline: "center",
+    });
+  }, [activeStep]);
+
+  const scrollToStep = (index: number) => {
+    const target = stepRefs.current[index];
+    if (!target) return;
+
+    target.scrollIntoView({
+      behavior: prefersReducedMotion() ? "auto" : "smooth",
+      block: "start",
+    });
+  };
 
   async function sealHarness() {
     setIsSealing(true);
@@ -5082,16 +5127,31 @@ function CreateAgentPage({ user }: { user: AuthUser | null }) {
 
       <section className="px-4 py-8 md:px-8">
         <div className="mx-auto max-w-5xl">
-          <div className="mb-6 grid grid-cols-2 gap-2 md:grid-cols-4">
-            {["Public Profile", "Private Harness", "Pricing", "Contract + Sample"].map((label, index) => (
-              <div className={`rounded-xl border px-3 py-3 text-xs font-semibold transition-colors duration-200 ${activeStep === index ? "border-[#533afd] bg-[#ede9ff] text-[#2e2b8c] shadow-[inset_0_0_0_1px_rgba(83,58,253,0.08)]" : "border-border bg-white text-[#52637a]"}`} key={label}>
-                <span className="mr-2 text-primary">{index + 1}</span>{label}
-              </div>
-            ))}
+          <div className="sticky top-[5rem] z-20 -mx-4 mb-6 border-y border-[#e2ddf0] bg-[#f6f9fc]/95 px-4 py-3 backdrop-blur md:top-24 md:mx-0 md:rounded-2xl md:border md:border-[#e2ddf0] md:bg-white/80 md:px-0 md:py-0">
+            <div className="flex gap-2 overflow-x-auto md:grid md:grid-cols-4 md:gap-2 md:overflow-visible">
+              {stepItems.map((step, index) => {
+                const isActive = activeStep === index;
+                return (
+                  <button
+                    aria-current={isActive ? "step" : undefined}
+                    className={`min-w-[11.5rem] flex-1 rounded-xl border px-3 py-3 text-left text-xs font-semibold transition-colors duration-200 md:min-w-0 ${isActive ? "border-[#533afd]/35 bg-gradient-to-br from-[#efeaff] to-[#f8f5ff] text-[#2e2b8c] shadow-[0_8px_20px_rgba(83,58,253,0.08)]" : "border-[#d9d5e2] bg-white/90 text-[#5f6f85] hover:border-[#c8c2d8] hover:bg-[#fbfaff]"}`}
+                    key={step.id}
+                    onClick={() => scrollToStep(index)}
+                    ref={(element) => { stepNavRefs.current[index] = element; }}
+                    type="button"
+                  >
+                    <span className={`mr-2 inline-flex size-5 items-center justify-center rounded-full border text-[11px] font-semibold ${isActive ? "border-[#cfc6ff] bg-white/70 text-[#2e2b8c]" : "border-[#d9d5e2] bg-[#f8f7fb] text-[#6b7280]"}`}>
+                      {String(index + 1)}
+                    </span>
+                    <span className="align-middle">{step.label}</span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
           <div className="space-y-5">
-            <div ref={(element: HTMLDivElement | null) => { stepRefs.current[0] = element; }} data-step-index="0">
+            <section id="public-profile" ref={(element: HTMLElement | null) => { stepRefs.current[0] = element; }} data-step-index="0" className="scroll-mt-28 md:scroll-mt-32">
               <Card>
               <CardHeader><CreateStepTitle number="1" title="Public Profile" /><CardDescription>What buyers see before they try the Agent.</CardDescription></CardHeader>
               <CardContent className="grid gap-4 md:grid-cols-2">
@@ -5100,9 +5160,9 @@ function CreateAgentPage({ user }: { user: AuthUser | null }) {
                 <Field className="md:col-span-2" label="Description"><textarea className="min-h-24 w-full rounded-md border border-input bg-white px-3 py-2 text-sm text-foreground shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring" onChange={updateDraft("description")} value={draft.description} /></Field>
               </CardContent>
               </Card>
-            </div>
+            </section>
 
-            <div ref={(element: HTMLDivElement | null) => { stepRefs.current[1] = element; }} data-step-index="1">
+            <section id="private-harness" ref={(element: HTMLElement | null) => { stepRefs.current[1] = element; }} data-step-index="1" className="scroll-mt-28 md:scroll-mt-32">
               <Card className="border-[#533afd]/45 bg-[#fbfaff] shadow-[rgba(83,58,253,0.10)_0_12px_36px]">
               <CardHeader>
                 <div className="flex flex-wrap items-center justify-between gap-3"><CreateStepTitle number="2" title="Private Harness Upload" /><span className="inline-flex items-center gap-1.5 rounded-full bg-[#e7f8ee] px-3 py-1 text-xs font-semibold text-[#166534]"><LockKeyhole className="size-3" /> Encrypted on upload</span></div>
@@ -5118,9 +5178,9 @@ function CreateAgentPage({ user }: { user: AuthUser | null }) {
                 </label>
               </CardContent>
               </Card>
-            </div>
+            </section>
 
-            <div ref={(element: HTMLDivElement | null) => { stepRefs.current[2] = element; }} data-step-index="2">
+            <section id="pricing" ref={(element: HTMLElement | null) => { stepRefs.current[2] = element; }} data-step-index="2" className="scroll-mt-28 md:scroll-mt-32">
               <Card>
               <CardHeader><CreateStepTitle number="3" title="Pricing" /><CardDescription>Set the model cost and your creator fee.</CardDescription></CardHeader>
               <CardContent className="grid gap-4 md:grid-cols-[1fr_1fr_1.2fr] md:items-end">
@@ -5129,9 +5189,9 @@ function CreateAgentPage({ user }: { user: AuthUser | null }) {
                 <div className="rounded-lg border border-[#533afd]/20 bg-secondary px-4 py-2"><div className="text-[10px] font-medium uppercase text-muted-foreground">Buyer price</div><div className="number-cell mt-0.5 text-xl font-semibold text-[#1c1e54]">{formatAgentPrice(totalPricePerCallUsd)}</div></div>
               </CardContent>
               </Card>
-            </div>
+            </section>
 
-            <div ref={(element: HTMLDivElement | null) => { stepRefs.current[3] = element; }} data-step-index="3">
+            <section id="contract-sample" ref={(element: HTMLElement | null) => { stepRefs.current[3] = element; }} data-step-index="3" className="scroll-mt-28 md:scroll-mt-32">
               <Card>
               <CardHeader><CreateStepTitle number="4" title="Execution Contract / Sample Output" /><CardDescription>Define the request and show the result—not the private method.</CardDescription></CardHeader>
               <CardContent className="grid gap-4 md:grid-cols-2">
@@ -5143,7 +5203,7 @@ function CreateAgentPage({ user }: { user: AuthUser | null }) {
                 {currentTypicalOutputMediaUrl ? <div className="overflow-hidden rounded-xl border border-border bg-secondary md:col-span-2">{currentTypicalOutputMediaType === "video" ? <video className="aspect-video w-full bg-black object-contain" controls src={currentTypicalOutputMediaUrl} /> : <img alt="Result preview" className="aspect-video w-full object-cover" src={currentTypicalOutputMediaUrl} />}</div> : null}
               </CardContent>
               </Card>
-            </div>
+            </section>
 
             <div className="rounded-2xl border border-[#d9d5ff] bg-[#f0edff] p-5 md:flex md:items-center md:justify-between md:gap-6">
               <div><div className="text-sm font-semibold text-[#171452]">Ready to protect and publish?</div><p className="mt-1 text-xs leading-5 text-[#4e5d77]">HireMe validates AGENTS.md, encrypts the Harness, and registers the execution contract.</p></div>
