@@ -2547,10 +2547,8 @@ function ExploreAgentsPage({
 }) {
   const signAndExecuteTransaction = useSignAndExecuteTransaction();
   const [query, setQuery] = useState("");
-  const [catalogView, setCatalogView] = useState<CatalogView>("agents");
-  const [selectedTopics, setSelectedTopics] = useState<Agent["category"][]>(
-    topicFilters,
-  );
+  const [catalogView, setCatalogView] = useState<CatalogView | null>(null);
+  const [selectedTopics, setSelectedTopics] = useState<Agent["category"][]>([]);
   const [marketplaceAgents, setMarketplaceAgents] =
     useState<Agent[]>(fallbackAgents);
   const [accessSnapshot, setAccessSnapshot] =
@@ -2614,9 +2612,9 @@ function ExploreAgentsPage({
       if (!isMarketplaceAgentVisible(agent)) return false;
       if (!isPaidAgent(agent)) return false;
       const categories = agentCategories(agent);
-      const matchesTopic = categories.some((category) =>
-        selectedTopics.includes(category),
-      );
+      const matchesTopic =
+        selectedTopics.length === 0 ||
+        categories.some((category) => selectedTopics.includes(category));
       const text = `${categories.join(" ")} ${agent.team.name} ${agent.team.handle} ${agent.team.owner} ${agent.team.publicSummary} ${agent.name} ${agent.handle} ${agent.headline} ${agent.publicSummary} ${agent.skills.join(" ")}`.toLowerCase();
       const matchesQuery = text.includes(query.toLowerCase());
       return matchesTopic && matchesQuery;
@@ -2649,8 +2647,8 @@ function ExploreAgentsPage({
     catalogView === "teams" ? teamResults.length : agentResults.length;
 
   function resetFilters() {
-    setSelectedTopics(topicFilters);
-    setCatalogView("agents");
+    setSelectedTopics([]);
+    setCatalogView(null);
     setQuery("");
   }
 
@@ -2725,13 +2723,17 @@ function ExploreAgentsPage({
                   return (
                     <button
                       aria-pressed={isSelected}
-                      className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] font-semibold leading-none transition ${
+                      className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] font-semibold leading-none transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6b7280]/40 focus-visible:ring-offset-2 ${
                         isSelected
-                          ? "border-[#533afd] bg-[#533afd] text-white shadow-[rgba(83,58,253,0.20)_0_6px_16px]"
-                          : "border-border bg-white text-[#273951] hover:border-[#533afd]/45 hover:bg-secondary"
+                          ? "border-[#374151] bg-[#111827] text-white hover:bg-[#1f2937] active:bg-black"
+                          : "border-[#d1d5db] bg-white text-[#374151] hover:border-[#c4c9d0] hover:bg-[#f3f4f6] active:bg-[#e5e7eb]"
                       }`}
                       key={view.id}
-                      onClick={() => setCatalogView(view.id)}
+                      onClick={() =>
+                        setCatalogView((current) =>
+                          current === view.id ? null : view.id,
+                        )
+                      }
                       type="button"
                     >
                       <span
@@ -2754,10 +2756,10 @@ function ExploreAgentsPage({
                   return (
                     <button
                       aria-pressed={isSelected}
-                      className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] font-semibold leading-none transition ${
+                      className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] font-semibold leading-none transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6b7280]/40 focus-visible:ring-offset-2 ${
                         isSelected
-                          ? "border-[#533afd] bg-[#533afd] text-white shadow-[rgba(83,58,253,0.20)_0_6px_16px]"
-                          : "border-border bg-white text-[#273951] hover:border-[#533afd]/45 hover:bg-secondary"
+                          ? "border-[#374151] bg-[#111827] text-white hover:bg-[#1f2937] active:bg-black"
+                          : "border-[#d1d5db] bg-white text-[#374151] hover:border-[#c4c9d0] hover:bg-[#f3f4f6] active:bg-[#e5e7eb]"
                       }`}
                       key={topic}
                       onClick={() =>
@@ -2791,7 +2793,7 @@ function ExploreAgentsPage({
                 ) : null}
                 {dataSource.message ? <span className="leading-5 text-muted-foreground">{dataSource.message}</span> : null}
               </div>
-              <button className="font-medium text-muted-foreground underline-offset-4 transition hover:text-primary hover:underline" onClick={resetFilters} type="button">
+              <button className="rounded-md px-2 py-1 font-medium text-[#6b7280] underline-offset-4 transition hover:bg-[#f3f4f6] hover:text-[#111827] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6b7280]/40 focus-visible:ring-offset-2 active:bg-[#e5e7eb]" onClick={resetFilters} type="button">
                 Reset filters
               </button>
             </div>
