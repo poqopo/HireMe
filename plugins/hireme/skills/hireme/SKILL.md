@@ -10,7 +10,7 @@ Use this skill when the user wants to work with HireMe protected AI agents from 
 ## Workflow
 
 1. Call `hireme_whoami` when the user asks who they are signed in as, which HireMe account Codex is using, or whether OAuth/gateway identity is connected.
-2. If the user gives a plain natural-language delegation, call `hireme_request` with the full request text. Example: `example-landing-designer에게 핸드폰 상세 랜딩페이지 하나 만들어달라고 해`.
+2. If the user gives a plain natural-language delegation, call `hireme_request` with the full request text. Example: `launch-operator에게 제품 출시 페이지 방향을 잡아달라고 해`.
 3. Call `hireme_list_my_agents` when the user asks which agents they can currently use. This reads Try/Hire entitlements from the gateway.
 4. Call `hireme_list_hired_agents` when the user asks what agents are available in the marketplace.
 5. If the user explicitly asks to switch active agents, call `hireme_select_agent` with that `agent_id`.
@@ -40,17 +40,14 @@ Use explicit agent IDs for important calls:
 - `data-ledger`
 - `launch-operator`
 - `ops-router`
-- `example-code-reviewer`
-- `example-landing-designer`
-- `example-aster-x1-launcher`
 - `wal-test1`
 
 For Korean natural-language requests, route these directly:
 
-- `example-landing-designer에게 핸드폰 상세 랜딩페이지 하나 만들어달라고 해` -> `hireme_request`
-- `Aster X1 프리오더 랜딩페이지 만들어줘` -> `hireme_request`, inferred agent `example-aster-x1-launcher`
-- `랜딩페이지 만들어줘`, `상세 페이지 만들어줘`, `핸드폰 페이지 만들어줘` -> `hireme_request`, inferred agent `example-landing-designer`
-- `코드 리뷰해줘`, `migration diff 리뷰해줘` -> `hireme_request`, inferred agent `example-code-reviewer`
+- `launch-operator에게 제품 출시 페이지 방향을 잡아달라고 해` -> `hireme_request`
+- `Aster X1 프리오더 랜딩페이지 방향 잡아줘` -> `hireme_request`, inferred agent `launch-operator`
+- `랜딩페이지 만들어줘`, `상세 페이지 만들어줘`, `핸드폰 페이지 만들어줘` -> `hireme_request`, inferred agent `launch-operator`
+- `코드 리뷰해줘`, `migration diff 리뷰해줘` -> `hireme_request`, inferred agent `codex-builder`
 - `wal_test1 폴더 구조 읽어줘`, `blobId는 <id>인 Walrus blob 읽어줘` -> `hireme_call_walrus_agent`
 - `나 에이전트 만들건데 템플릿 만들어줘`, `새 Agent template 만들어줘` -> `hireme_create_agent_template` or `hireme_request`
 

@@ -45,7 +45,11 @@ services:
         sync: false
       - key: HIREME_SEAL_KEY_SERVER_IDS
         sync: false
-      - key: OPENAI_API_KEY
+      - key: HIREME_LLM_PROVIDER
+        value: ollama
+      - key: OLLAMA_BASE_URL
+        value: https://ollama.com/api
+      - key: OLLAMA_API_KEY
         sync: false
-      - key: HIREME_OPENAI_MODEL
-        sync: false
+      - key: OLLAMA_MODEL
+        value: gpt-oss:120b

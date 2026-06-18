@@ -70,8 +70,7 @@ const requests = [
     params: {
       name: "hireme_request",
       arguments: {
-        request:
-          "example-landing-designer에게 핸드폰 상세 랜딩페이지 하나 만들어달라고 해",
+        request: "launch-operator에게 제품 출시 페이지 방향을 잡아달라고 해",
       },
     },
   },
@@ -94,7 +93,7 @@ const requests = [
     params: {
       name: "hireme_read_memwal",
       arguments: {
-        agent_id: "example-code-reviewer",
+        agent_id: "walrus-researcher",
       },
     },
   },
@@ -225,10 +224,10 @@ if (
 
 if (
   !naturalResult?.result?.content?.[0]?.text?.includes(
-    '"inferredAgentId": "example-landing-designer"',
+    '"inferredAgentId": "launch-operator"',
   )
 ) {
-  throw new Error("hireme_request did not infer the landing designer");
+  throw new Error("hireme_request did not infer launch-operator");
 }
 
 if (

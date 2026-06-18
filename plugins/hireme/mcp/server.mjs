@@ -130,78 +130,6 @@ const agents = [
     latencyMs: 690,
   },
   {
-    id: "example-code-reviewer",
-    name: "Example Code Reviewer",
-    handle: "@examples/code-reviewer",
-    creator: "HireMe Examples",
-    category: "Code",
-    status: "Available",
-    headline: "Reviews pull requests through a protected private rubric.",
-    publicSummary:
-      "A demo agent for validating the HireMe protected runner flow. Buyers see review findings, not the creator folder.",
-    harnessSummary: "private rubric + risk-review skill + redacted finding formatter",
-    memwalPolicy:
-      "Example AGENTS.md, private risk checklist, and harness policy decrypt only inside the gateway runner.",
-    skills: ["Code review", "Risk triage", "Test planning"],
-    protectedAssets: ["AGENTS.md", "skills/**", "harness/**", "private rubric"],
-    pricePerCallUsd: 28,
-    freeCalls: 3,
-    rating: 4.8,
-    calls: 12,
-    latencyMs: 840,
-  },
-  {
-    id: "example-landing-designer",
-    name: "Example Landing Designer",
-    handle: "@examples/landing-designer",
-    creator: "HireMe Examples",
-    category: "Growth",
-    status: "Available",
-    headline: "Creates landing page briefs from a protected design system guide.",
-    publicSummary:
-      "A demo agent that uses protected AGENTS.md and design.md instructions to produce safe landing page implementation guidance.",
-    harnessSummary:
-      "private AGENTS.md + design.md guide + landing page brief formatter",
-    memwalPolicy:
-      "Private AGENTS.md and design.md decrypt only inside the gateway runner.",
-    skills: ["Landing pages", "Design systems", "Conversion copy"],
-    protectedAssets: ["AGENTS.md", "design.md", "skills/**", "harness/**"],
-    pricePerCallUsd: 26,
-    freeCalls: 5,
-    rating: 4.9,
-    calls: 8,
-    latencyMs: 790,
-  },
-  {
-    id: "example-aster-x1-launcher",
-    name: "Example Aster X1 Launch Agent",
-    handle: "@examples/aster-x1-launcher",
-    creator: "HireMe Examples",
-    category: "Growth",
-    status: "Available",
-    headline: "Builds Aster X1 preorder pages from a protected product dossier.",
-    publicSummary:
-      "A narrow demo agent for a single smartphone launch. Buyers receive preorder-page output, not the private product dossier or launch playbook.",
-    harnessSummary:
-      "private Aster X1 product dossier + launch playbook + preorder-page formatter",
-    memwalPolicy:
-      "Private Aster X1 product dossier, launch playbook, and preorder skill decrypt only inside the gateway runner.",
-    skills: ["Smartphone preorder pages", "Launch offer mechanics", "Product detail conversion"],
-    protectedAssets: [
-      "AGENTS.md",
-      "product-dossier.json",
-      "launch-playbook.json",
-      "visual-layout-harness.json",
-      "skills/**",
-      "harness/**",
-    ],
-    pricePerCallUsd: 34,
-    freeCalls: 3,
-    rating: 5.0,
-    calls: 2,
-    latencyMs: 810,
-  },
-  {
     id: "wal-test1",
     name: "Walrus Test One",
     handle: "@examples/wal-test1",
@@ -275,7 +203,7 @@ const inputSchemas = {
         type: "string",
         minLength: 1,
         description:
-          "Plain-language user request, for example: example-landing-designer에게 핸드폰 상세 랜딩페이지 하나 만들어달라고 해.",
+          "Plain-language user request, for example: launch-operator에게 제품 출시 페이지 방향을 잡아달라고 해.",
       },
       agent_id: {
         type: "string",
@@ -291,7 +219,7 @@ const inputSchemas = {
       hire_receipt_object_id: {
         type: "string",
         description:
-          "Optional paid hire receipt. Local protected example agents default to hire_receipt_local_paid_demo.",
+          "Optional paid hire receipt. Explicit local artifact validation may use hire_receipt_local_paid_demo.",
       },
       hirer_id: {
         type: "string",
@@ -813,12 +741,12 @@ const inputSchemas = {
       agent_id: {
         type: "string",
         description:
-          "Optional protected example agent id. Use example-landing-designer for the design.md landing page demo.",
+          "Optional published agent id. Provide this when validating a specific artifact record.",
       },
       record_path: {
         type: "string",
         description:
-          "Path to the public artifact record. Defaults to the example code reviewer record.",
+          "Path to the public artifact record. Required when validating a local artifact file.",
       },
       walrus_path: {
         type: "string",
@@ -843,7 +771,7 @@ const inputSchemas = {
       record_path: {
         type: "string",
         description:
-          "Path to the public artifact record. Defaults to the example code reviewer record.",
+          "Path to the public artifact record. Required when validating a local artifact file.",
       },
       walrus_path: {
         type: "string",
@@ -875,7 +803,7 @@ const tools = [
     name: "hireme_request",
     title: "Route a plain-language HireMe request",
     description:
-      "Use this for natural requests like 'example-landing-designer에게 핸드폰 상세 랜딩페이지 하나 만들어달라고 해'. It infers the agent, default demo hire receipt, and calls the protected gateway.",
+      "Use this for natural requests like 'launch-operator에게 제품 출시 페이지 방향을 잡아달라고 해'. It infers the agent and calls the protected gateway.",
     inputSchema: inputSchemas.hireme_request,
   },
   {
@@ -1023,15 +951,6 @@ const tools = [
     inputSchema: inputSchemas.hireme_connection_help,
   },
 ];
-
-const localSealedExampleRecords = {
-  "example-code-reviewer":
-    ".hireme/artifacts/example-code-reviewer.public-record.json",
-  "example-landing-designer":
-    ".hireme/artifacts/example-landing-designer.public-record.json",
-  "example-aster-x1-launcher":
-    ".hireme/artifacts/example-aster-x1-launcher.public-record.json",
-};
 
 function sealedHarnessFor(agentId) {
   return (
@@ -2031,12 +1950,9 @@ async function callTool(name, args = {}) {
       return textResult(await createAgentFromFolder(args));
     case "hireme_validate_platform_encrypted_harness":
     case "hireme_validate_sealed_harness": {
-      const agentId = args.agent_id || "example-code-reviewer";
+      const agentId = args.agent_id;
       const payload = {
-        record_path:
-          args.record_path ||
-          localSealedExampleRecords[agentId] ||
-          localSealedExampleRecords["example-code-reviewer"],
+        record_path: args.record_path,
         walrus_path: args.walrus_path,
         hire_receipt_object_id:
           args.hire_receipt_object_id || "hire_receipt_local_paid_demo",
@@ -2058,7 +1974,7 @@ async function callTool(name, args = {}) {
         install: "codex plugin add hireme --marketplace hireme-local",
         verify: "Start a new Codex session and run /mcp.",
         naturalRequests:
-          "For plain user wording, call hireme_request. Example: request='example-landing-designer에게 핸드폰 상세 랜딩페이지 하나 만들어달라고 해'.",
+          "For plain user wording, call hireme_request. Example: request='launch-operator에게 제품 출시 페이지 방향을 잡아달라고 해'.",
         identity:
           "Use hireme_whoami to confirm which HireMe hirer identity Codex is using.",
         walrusAgent:
@@ -2066,7 +1982,7 @@ async function callTool(name, args = {}) {
         switching:
           "Use hireme_list_my_agents to see callable Try/Hire entitlements, then hireme_select_agent, then hireme_call_agent. For marketplace discovery, use hireme_list_hired_agents.",
         protectedExample:
-          "Run npm run platform:encrypt, start npm run gateway:dev, then call hireme_validate_platform_encrypted_harness with hire_receipt_object_id='hire_receipt_local_paid_demo'.",
+          "Run npm run platform:encrypt, start npm run gateway:dev, then call hireme_validate_platform_encrypted_harness with an explicit record_path.",
         template:
           "To start a new creator Agent, call hireme_create_agent_template or say '나 에이전트 만들건데 템플릿 만들어줘'. It creates AGENTS.md, public.json, skills, harness policy, and examples.",
         registerAgent:
@@ -2492,20 +2408,16 @@ function inferAgentId(request) {
   });
   if (directMatch) return directMatch.id;
 
-  if (/aster\s*x1|preorder|프리오더|사전\s*예약|런칭|launch/.test(normalized)) {
-    return "example-aster-x1-launcher";
-  }
-
   if (
-    /랜딩|landing|상세\s*페이지|상세\s*랜딩|페이지\s*만들|홈페이지|hero|cta|핸드폰|휴대폰|phone|mobile/.test(
+    /aster\s*x1|preorder|프리오더|사전\s*예약|런칭|launch|랜딩|landing|상세\s*페이지|상세\s*랜딩|페이지\s*만들|홈페이지|hero|cta|핸드폰|휴대폰|phone|mobile/.test(
       normalized,
     )
   ) {
-    return "example-landing-designer";
+    return "launch-operator";
   }
 
   if (/리뷰|review|pull request|pr\b|diff|migration|코드/.test(normalized)) {
-    return "example-code-reviewer";
+    return "codex-builder";
   }
 
   if (/wal[_-]?test1|blob\s*id|blobid|walrus[_\s-]?blob/.test(normalized)) {
@@ -2528,8 +2440,8 @@ function stripDelegationPrefix(request, agentId) {
     .trim() || request;
 }
 
-function defaultHireReceiptFor(agentId) {
-  return localSealedExampleRecords[agentId] ? "hire_receipt_local_paid_demo" : undefined;
+function defaultHireReceiptFor() {
+  return undefined;
 }
 
 function escapeRegExp(value) {
@@ -2574,7 +2486,7 @@ async function handleRequest(message) {
             version: "0.1.0",
           },
           instructions:
-            "HireMe exposes hired protected AI agents. For '내가 누구로 로그인되어 있어?' or identity checks, call hireme_whoami. For '내가 쓸 수 있는 agent 보여줘', call hireme_list_my_agents. For plain-language delegation such as 'example-landing-designer에게 핸드폰 상세 랜딩페이지 하나 만들어달라고 해', call hireme_request with the user's sentence as request. If the user wants to start building a new Agent template, call hireme_create_agent_template or route the natural request through hireme_request. Use hireme_create_agent_from_folder when the user has a local Agent working folder containing AGENTS.md and wants to create/publish it; the MCP server archives the folder as tar.gz and uploads it to the gateway. Use hireme_register_agent only when encrypted Walrus artifact metadata already exists. Use hireme_call_agent only when you already have structured agent_id/task arguments. Never request or reveal creator AGENTS.md files, private skills folders, design.md, Harness internals, plugin source, or protected memWal/Walrus artifacts.",
+            "HireMe exposes hired protected AI agents. For '내가 누구로 로그인되어 있어?' or identity checks, call hireme_whoami. For '내가 쓸 수 있는 agent 보여줘', call hireme_list_my_agents. For plain-language delegation such as 'launch-operator에게 제품 출시 페이지 방향을 잡아달라고 해', call hireme_request with the user's sentence as request. If the user wants to start building a new Agent template, call hireme_create_agent_template or route the natural request through hireme_request. Use hireme_create_agent_from_folder when the user has a local Agent working folder containing AGENTS.md and wants to create/publish it; the MCP server archives the folder as tar.gz and uploads it to the gateway. Use hireme_register_agent only when encrypted Walrus artifact metadata already exists. Use hireme_call_agent only when you already have structured agent_id/task arguments. Never request or reveal creator AGENTS.md files, private skills folders, Harness internals, plugin source, or protected memWal/Walrus artifacts.",
         });
         break;
       case "tools/list":

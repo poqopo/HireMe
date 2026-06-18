@@ -1,30 +1,10 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { once } from "node:events";
-import { sealAgentFolder } from "../apps/gateway/src/localSealedArtifact.mjs";
 
 const port = 18787;
 const gatewayUrl = `http://localhost:${port}`;
 const gatewayKey = "smoke-test-key";
-
-await sealAgentFolder({
-  folderPath: "examples/code-reviewer-agent",
-  agentId: "example-code-reviewer",
-  pricePerCallUsd: 28,
-  epochs: 3,
-});
-await sealAgentFolder({
-  folderPath: "examples/landing-page-designer-agent",
-  agentId: "example-landing-designer",
-  pricePerCallUsd: 26,
-  epochs: 3,
-});
-await sealAgentFolder({
-  folderPath: "examples/aster-x1-launch-agent",
-  agentId: "example-aster-x1-launcher",
-  pricePerCallUsd: 34,
-  epochs: 3,
-});
 
 const gateway = spawn("node", ["apps/gateway/src/index.mjs"], {
   env: {
@@ -32,6 +12,8 @@ const gateway = spawn("node", ["apps/gateway/src/index.mjs"], {
     HIREME_GATEWAY_PORT: String(port),
     HIREME_GATEWAY_API_KEY: gatewayKey,
     HIREME_OAUTH_ALLOW_DEMO_LOGIN: "1",
+    HIREME_LLM_PROVIDER: "ollama",
+    HIREME_OLLAMA_DISABLED: "1",
     SUPABASE_SERVICE_ROLE_KEY: "",
   },
   stdio: ["ignore", "pipe", "inherit"],
@@ -40,15 +22,30 @@ const gateway = spawn("node", ["apps/gateway/src/index.mjs"], {
 try {
   await waitForGateway(gatewayUrl);
 
+  const health = await getJson(`${gatewayUrl}/health`);
+  if (health.llmProvider !== "ollama" || health.llmConfigured !== false) {
+    throw new Error("Gateway health did not expose the disabled Ollama smoke configuration");
+  }
+
+  const removedDemoAgent = await postJsonAllowError(`${gatewayUrl}/v1/agents/get`, gatewayKey, {
+    agent_id: "local-file-demo-agent",
+  });
+  if (removedDemoAgent.ok || removedDemoAgent.status !== 404) {
+    throw new Error("Removed local demo Agent was still available from the gateway");
+  }
+
   await postJson(`${gatewayUrl}/v1/agents/hire`, gatewayKey, {
     agent_id: "codex-builder",
+    hirer_id: "smoke-hirer",
+  });
+  await postJson(`${gatewayUrl}/v1/agents/hire`, gatewayKey, {
+    agent_id: "launch-operator",
     hirer_id: "smoke-hirer",
   });
 
   const myAgents = await postJson(`${gatewayUrl}/v1/my/agents`, gatewayKey, {
     hirer_id: "smoke-hirer",
   });
-
   if (
     myAgents.hirerId !== "smoke-hirer" ||
     !myAgents.agents?.some((record) => record.agent?.id === "codex-builder")
@@ -62,9 +59,27 @@ try {
     task: "Create a billing ledger schema",
     budget_calls: 3,
   });
-
   if (!directCall.gatewayCall || !directCall.runner?.privateHarnessApplied) {
     throw new Error("Gateway direct call did not run through protected runner");
+  }
+  if (
+    directCall.jsonOutput?.schema !== "hireme.protected_agent_json_output.v1" ||
+    directCall.jsonOutput?.localCodex?.shouldAct !== true
+  ) {
+    throw new Error("Gateway direct call did not return local Codex JSON output");
+  }
+
+  const naturalCall = await postJson(`${gatewayUrl}/v1/agent-call`, gatewayKey, {
+    agent_id: "launch-operator",
+    hirer_id: "smoke-hirer",
+    task: "Plan a product launch page direction for HireMe",
+    budget_calls: 1,
+  });
+  if (
+    naturalCall.activeAgentId !== "launch-operator" ||
+    naturalCall.jsonOutput?.schema !== "hireme.protected_agent_json_output.v1"
+  ) {
+    throw new Error("Gateway launch-operator call did not return protected JSON output");
   }
 
   const registeredAgent = await postJson(`${gatewayUrl}/v1/agents/register`, gatewayKey, {
@@ -84,7 +99,6 @@ try {
     ciphertext_digest:
       "sha256:3d9d55d1f90fd5a6e9418636529234deaf27f3b51a962927d0c4f6c62c66e8a8",
   });
-
   if (
     registeredAgent.status !== "registered" ||
     registeredAgent.publicAgent?.id !== "smoke-mcp-registrar" ||
@@ -97,75 +111,16 @@ try {
   const registeredList = await postJson(`${gatewayUrl}/v1/agents/list`, gatewayKey, {
     query: "smoke-mcp-registrar",
   });
-
   if (!registeredList.hiredAgents?.some((agent) => agent.id === "smoke-mcp-registrar")) {
     throw new Error("Registered Agent was not visible in the gateway registry");
   }
 
-  if (
-    directCall.jsonOutput?.schema !== "hireme.protected_agent_json_output.v1" ||
-    directCall.jsonOutput?.localCodex?.shouldAct !== true
-  ) {
-    throw new Error("Gateway direct call did not return local Codex JSON output");
-  }
-
-  const exampleCall = await postJson(`${gatewayUrl}/v1/agent-call`, gatewayKey, {
-    agent_id: "example-code-reviewer",
-    task: "Review a migration diff",
-    budget_calls: 1,
-    hire_receipt_object_id: "hire_receipt_local_paid_demo",
-  });
-
-  if (!exampleCall.sealedValidation?.gatewayOnlyDecrypt) {
-    throw new Error("Gateway example agent call did not validate the protected artifact");
-  }
-
-  if (
-    exampleCall.platformEncryption?.provider !== "platform_encryption" ||
-    !exampleCall.platformEncryption?.platformKmsKeyId ||
-    !exampleCall.platformEncryption?.packageId ||
-    !exampleCall.sealedArtifact?.platformEncryptionId ||
-    exampleCall.jsonOutput?.proof?.walrusStoresCiphertextOnly !== true ||
-    exampleCall.jsonOutput?.harness?.artifact?.plaintextInWalrus !== false
-  ) {
-    throw new Error("Gateway example agent call did not preserve platform encryption metadata");
-  }
-
-  if (
-    !exampleCall.runner?.gatewayTrustedExecutor ||
-    exampleCall.runner?.gatewayCanReadUserInput !== true ||
-    exampleCall.runner?.privateFolderReturnedToCodex !== false
-  ) {
-    throw new Error("Gateway example agent call did not preserve the MVP trusted gateway boundary");
-  }
-
-  if (
-    exampleCall.jsonOutput?.payload?.type !== "code_review_guidance" ||
-    exampleCall.jsonOutput?.harness?.rawHarnessReturned !== false
-  ) {
-    throw new Error("Gateway example agent call did not return harness-based JSON output");
-  }
-
-  const asterCall = await postJson(`${gatewayUrl}/v1/agent-call`, gatewayKey, {
-    agent_id: "example-aster-x1-launcher",
-    task: "Create an Aster X1 preorder landing page",
-    budget_calls: 1,
-    hire_receipt_object_id: "hire_receipt_local_paid_demo",
-  });
-
-  if (
-    asterCall.jsonOutput?.payload?.type !== "aster_x1_preorder_landing" ||
-    asterCall.jsonOutput?.payload?.privateReferencesApplied?.productDossier !== true ||
-    asterCall.jsonOutput?.payload?.privateReferencesApplied?.launchPlaybook !== true ||
-    asterCall.jsonOutput?.payload?.privateReferencesApplied?.visualLayoutHarness !== true ||
-    asterCall.jsonOutput?.payload?.mobileLayoutSystem?.stickyPreorderBar?.required !== true ||
-    asterCall.runner?.privateFolderReturnedToCodex !== false
-  ) {
-    throw new Error("Gateway Aster X1 launch agent did not return specialized protected output");
-  }
-
   await postJson(`${gatewayUrl}/v1/agents/hire`, gatewayKey, {
     agent_id: "codex-builder",
+    hirer_id: "local-hirer",
+  });
+  await postJson(`${gatewayUrl}/v1/agents/hire`, gatewayKey, {
+    agent_id: "launch-operator",
     hirer_id: "local-hirer",
   });
 
@@ -186,7 +141,6 @@ try {
   ) {
     throw new Error("HTTP MCP OAuth flow did not initialize HireMe tools");
   }
-
   if (
     !httpMcpWhoamiText.includes('"mode": "oauth_bearer"') ||
     !httpMcpWhoamiText.includes('"hirerId": "local-hirer"') ||
@@ -194,14 +148,12 @@ try {
   ) {
     throw new Error("HTTP MCP OAuth whoami did not return the connected safe identity");
   }
-
   if (
     !httpMcpMyAgentsText.includes('"hirerId": "local-hirer"') ||
     !httpMcpMyAgentsText.includes('"id": "codex-builder"')
   ) {
     throw new Error("HTTP MCP OAuth flow did not list the connected user's Agents");
   }
-
   if (
     !httpMcpCallText.includes('"gatewayCall": true') ||
     !httpMcpCallText.includes('"activeAgentId": "codex-builder"')
@@ -217,13 +169,11 @@ try {
     .map((line) => JSON.parse(line));
 
   const callResult = responses.find((response) => response.id === 4);
-  const validateResult = responses.find((response) => response.id === 5);
-  const naturalResult = responses.find((response) => response.id === 6);
-  const registerResult = responses.find((response) => response.id === 7);
-  const myAgentsResult = responses.find((response) => response.id === 8);
-  const whoamiResult = responses.find((response) => response.id === 9);
+  const naturalResult = responses.find((response) => response.id === 5);
+  const registerResult = responses.find((response) => response.id === 6);
+  const myAgentsResult = responses.find((response) => response.id === 7);
+  const whoamiResult = responses.find((response) => response.id === 8);
   const text = callResult?.result?.content?.[0]?.text || "";
-  const validateText = validateResult?.result?.content?.[0]?.text || "";
   const naturalText = naturalResult?.result?.content?.[0]?.text || "";
   const registerText = registerResult?.result?.content?.[0]?.text || "";
   const myAgentsText = myAgentsResult?.result?.content?.[0]?.text || "";
@@ -232,31 +182,18 @@ try {
   if (!text.includes('"gatewayCall": true')) {
     throw new Error("Plugin MCP call did not route through the gateway");
   }
-
   if (!text.includes('"schema": "hireme.protected_agent_json_output.v1"')) {
     throw new Error("Plugin MCP call did not return the protected JSON output schema");
   }
-
   if (!text.includes('"privateFolderReturnedToCodex": false')) {
     throw new Error("Gateway response did not preserve private folder boundary");
   }
-
-  if (!validateText.includes('"gatewayOnlyDecrypt": true')) {
-    throw new Error("Plugin MCP sealed validation did not route through the gateway");
-  }
-
   if (
-    !naturalText.includes('"inferredAgentId": "example-landing-designer"') ||
-    !naturalText.includes('"type": "landing_page_brief"') ||
+    !naturalText.includes('"inferredAgentId": "launch-operator"') ||
     !naturalText.includes('"shouldAct": true')
   ) {
-    throw new Error("Plugin MCP natural request did not route to the landing designer");
+    throw new Error("Plugin MCP natural request did not route to launch-operator");
   }
-
-  if (!naturalText.includes('"walrusStoresCiphertextOnly": true')) {
-    throw new Error("Plugin MCP protected request did not expose ciphertext proof metadata");
-  }
-
   if (
     !registerText.includes('"status": "registered"') ||
     !registerText.includes('"id": "smoke-plugin-registrar"') ||
@@ -264,14 +201,12 @@ try {
   ) {
     throw new Error("Plugin MCP register Agent call did not route through the gateway");
   }
-
   if (
     !myAgentsText.includes('"hirerId": "local-hirer"') ||
     !myAgentsText.includes('"id": "codex-builder"')
   ) {
     throw new Error("Plugin MCP my-agents call did not route through the gateway");
   }
-
   if (
     !whoamiText.includes('"gatewayCall": true') ||
     !whoamiText.includes('"hirerId": "local-hirer"') ||
@@ -300,6 +235,14 @@ async function waitForGateway(url) {
 }
 
 async function postJson(url, key, body) {
+  const result = await postJsonAllowError(url, key, body);
+  if (!result.ok) {
+    throw new Error(`Gateway request failed: ${result.status} ${JSON.stringify(result.body)}`);
+  }
+  return result.body;
+}
+
+async function postJsonAllowError(url, key, body) {
   const response = await fetch(url, {
     method: "POST",
     headers: {
@@ -308,12 +251,13 @@ async function postJson(url, key, body) {
     },
     body: JSON.stringify(body),
   });
-
-  if (!response.ok) {
-    throw new Error(`Gateway request failed: ${response.status} ${await response.text()}`);
-  }
-
-  return response.json();
+  const text = await response.text();
+  const parsed = text ? JSON.parse(text) : null;
+  return {
+    ok: response.ok,
+    status: response.status,
+    body: parsed,
+  };
 }
 
 async function runHttpMcpOAuthFlow(gatewayUrl) {
@@ -561,27 +505,15 @@ async function runPluginThroughGateway(gatewayUrl, gatewayKey) {
       id: 5,
       method: "tools/call",
       params: {
-        name: "hireme_validate_sealed_harness",
+        name: "hireme_request",
         arguments: {
-          hire_receipt_object_id: "hire_receipt_local_paid_demo",
+          request: "launch-operator에게 제품 출시 페이지 방향을 잡아달라고 해",
         },
       },
     },
     {
       jsonrpc: "2.0",
       id: 6,
-      method: "tools/call",
-      params: {
-        name: "hireme_request",
-        arguments: {
-          request:
-            "example-landing-designer에게 핸드폰 상세 랜딩페이지 하나 만들어달라고 해",
-        },
-      },
-    },
-    {
-      jsonrpc: "2.0",
-      id: 7,
       method: "tools/call",
       params: {
         name: "hireme_register_agent",
@@ -607,7 +539,7 @@ async function runPluginThroughGateway(gatewayUrl, gatewayKey) {
     },
     {
       jsonrpc: "2.0",
-      id: 8,
+      id: 7,
       method: "tools/call",
       params: {
         name: "hireme_list_my_agents",
@@ -618,7 +550,7 @@ async function runPluginThroughGateway(gatewayUrl, gatewayKey) {
     },
     {
       jsonrpc: "2.0",
-      id: 9,
+      id: 8,
       method: "tools/call",
       params: {
         name: "hireme_whoami",

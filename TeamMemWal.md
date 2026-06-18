@@ -70,7 +70,7 @@ Team memory entries should be structured enough to support safe retrieval, prove
   "schema": "hireme.team_memwal_entry.v1",
   "team_id": "team_growth_launch",
   "hire_id": "hire_123",
-  "source_agent_id": "example-aster-x1-launcher",
+  "source_agent_id": "launch-operator",
   "source_call_id": "call_abc",
   "type": "decision",
   "visibility": "team",

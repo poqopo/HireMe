@@ -56,7 +56,29 @@ HireMe lets users hire protected AI Agents from Codex while creator private logi
 
 Creators publish Agents as paid tools. Buyers use those Agents from Codex through MCP. The private files that make the Agent valuable stay behind the HireMe gateway, and the user receives the final result, not the creator's private Harness.
 
-#### 1.2 The Short Version
+#### 1.2 What Counts as an Agent
+
+In HireMe, an Agent is not the base model itself. The model is the engine. The private Harness is the working method. The gateway is the runtime. Memory and tools define what the Agent can remember and do.
+
+```txt
+Model = engine
+Harness = working method
+Gateway Runtime = execution environment
+Memory and Tools = continuity and action boundary
+Agent = a repeatable worker for a specific job
+```
+
+This means HireMe is not selling raw model access. It is also not selling a prompt file to copy.
+
+```txt
+HireMe lets you hire protected Agents, not prompts.
+```
+
+A HireMe Agent is a model-agnostic worker packaged with private know-how, tools, memory rules, and an execution contract. The creator owns the Harness. The buyer hires the capability.
+
+A normal prompt marketplace gives the buyer text to copy and run somewhere else. HireMe keeps the Harness protected, runs it through the gateway, and returns the result. The model can change over time, but the Agent's working method can remain valuable.
+
+#### 1.3 The Short Version
 
 The loop is simple:
 
@@ -69,7 +91,7 @@ HireMe runs the protected Agent and returns the result.
 
 The user may pay more than they would for a generic model call, but they are paying for an Agent that has already been shaped for a job. Once the Agent fits the user's workflow, it can become much more useful than a general assistant that needs to be re-taught every time.
 
-#### 1.3 Who It Is For
+#### 1.4 Who It Is For
 
 HireMe is for creators, buyers, teams, and platform operators.
 
@@ -81,7 +103,7 @@ Teams use HireMe when one Agent is not enough. A Team can combine research, prod
 
 Operators use HireMe to manage access, usage, payment, memory records, and protected artifact execution.
 
-#### 1.4 Core Terms
+#### 1.5 Core Terms
 
 These are the terms readers need before going deeper:
 
@@ -619,6 +641,7 @@ Product work:
 - Make Try → Codex usage → wallet funds → Hire easy to understand.
 - Add creator earnings and Redeem UX in My Page.
 - Improve Agent cards with typical outputs, pricing, usage, latency, and quality signals.
+- Add Agent performance indicators so buyers can compare Agents by actual usefulness, not only by description.
 - Add Team Agent examples that show how memWal carries project context across Agents.
 
 Engineering work:
@@ -626,6 +649,7 @@ Engineering work:
 - Connect Sui payment verification to creator settlement records.
 - Add typed memory deltas for Agent outputs.
 - Add memWal-powered Team memory retrieval and write policies.
+- Add Agent evaluation metrics such as task success rate, schema reliability, latency, repeat usage, buyer feedback, cost per useful result, and safe-output checks.
 - Keep HTTP MCP startup failure as a clear signal that the local gateway is down during development.
 - Continue separating safe public metadata from private Harness content.
 

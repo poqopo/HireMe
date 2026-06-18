@@ -1,7 +1,11 @@
 import { validateSealedArtifact } from "../apps/gateway/src/localSealedArtifact.mjs";
 
-const recordPath =
-  process.argv[2] || ".hireme/artifacts/example-code-reviewer.public-record.json";
+const recordPath = process.argv[2];
+if (!recordPath) {
+  console.error("Usage: node scripts/validate-protected-artifact.mjs <public-record.json> [hire-receipt-object-id]");
+  process.exit(1);
+}
+
 const hireReceiptObjectId = process.argv[3] || "hire_receipt_local_paid_demo";
 
 const result = await validateSealedArtifact({

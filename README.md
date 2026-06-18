@@ -240,46 +240,37 @@ npm run gateway:smoke
 npm run plugin:smoke
 ```
 
-## 예시 Protected Agent Folder
-
-`examples/code-reviewer-agent/`는 creator가 올리는 원본 Agent folder 예시입니다.
-
-Agent를 쓸 때와 안 쓸 때의 차이를 빠르게 보여주는 데모:
-
-```bash
-npm run demo:agent-impact
-```
-
-이 명령은 같은 Aster X1 스마트폰 프리오더 페이지 요청에 대해 local Codex-only baseline과 `example-aster-x1-launcher` gateway output을 비교하고, `.hireme/agent-impact-demo/index.html`에서 실제 HTML 랜딩페이지를 좌우로 보여줍니다. 자세한 설명은 `examples/agent-impact-demo/README.md`에 있습니다.
+## Protected Agent Folder
 
 ```txt
-examples/code-reviewer-agent/
+<agent-folder>/
   AGENTS.md
   public.json
-  skills/risk-review/SKILL.md
+  skills/<skill-name>/SKILL.md
   harness/policy.json
 ```
 
-올바른 보호 모델은 hirer가 이 folder를 직접 복호화하는 것이 아니라, 결제/권한을 검증한 gateway만 복호화하고 실행 결과만 반환하는 구조입니다.
+Creator가 올리는 원본 Agent folder는 `AGENTS.md`, private skills, harness policy를 포함합니다. 올바른 보호 모델은 buyer가 이 folder를 직접 복호화하는 것이 아니라, 결제/권한을 검증한 gateway만 복호화하고 실행 결과만 반환하는 구조입니다.
 
-로컬에서 이 흐름을 검증하는 명령:
+새 creator folder는 MCP의 `hireme_create_agent_template`로 만들거나, 위 folder shape에 맞춰 직접 만들 수 있습니다. 로컬에서 보호 흐름을 검증할 때는 folder 경로를 명시합니다.
 
 ```bash
-npm run example:validate
-npm run platform:encrypt
-npm run example:run
-npm run example:smoke
+npm run agent:validate-folder -- <agent-folder>
+npm run platform:encrypt -- <agent-folder>
+node scripts/validate-protected-artifact.mjs .hireme/artifacts/<agent>.public-record.json
+npm run gateway:smoke
+npm run plugin:smoke
 ```
 
 각 단계의 의미:
 
 | Command | Purpose |
 | --- | --- |
-| `example:validate` | 원본 folder에 `AGENTS.md`, `public.json`, `skills/**/SKILL.md`가 있는지 검증 |
-| `platform:encrypt` / `example:seal` | 원본 folder를 platform-managed envelope로 암호화하고 `.hireme/local-walrus/*.seal.json`에 ciphertext 저장 |
+| `agent:validate-folder` | 원본 folder에 `AGENTS.md`, `public.json`, `skills/**/SKILL.md`가 있는지 검증 |
+| `platform:encrypt` | 원본 folder를 platform-managed envelope로 암호화하고 `.hireme/local-walrus/*.platform-encryption.json`에 ciphertext 저장 |
 | `platform:inspect` / `seal:inspect` | public record와 local Walrus ciphertext를 읽어 plaintext marker가 없는지 확인 |
-| `example:run` | paid hire receipt mock이 있을 때만 gateway runner가 decrypt 검증을 수행하고 safe summary만 반환 |
-| `example:smoke` | encrypt부터 gateway validation, unpaid receipt 거절까지 end-to-end 검증 |
+| `validate-protected-artifact.mjs` | paid hire receipt mock이 있을 때만 gateway runner가 decrypt 검증을 수행하고 safe summary만 반환 |
+| `gateway:smoke` / `plugin:smoke` | gateway API, OAuth MCP, plugin routing, Agent call JSON output을 검증 |
 
 생성되는 `.hireme/` 폴더는 로컬 artifact cache이며 git에 커밋하지 않습니다. Production에서는 이 local cache가 Walrus blob으로 바뀌고, `.hireme/artifacts/*.public-record.json`에 해당하는 metadata만 Supabase `protected_artifacts`에 저장됩니다.
 
@@ -293,32 +284,13 @@ Production 매핑:
 | platform-managed envelope with AES-GCM DEM | production KMS or optional `@mysten/seal` provider |
 | `/v1/sealed-harness/validate` | trusted gateway decrypt + manifest verification mock |
 
-`examples/landing-page-designer-agent/`는 `AGENTS.md`와 `design.md`를 함께 protected artifact로 올리는 예시입니다. 이 agent는 고용자가 “예시 랜딩페이지를 만들어줘”라고 요청하면 gateway runner 내부에서만 `design.md`를 열어보고, 원문 대신 safe landing page brief를 반환합니다.
-
-```txt
-examples/landing-page-designer-agent/
-  AGENTS.md
-  design.md
-  public.json
-  skills/landing-page-design/SKILL.md
-  harness/policy.json
-```
-
-로컬 검증:
-
-```bash
-npm run example:seal:landing
-npm run example:run:landing
-npm run example:smoke:landing
-```
-
 Codex MCP 사용 예:
 
 ```txt
-example-landing-designer에게 핸드폰 상세 랜딩페이지 하나 만들어달라고 해
+launch-operator에게 핸드폰 출시 페이지 방향을 잡아달라고 해
 ```
 
-Codex는 `hireme_request`를 호출하고, MCP 서버가 `example-landing-designer`, demo hire receipt, task를 자동으로 채웁니다. 반환되는 결과는 `landing_page_brief`이며, `privateReferencesApplied.designMd: true`로 protected `design.md`가 적용됐음을 표시합니다. `design.md` 원문과 `AGENTS.md` 원문은 반환하지 않습니다.
+Codex는 `hireme_request`를 호출하고, MCP 서버가 요청을 실제 marketplace Agent로 라우팅합니다. 배포 환경에서는 `.hireme/artifacts` local demo record에 의존하지 않고, Try/Hire entitlement와 gateway registry를 기준으로 실행합니다. `AGENTS.md`, private skills, Harness 원문은 반환하지 않습니다.
 
 현재 gateway의 `POST /v1/agent-call`은 다음을 보장하는 mock 결과를 반환합니다.
 
@@ -393,26 +365,20 @@ HIREME_SEAL_PACKAGE_ID=<published package id>
 현재 로컬 MVP 흐름:
 
 ```bash
-npm run platform:encrypt
+npm run platform:encrypt -- <agent-folder>
 npm run platform:inspect
-npm run example:run
+node scripts/validate-protected-artifact.mjs .hireme/artifacts/<agent>.public-record.json
 ```
 
-`platform:encrypt`는 Agent folder를 하나의 bundle로 만들고 `hireme.platform-ciphertext-envelope.v1` 포맷으로 암호화합니다. `.hireme/local-walrus/*.seal.json`에는 ciphertext envelope만 저장되고, `.hireme/artifacts/*.public-record.json`에는 `encryption_provider`, `platform_kms_key_id`, `walrus_blob_id`, `sui_object_id`, `ciphertext_digest` 등 safe metadata만 저장됩니다. `example:seal`은 같은 스크립트를 가리키는 legacy alias입니다.
+`platform:encrypt`는 Agent folder를 하나의 bundle로 만들고 `hireme.platform-ciphertext-envelope.v1` 포맷으로 암호화합니다. `.hireme/local-walrus/*.platform-encryption.json`에는 ciphertext envelope만 저장되고, `.hireme/artifacts/*.public-record.json`에는 `encryption_provider`, `platform_kms_key_id`, `walrus_blob_id`, `sui_object_id`, `ciphertext_digest` 등 safe metadata만 저장됩니다.
 
 Production에서는 같은 경계를 유지하되 로컬 root secret을 cloud KMS/HSM으로 교체합니다. Gateway는 paid `HireReceipt`나 subscription/budget check를 통과한 뒤에만 platform KMS로 artifact를 복호화합니다.
 
 실제 Walrus에 platform-managed ciphertext를 올리고 gateway가 Walrus에서 다시 읽어 복호화하는 흐름:
 
 ```bash
-npm run platform:publish:walrus
-node scripts/validate-protected-artifact.mjs .hireme/artifacts/example-code-reviewer.public-record.json
-```
-
-`platform:publish:walrus`는 `examples/code-reviewer-agent`를 기본값으로 사용합니다. 다른 agent folder를 올릴 때는 경로를 넘깁니다. `seal:publish:walrus`는 같은 스크립트를 가리키는 legacy alias입니다.
-
-```bash
-npm run platform:publish:walrus -- examples/aster-x1-launch-agent
+npm run platform:publish:walrus -- <agent-folder>
+node scripts/validate-protected-artifact.mjs .hireme/artifacts/<agent>.public-record.json
 ```
 
 이 경로에서 `.hireme/artifacts/<agent>.public-record.json`은 `storageProvider: "walrus"`와 실제 `walrusBlobId`를 갖습니다. Gateway는 이 record를 받으면 local cache가 아니라 Walrus blob을 읽고 ciphertext digest를 검증한 뒤 runner 내부에서만 복호화합니다.
@@ -422,11 +388,11 @@ npm run platform:publish:walrus -- examples/aster-x1-launch-agent
 memWal은 Agent의 private memory snapshot과 Hirer별 Agent call result를 같은 방식으로 보호합니다.
 
 ```bash
-npm run memwal:publish
-npm run memwal:read
+npm run memwal:publish -- <memory.json> <agent-id>
+npm run memwal:read -- .hireme/memwal/<agent>.memwal-record.json
 ```
 
-`memwal:publish`는 `examples/memwal/code-reviewer-memory.json`을 platform-managed envelope로 암호화해 Walrus에 올립니다. `memwal:read`는 gateway 경계에서만 복호화하고 `entryCount`, `tags`, `safeCapabilities` 같은 safe summary만 반환합니다. raw memory entry와 private notes는 hirer/Codex 응답으로 반환하지 않습니다.
+`memwal:publish`는 명시한 memory JSON을 platform-managed envelope로 암호화해 Walrus에 올립니다. `memwal:read`는 gateway 경계에서만 복호화하고 `entryCount`, `tags`, `safeCapabilities` 같은 safe summary만 반환합니다. raw memory entry와 private notes는 hirer/Codex 응답으로 반환하지 않습니다.
 
 Agent call 결과는 `apps/gateway/src/memWal.mjs`의 `writeUserMemWalResult`를 통해 Hirer별 ciphertext로 저장됩니다. Public record와 DB에는 raw result 대신 digest, encryption id, safe summary만 남기며, `user_memwal_results` RLS는 owning Hirer만 조회할 수 있게 제한합니다.
 
@@ -564,7 +530,7 @@ Agent 전환 방식:
 
 ```txt
 hireme_whoami()
-hireme_request(request: "example-landing-designer에게 핸드폰 상세 랜딩페이지 하나 만들어달라고 해")
+hireme_request(request: "launch-operator에게 제품 출시 페이지 방향을 잡아달라고 해")
 hireme_list_hired_agents()
 hireme_select_agent(agent_id: "codex-builder")
 hireme_current_agent()
@@ -580,8 +546,7 @@ npm run platform:encrypt
 npm run gateway:dev
 
 # Codex MCP tool call
-example-code-reviewer에게 이 migration diff 리뷰해달라고 해
-example-landing-designer에게 핸드폰 상세 랜딩페이지 하나 만들어달라고 해
+hireme_validate_platform_encrypted_harness(record_path: ".hireme/artifacts/<agent>.public-record.json")
 ```
 
 이 경로에서 MCP plugin은 복호화하지 않습니다. Plugin은 gateway로 요청을 전달하고, gateway runner만 `.hireme/local-walrus/*.seal.json` 또는 Walrus ciphertext를 복호화 검증한 뒤 safe summary와 ledger metadata만 반환합니다.

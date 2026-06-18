@@ -1,7 +1,11 @@
 import { publishMemWalSnapshot } from "../apps/gateway/src/memWal.mjs";
 
-const memoryPath = process.argv[2] || "examples/memwal/code-reviewer-memory.json";
-const agentId = process.argv[3] || process.env.HIREME_MEMWAL_AGENT_ID || "example-code-reviewer";
+const memoryPath = process.argv[2];
+const agentId = process.argv[3] || process.env.HIREME_MEMWAL_AGENT_ID;
+if (!memoryPath || !agentId) {
+  console.error("Usage: node scripts/publish-memwal-snapshot.mjs <memory.json> <agent-id>");
+  process.exit(1);
+}
 
 const result = await publishMemWalSnapshot({
   agentId,

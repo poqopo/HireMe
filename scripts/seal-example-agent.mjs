@@ -2,7 +2,12 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { sealAgentFolder } from "../apps/gateway/src/localSealedArtifact.mjs";
 
-const folderPath = process.argv[2] || "examples/code-reviewer-agent";
+const folderPath = process.argv[2];
+if (!folderPath) {
+  console.error("Usage: node scripts/seal-example-agent.mjs <agent-folder>");
+  process.exit(1);
+}
+
 const publicProfile = JSON.parse(await readFile(join(folderPath, "public.json"), "utf8"));
 
 const sealed = await sealAgentFolder({

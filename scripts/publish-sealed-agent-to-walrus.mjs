@@ -4,7 +4,12 @@ import { join } from "node:path";
 import { sealAgentFolder } from "../apps/gateway/src/localSealedArtifact.mjs";
 import { storeFileOnWalrus } from "../apps/gateway/src/walrusBlobStore.mjs";
 
-const folderPath = process.argv[2] || "examples/code-reviewer-agent";
+const folderPath = process.argv[2];
+if (!folderPath) {
+  console.error("Usage: node scripts/publish-sealed-agent-to-walrus.mjs <agent-folder>");
+  process.exit(1);
+}
+
 const publicProfile = JSON.parse(await readFile(join(folderPath, "public.json"), "utf8"));
 const epochs = Number.parseInt(process.env.HIREME_EXAMPLE_STORAGE_EPOCHS || "3", 10);
 

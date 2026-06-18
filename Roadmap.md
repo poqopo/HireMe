@@ -55,6 +55,24 @@ HireMe cannot see user input.
 HireMe cannot see creator artifacts.
 ```
 
+## Agent Definition
+
+HireMe에서 Agent는 base model 자체가 아니다. 모델은 엔진이고, Harness는 일하는 방식이며, Gateway Runtime은 실행 환경이다. 여기에 memory rule, tool boundary, public execution contract가 붙으면 특정 일을 반복 가능하게 수행하는 Agent가 된다.
+
+```txt
+Model = engine
+Harness = working method
+Gateway Runtime = execution environment
+Memory and Tools = continuity and action boundary
+Agent = repeatable worker for a specific job
+```
+
+따라서 HireMe는 prompt file을 판매하는 서비스가 아니다. Creator는 private Harness를 소유하고, Hirer는 그 Harness가 만들어내는 capability를 고용한다.
+
+```txt
+HireMe lets users hire protected Agents, not prompts.
+```
+
 ## MVP Architecture
 
 ```txt
@@ -162,7 +180,7 @@ Goal:
 
 - Demo creator folder registration.
 - Demo natural-language `hireme_request`.
-- Demo `example-landing-designer` using protected `design.md`.
+- Demo natural-language routing to deployed marketplace Agents such as `launch-operator`.
 - Prove local Walrus stores ciphertext envelope, not plaintext folders.
 - Prove responses do not include private creator files.
 
@@ -206,8 +224,20 @@ Goal:
 - Per-agent budget caps.
 - Version pinning.
 - Creator analytics.
+- Agent performance indicators.
 - Response schema validation.
 - Replayable audit records with digests, not raw prompts.
+
+Agent performance indicators should help buyers compare Agents by actual usefulness, not only by marketplace copy. Planned signals include:
+
+- Task success rate.
+- Output schema reliability.
+- Latency and timeout rate.
+- Repeat usage and retention.
+- Buyer feedback.
+- Cost per useful result.
+- Safe-output and leakage checks.
+- Version-to-version quality changes.
 
 ## Current Direction
 

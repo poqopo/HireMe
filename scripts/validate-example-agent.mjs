@@ -1,6 +1,11 @@
 import { validateAgentFolder } from "../apps/gateway/src/localSealedArtifact.mjs";
 
-const folderPath = process.argv[2] || "examples/code-reviewer-agent";
+const folderPath = process.argv[2];
+if (!folderPath) {
+  console.error("Usage: node scripts/validate-example-agent.mjs <agent-folder>");
+  process.exit(1);
+}
+
 const validation = await validateAgentFolder(folderPath);
 
 console.log(

@@ -1,7 +1,12 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
-const recordPath = process.argv[2] || ".hireme/artifacts/example-code-reviewer.public-record.json";
+const recordPath = process.argv[2];
+if (!recordPath) {
+  console.error("Usage: node scripts/inspect-seal-artifact.mjs <public-record.json>");
+  process.exit(1);
+}
+
 const publicRecord = JSON.parse(await readFile(resolve(recordPath), "utf8"));
 const walrusPath = resolve(publicRecord.localWalrusPath);
 const walrusPayload = await readFile(walrusPath, "utf8");

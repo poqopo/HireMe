@@ -2090,14 +2090,22 @@ function DocsPage() {
               to copy the creator's prompts, skills, examples, or review rules.
               They just ask the Agent to do the work from Codex.
             </p>
+            <p>
+              In HireMe, an Agent is not the base model itself. The model is the
+              engine. The private Harness is the working method. The gateway is
+              the runtime. Memory and tools define what the Agent can remember
+              and do. Together, those pieces become a repeatable worker for a
+              specific job.
+            </p>
             <div className="rounded-xl border border-[#533afd]/20 bg-[#f8f5ff] p-4 font-mono text-xs leading-6 text-[#1c1e54]">
-              Creators upload protected Agent files.
+              HireMe lets you hire protected Agents, not prompts.
               <br />
-              Buyers try or hire the Agent.
+              Each Agent is powered by private know-how, tools, memory rules,
+              and an execution contract.
               <br />
-              Codex calls HireMe through MCP.
+              The creator owns the Harness.
               <br />
-              HireMe runs the Agent and returns the result.
+              The buyer hires the capability.
             </div>
             <div className="grid gap-4 md:grid-cols-2">
               <DocsMiniBlock
@@ -2109,6 +2117,16 @@ function DocsPage() {
                 id="meet-buyers"
                 title="For buyers"
                 copy="Use a ready Agent from Codex without building it from scratch. You pay more than a raw model call, but you skip the repeated training and setup work."
+              />
+              <DocsMiniBlock
+                id="meet-agent"
+                title="What counts as an Agent?"
+                copy="A HireMe Agent is a model-agnostic worker packaged with private instructions, skills, examples, tool habits, memory rules, and a public execution contract."
+              />
+              <DocsMiniBlock
+                id="meet-not-prompts"
+                title="Not a prompt file"
+                copy="A prompt marketplace sells text to copy. HireMe sells protected execution: the Harness stays hidden, the gateway runs it, and the buyer receives the result."
               />
             </div>
           </DocsArticleSection>
@@ -2324,6 +2342,11 @@ function DocsPage() {
                 id="roadmap-privacy"
                 title="Long-term privacy"
                 copy="TEE, ICP blockchain, Seal, and similar systems can move HireMe toward a future where even the platform cannot read plain user or creator data."
+              />
+              <DocsMiniBlock
+                id="roadmap-quality"
+                title="Agent quality signals"
+                copy="HireMe will add performance indicators for Agents, including task success, latency, repeat usage, buyer feedback, schema reliability, and cost per useful result."
               />
             </div>
             <div className="grid gap-4 md:grid-cols-2">

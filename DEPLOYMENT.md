@@ -158,8 +158,10 @@ HIREME_PLATFORM_KMS_KEY_ID=platform:production-key
 HIREME_SEAL_PACKAGE_ID=
 HIREME_SEAL_KEY_SERVER_IDS=
 
-OPENAI_API_KEY=
-HIREME_OPENAI_MODEL=
+HIREME_LLM_PROVIDER=ollama
+OLLAMA_BASE_URL=https://ollama.com/api
+OLLAMA_API_KEY=
+OLLAMA_MODEL=gpt-oss:120b
 ```
 
 If `HIREME_GATEWAY_API_KEY` is set, MCP/plugin calls must send the same key. Keep that value out of the public web bundle.
