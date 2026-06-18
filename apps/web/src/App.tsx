@@ -710,7 +710,7 @@ function safeReturnTo(value: string | null) {
 }
 
 function hirerIdFor(user: AuthUser) {
-  return normalizeHirerId(user.wallet || user.email || "local-hirer");
+  return normalizeHirerId(user.email || user.wallet || "local-hirer");
 }
 
 function creatorIdFor(user: AuthUser) {

@@ -3178,20 +3178,28 @@ async function grantAgentAccess(args = {}) {
 
 async function listMyAgents(args = {}) {
   const hirerId = readHirerId(args);
-  const storedRecords = await listStoredAgentEntitlements(hirerId);
+  const hirerIds = readHirerIdentityCandidates(args);
+  const storedRecords = (
+    await Promise.all(hirerIds.map((candidate) => listStoredAgentEntitlements(candidate)))
+  ).flat();
   const recordsByKey = new Map();
 
   for (const record of storedRecords) {
-    recordsByKey.set(entitlementKey(record.hirerId, record.agentId), record);
+    recordsByKey.set(record.agentId, chooseEntitlementRecord(
+      recordsByKey.get(record.agentId),
+      record,
+      hirerId,
+    ));
     agentEntitlements.set(entitlementKey(record.hirerId, record.agentId), record);
   }
 
   for (const record of agentEntitlements.values()) {
-    if (record.hirerId !== hirerId || record.status !== "active") continue;
-    const key = entitlementKey(record.hirerId, record.agentId);
-    if (!recordsByKey.has(key)) {
-      recordsByKey.set(key, record);
-    }
+    if (!hirerIds.includes(record.hirerId) || record.status !== "active") continue;
+    recordsByKey.set(record.agentId, chooseEntitlementRecord(
+      recordsByKey.get(record.agentId),
+      record,
+      hirerId,
+    ));
   }
 
   const records = [];
@@ -3214,6 +3222,7 @@ async function listMyAgents(args = {}) {
   return {
     gatewayCall: true,
     hirerId,
+    hirerIds,
     count: records.length,
     agents: records,
   };
@@ -3345,15 +3354,18 @@ async function runProtectedAgent(args = {}) {
   const agent = await findOrHydrateAgent(agentId);
   const artifact = protectedArtifacts.get(agent.id) || {};
   const budgetCalls = args.budget_calls || 1;
-  const hirerId = readHirerId(args);
+  const requestedHirerId = readHirerId(args);
+  const hirerIds = readHirerIdentityCandidates(args);
   const hireReceiptObjectId =
     args.hire_receipt_object_id || args.hireReceiptObjectId || null;
   const access = await authorizeAgentCall({
     agent,
-    hirerId,
+    hirerId: requestedHirerId,
+    hirerIds,
     budgetCalls,
     hireReceiptObjectId,
   });
+  const hirerId = access.hirerId || requestedHirerId;
   const callId = `call_${Date.now().toString(36)}_${sha256Hex(`${agent.id}:${args.task || ""}`).slice(0, 8)}`;
   const requestDigest = `sha256:${sha256Hex(JSON.stringify({
     agentId: agent.id,
@@ -5511,6 +5523,22 @@ async function readStoredAgentEntitlement(agent, hirerId) {
   }
 }
 
+async function readStoredAgentEntitlementForHirerIds(agent, hirerIds) {
+  for (const hirerId of uniqueHirerIds(hirerIds)) {
+    const record = await readStoredAgentEntitlement(agent, hirerId);
+    if (record) return record;
+  }
+  return null;
+}
+
+function readMemoryAgentEntitlementForHirerIds(agent, hirerIds) {
+  for (const hirerId of uniqueHirerIds(hirerIds)) {
+    const record = agentEntitlements.get(entitlementKey(hirerId, agent.id));
+    if (record) return record;
+  }
+  return null;
+}
+
 async function persistSuiPaymentIntent(intent) {
   const admin = createSupabaseAdminClient();
   if (!admin) return null;
@@ -6632,9 +6660,11 @@ function averageInteger(values) {
 async function authorizeAgentCall({
   agent,
   hirerId,
+  hirerIds,
   budgetCalls,
   hireReceiptObjectId,
 }) {
+  const candidateHirerIds = uniqueHirerIds([hirerId, ...(hirerIds || [])]);
   if (String(hireReceiptObjectId || "").startsWith("hire_receipt_local_paid_demo")) {
     if (!isLocalDemoReceiptAllowed()) {
       throw Object.assign(
@@ -6656,12 +6686,13 @@ async function authorizeAgentCall({
   }
 
   const record =
-    (await readStoredAgentEntitlement(agent, hirerId)) ||
-    agentEntitlements.get(entitlementKey(hirerId, agent.id));
+    (await readStoredAgentEntitlementForHirerIds(agent, candidateHirerIds)) ||
+    readMemoryAgentEntitlementForHirerIds(agent, candidateHirerIds);
   if (!record || record.status !== "active") {
+    const checkedHirerIds = candidateHirerIds.join(", ");
     throw Object.assign(
       new Error(
-        `No active Try/Hire entitlement for agent_id=${agent.id} and hirer_id=${hirerId}`,
+        `No active Try/Hire entitlement for agent_id=${agent.id} and hirer_id=${hirerId}. Checked identities: ${checkedHirerIds}`,
       ),
       {
         statusCode: 402,
@@ -6674,7 +6705,7 @@ async function authorizeAgentCall({
     record.status = "expired";
     record.updatedAt = new Date().toISOString();
     await persistAgentEntitlement(record, agent);
-    agentEntitlements.set(entitlementKey(hirerId, agent.id), record);
+    agentEntitlements.set(entitlementKey(record.hirerId, agent.id), record);
     throw Object.assign(new Error(`Agent access expired for ${agent.id}`), {
       statusCode: 403,
       code: "agent_access_expired",
@@ -6696,7 +6727,7 @@ async function authorizeAgentCall({
     record.updatedAt = new Date().toISOString();
     const storedRecord = await persistAgentEntitlement(record, agent);
     agentEntitlements.set(
-      entitlementKey(hirerId, agent.id),
+      entitlementKey(record.hirerId, agent.id),
       storedRecord || record,
     );
     return storedRecord || record;
@@ -6713,6 +6744,22 @@ function isLocalDemoReceiptAllowed() {
     return false;
   }
   return process.env.NODE_ENV !== "production";
+}
+
+function chooseEntitlementRecord(existing, candidate, primaryHirerId) {
+  if (!existing) return candidate;
+  if (existing.hirerId !== primaryHirerId && candidate.hirerId === primaryHirerId) {
+    return candidate;
+  }
+  if (existing.accessType !== "hired" && candidate.accessType === "hired") {
+    return candidate;
+  }
+  if (existing.accessType === candidate.accessType) {
+    const existingUpdatedAt = Date.parse(existing.updatedAt || "") || 0;
+    const candidateUpdatedAt = Date.parse(candidate.updatedAt || "") || 0;
+    if (candidateUpdatedAt > existingUpdatedAt) return candidate;
+  }
+  return existing;
 }
 
 function publicEntitlement(record) {
@@ -6768,6 +6815,32 @@ function readHirerId(args = {}) {
     args.email ||
     "local-hirer";
   return normalizeHirerId(value);
+}
+
+function readHirerIdentityCandidates(args = {}) {
+  return uniqueHirerIds([
+    readHirerId(args),
+    normalizeSuiAddress(
+      args.sui_address ||
+        args.suiAddress ||
+        args.wallet_address ||
+        args.walletAddress ||
+        args.wallet,
+    ),
+    args.hirer_email || args.hirerEmail || args.email,
+  ]);
+}
+
+function uniqueHirerIds(values = []) {
+  const unique = [];
+  for (const value of values) {
+    const text = String(value || "").trim();
+    if (!text) continue;
+    const normalized = normalizeHirerId(text);
+    if (!normalized || unique.includes(normalized)) continue;
+    unique.push(normalized);
+  }
+  return unique.length ? unique : ["local-hirer"];
 }
 
 function normalizeSuiAddress(value) {
