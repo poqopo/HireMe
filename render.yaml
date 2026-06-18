@@ -33,10 +33,16 @@ services:
         value: "0"
       - key: WALRUS_NETWORK
         value: testnet
-      - key: WALRUS_CONTEXT
-        value: testnet
       - key: WALRUS_UPLOAD_RELAY_URL
         sync: false
+      - key: WALRUS_UPLOAD_RELAY_TIP_MAX_MIST
+        value: "1000"
+      - key: HIREME_WALRUS_REQUIRED
+        value: "1"
+      - key: HIREME_WALRUS_PAYER_PRIVATE_KEY
+        sync: false
+      - key: HIREME_WALRUS_DELETABLE
+        value: "0"
       - key: HIREME_PLATFORM_KMS_KEY
         sync: false
       - key: HIREME_PLATFORM_KMS_KEY_ID

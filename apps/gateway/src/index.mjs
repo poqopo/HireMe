@@ -38,7 +38,11 @@ import {
   platformEncryptionProvider,
   readSealEnvelopeMetadata,
 } from "./sealEnvelope.mjs";
-import { readWalrusBlobBytes, storeFileOnWalrus } from "./walrusBlobStore.mjs";
+import {
+  isWalrusPayerConfigured,
+  readWalrusBlobBytes,
+  storeFileOnWalrus,
+} from "./walrusBlobStore.mjs";
 
 loadEnvFile(".env");
 loadEnvFile(".env.local");
@@ -377,6 +381,10 @@ const server = createServer(async (req, res) => {
             process.env.SUPABASE_SERVICE_ROLE_KEY,
         ),
         walrusNetwork: process.env.WALRUS_NETWORK || "testnet",
+        walrusUploadRequired: isWalrusUploadRequired(),
+        walrusSdkConfigured: true,
+        walrusUploadRelayConfigured: Boolean(process.env.WALRUS_UPLOAD_RELAY_URL),
+        walrusPayerConfigured: isWalrusPayerConfigured(),
         suiNetwork: process.env.SUI_NETWORK || "testnet",
         llmProvider: defaultLlmProvider,
         llmModel:
@@ -891,7 +899,7 @@ const httpMcpTools = [
     name: "hireme_create_agent_from_folder",
     title: "Create Agent from local folder",
     description:
-      "Create a protected Agent by archiving a local Agent working folder as tar.gz, encrypting it in the gateway, uploading ciphertext to Walrus, and registering the public Agent card.",
+      "Create a protected Agent by archiving a local Agent working folder as tar.gz, encrypting it in the gateway, uploading ciphertext to Walrus, and registering the public Agent card. Web uploads may provide zip or tar.gz archives.",
     inputSchema: {
       type: "object",
       properties: {
@@ -2074,7 +2082,7 @@ function routeRegistrationNaturalRequest(request) {
   }
   const createFromFolder =
     /(생성|create|만들|publish|register|등록|마켓플레이스|marketplace)/i.test(text) &&
-    /(folder|폴더|path|경로|작업\s*폴더|working\s*folder|tar\.gz|tgz)/i.test(text);
+    /(folder|폴더|path|경로|작업\s*폴더|working\s*folder|tar\.gz|tgz|zip)/i.test(text);
   if (createFromFolder) {
     return {
       status: "create_agent_folder_fields_required",
@@ -2086,7 +2094,7 @@ function routeRegistrationNaturalRequest(request) {
       )?.inputSchema.required,
       flow: [
         "Pass folder_path for the local Agent working folder containing AGENTS.md.",
-        "The gateway archives the folder as tar.gz, encrypts it, uploads ciphertext to Walrus, and registers the public Agent card.",
+        "The gateway accepts zip or tar.gz Harness archives, encrypts the archive, uploads ciphertext to Walrus, and registers the public Agent card.",
         "The response returns public metadata and safe upload summaries, not private folder plaintext.",
       ],
     };
@@ -3705,17 +3713,29 @@ async function runPlatformEncryptedArtifactTask({
   const workDir = await mkdtemp(join(runtimeRoot, `${agent.id}-`));
 
   try {
-    const archivePath = join(workDir, `${safeUploadName(agent.id)}.tar.gz`);
+    const archiveFormat = normalizeHarnessArchiveFormat(
+      artifact.archiveFormat ||
+        artifact.harnessArchiveFormat ||
+        artifact.metadata?.harnessArchiveFormat ||
+        artifact.metadata?.archiveFormat ||
+        "tar.gz",
+    );
+    const archiveExtension = archiveFormat === "zip" ? "zip" : "tar.gz";
+    const archivePath = join(
+      workDir,
+      `${safeUploadName(agent.id)}.${archiveExtension}`,
+    );
     await writeFile(archivePath, plaintextArchive);
     const archive = await inspectHarnessArchive({
       archivePath,
-      originalName: `${agent.id}.tar.gz`,
+      originalName: `${agent.id}.${archiveExtension}`,
     });
     const extractDir = join(workDir, "harness");
     await mkdir(extractDir, { recursive: true });
-    await execFileAsync("tar", ["-xzf", archivePath, "-C", extractDir], {
-      maxBuffer: 20 * 1024 * 1024,
-      env: { ...process.env, COPYFILE_DISABLE: "1" },
+    await extractHarnessArchive({
+      archivePath,
+      extractDir,
+      format: archive.format,
     });
     const extractedFiles = await listExtractedFiles(extractDir);
     const agentsMd = await readFirstAgentsMd(extractDir, extractedFiles);
@@ -4222,6 +4242,7 @@ async function createAgentFromArchiveUpload({
       archivePath,
       originalName: harnessFile.filename || "",
     });
+    const harnessArchiveFormat = archive.format;
     const plaintextArchive = await readFile(archivePath);
     const plaintextArchiveDigest = `sha256:${sha256Hex(plaintextArchive)}`;
     const folderManifestDigest = `sha256:${sha256Hex(
@@ -4276,6 +4297,8 @@ async function createAgentFromArchiveUpload({
       seal_threshold: sealed.sealMetadata.threshold,
       seal_key_server_ids: sealed.sealMetadata.keyServerIds,
       storage_network: storage.network,
+      harness_archive_format: harnessArchiveFormat,
+      archive_format: harnessArchiveFormat,
       metadata: {
         ...(metadata.metadata && typeof metadata.metadata === "object"
           ? metadata.metadata
@@ -4283,6 +4306,7 @@ async function createAgentFromArchiveUpload({
         registeredVia,
         harnessArchiveFileName: harnessFile.filename || null,
         harnessArchiveMimeType: harnessFile.contentType || null,
+        harnessArchiveFormat,
         harnessEntryPreview: archive.entries.slice(0, 12),
         plaintextArchiveDigest,
         plaintextArchiveSizeBytes: plaintextArchive.byteLength,
@@ -4303,6 +4327,7 @@ async function createAgentFromArchiveUpload({
         ciphertextSizeBytes: sealed.encryptedBytes.byteLength,
         plaintextArchiveDigest,
         plaintextArchiveSizeBytes: plaintextArchive.byteLength,
+        harnessArchiveFormat,
         folderManifestDigest,
         entryPreview: archive.entries.slice(0, 12),
         entryCount: archive.entries.length,
@@ -4317,6 +4342,8 @@ async function createAgentFromArchiveUpload({
         suiObjectId: storage.suiObjectId,
         ciphertextDigest,
         folderManifestDigest,
+        archiveFormat: harnessArchiveFormat,
+        harnessArchiveFormat,
       },
     };
   } finally {
@@ -4457,6 +4484,13 @@ async function registerAgentFromMcp(args = {}) {
     suiObjectId: String(args.sui_object_id).trim(),
     ciphertextDigest: String(args.ciphertext_digest).trim(),
     folderManifestDigest: args.folder_manifest_digest || null,
+    archiveFormat: normalizeHarnessArchiveFormat(
+      args.harness_archive_format ||
+        args.archive_format ||
+        args.metadata?.harnessArchiveFormat ||
+        args.metadata?.archiveFormat ||
+        "tar.gz",
+    ),
     pricePerCallUsd: pricePer1MTokensSui,
     pricePer1MTokensSui,
     visibility:
@@ -4723,6 +4757,8 @@ async function persistRegisteredAgentToSupabase({ agent, artifact, args }) {
             protectedAssetClasses: agent.hiddenAssetClasses,
             encryptionProvider: artifact.encryptionProvider,
             ciphertextFormat: artifact.ciphertextFormat,
+            archiveFormat: artifact.archiveFormat,
+            harnessArchiveFormat: artifact.archiveFormat,
             platformKmsKeyId: artifact.platformKmsKeyId,
             platformPolicyId: artifact.platformPolicyId || artifact.policyId,
             platformEncryptionId:
@@ -6914,6 +6950,11 @@ async function hydrateAgentFromSupabase(agentId) {
     ciphertextDigest:
       artifactRow?.ciphertext_digest || "registered-with-protected-artifacts",
     folderManifestDigest: artifactRow?.folder_manifest_digest || null,
+    archiveFormat: normalizeHarnessArchiveFormat(
+      artifactRow?.metadata?.harnessArchiveFormat ||
+        artifactRow?.metadata?.archiveFormat ||
+        "tar.gz",
+    ),
     localFallbackPath: artifactRow?.metadata?.localFallbackPath || null,
     storageProvider: artifactRow?.metadata?.storageProvider || null,
     visibility:
@@ -7142,13 +7183,13 @@ async function archiveAgentFolder({ folderPath, archivePath, exclude = [] }) {
 
 async function inspectHarnessArchive({ archivePath, originalName }) {
   const lowerName = String(originalName || archivePath).toLowerCase();
+  const format = normalizeHarnessArchiveFormat(lowerName);
   if (
-    !lowerName.endsWith(".tar.gz") &&
-    !lowerName.endsWith(".tgz") &&
-    !lowerName.endsWith(".gz")
+    format !== "tar.gz" &&
+    format !== "zip"
   ) {
     throw Object.assign(
-      new Error("Harness archive must be a .tar.gz, .tgz, or tar-compatible .gz file"),
+      new Error("Harness archive must be a .zip, .tar.gz, .tgz, or tar-compatible .gz file"),
       {
         statusCode: 400,
         code: "unsupported_harness_archive",
@@ -7156,44 +7197,8 @@ async function inspectHarnessArchive({ archivePath, originalName }) {
     );
   }
 
-  let stdout = "";
-  try {
-    ({ stdout } = await execFileAsync("tar", ["-tzf", archivePath], {
-      maxBuffer: 20 * 1024 * 1024,
-      env: { ...process.env, COPYFILE_DISABLE: "1" },
-    }));
-  } catch (err) {
-    const detail = err.stderr ? String(err.stderr).trim() : "";
-    throw Object.assign(
-      new Error(
-        `Harness archive must be a valid tar.gz containing AGENTS.md${detail ? `: ${detail}` : ""}`,
-      ),
-      {
-        statusCode: 400,
-        code: "invalid_harness_archive",
-      },
-    );
-  }
-
-  const entries = stdout
-    .split(/\r?\n/)
-    .map((entry) => entry.trim())
-    .filter(Boolean)
-    .map((entry) => entry.replace(/\\/g, "/"));
-
-  for (const entry of entries) {
-    if (
-      entry.startsWith("/") ||
-      entry === ".." ||
-      entry.startsWith("../") ||
-      entry.includes("/../")
-    ) {
-      throw Object.assign(new Error(`Unsafe archive entry: ${entry}`), {
-        statusCode: 400,
-        code: "unsafe_harness_archive",
-      });
-    }
-  }
+  const entries = await listHarnessArchiveEntries({ archivePath, format });
+  assertSafeHarnessArchiveEntries(entries);
 
   const containsAgentsMd = entries.some(
     (entry) => entry === "AGENTS.md" || entry.endsWith("/AGENTS.md"),
@@ -7205,7 +7210,87 @@ async function inspectHarnessArchive({ archivePath, originalName }) {
     });
   }
 
-  return { entries, containsAgentsMd };
+  return { entries, containsAgentsMd, format };
+}
+
+function normalizeHarnessArchiveFormat(value = "") {
+  const lowerValue = String(value || "").toLowerCase();
+  if (lowerValue === "zip" || lowerValue.endsWith(".zip")) return "zip";
+  if (
+    lowerValue === "tar.gz" ||
+    lowerValue === "tgz" ||
+    lowerValue === "gz" ||
+    lowerValue.endsWith(".tar.gz") ||
+    lowerValue.endsWith(".tgz") ||
+    lowerValue.endsWith(".gz")
+  ) {
+    return "tar.gz";
+  }
+  return "";
+}
+
+async function listHarnessArchiveEntries({ archivePath, format }) {
+  let stdout = "";
+  try {
+    if (format === "zip") {
+      ({ stdout } = await execFileAsync("unzip", ["-Z1", archivePath], {
+        maxBuffer: 20 * 1024 * 1024,
+      }));
+    } else {
+      ({ stdout } = await execFileAsync("tar", ["-tzf", archivePath], {
+        maxBuffer: 20 * 1024 * 1024,
+        env: { ...process.env, COPYFILE_DISABLE: "1" },
+      }));
+    }
+  } catch (err) {
+    const detail = err.stderr ? String(err.stderr).trim() : "";
+    throw Object.assign(
+      new Error(
+        `Harness archive must be a valid ${format} containing AGENTS.md${detail ? `: ${detail}` : ""}`,
+      ),
+      {
+        statusCode: 400,
+        code: "invalid_harness_archive",
+      },
+    );
+  }
+
+  return stdout
+    .split(/\r?\n/)
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .map((entry) => entry.replace(/\\/g, "/"));
+}
+
+function assertSafeHarnessArchiveEntries(entries) {
+  for (const entry of entries) {
+    if (
+      entry.startsWith("/") ||
+      entry === ".." ||
+      entry.startsWith("../") ||
+      entry.includes("/../") ||
+      /^[A-Za-z]:\//.test(entry)
+    ) {
+      throw Object.assign(new Error(`Unsafe archive entry: ${entry}`), {
+        statusCode: 400,
+        code: "unsafe_harness_archive",
+      });
+    }
+  }
+}
+
+async function extractHarnessArchive({ archivePath, extractDir, format }) {
+  if (format === "zip") {
+    await execFileAsync("unzip", ["-q", archivePath, "-d", extractDir], {
+      maxBuffer: 20 * 1024 * 1024,
+    });
+    return;
+  }
+
+  await execFileAsync("tar", ["-xzf", archivePath, "-C", extractDir], {
+    maxBuffer: 20 * 1024 * 1024,
+    env: { ...process.env, COPYFILE_DISABLE: "1" },
+  });
 }
 
 async function storeProtectedEncryptedArchive({
@@ -7233,7 +7318,7 @@ async function storeProtectedEncryptedArchive({
       raw: upload.result,
     };
   } catch (err) {
-    if (/^(1|true|yes)$/i.test(process.env.HIREME_WALRUS_REQUIRED || "")) {
+    if (isWalrusUploadRequired()) {
       throw Object.assign(
         new Error(
           `Walrus upload failed and HIREME_WALRUS_REQUIRED is enabled: ${
@@ -7267,6 +7352,10 @@ async function storeProtectedEncryptedArchive({
       error: err instanceof Error ? err.message : String(err),
     };
   }
+}
+
+function isWalrusUploadRequired() {
+  return /^(1|true|yes)$/i.test(process.env.HIREME_WALRUS_REQUIRED || "");
 }
 
 function safeUploadName(value) {

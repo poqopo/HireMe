@@ -150,8 +150,11 @@ HIREME_DEFAULT_HIRE_PRICE_SUI=0.05
 HIREME_PLATFORM_FEE_BPS=0
 
 WALRUS_NETWORK=testnet
-WALRUS_CONTEXT=testnet
 WALRUS_UPLOAD_RELAY_URL=
+WALRUS_UPLOAD_RELAY_TIP_MAX_MIST=1000
+HIREME_WALRUS_REQUIRED=1
+HIREME_WALRUS_PAYER_PRIVATE_KEY=
+HIREME_WALRUS_DELETABLE=0
 
 HIREME_PLATFORM_KMS_KEY=
 HIREME_PLATFORM_KMS_KEY_ID=platform:production-key
@@ -163,6 +166,29 @@ OLLAMA_BASE_URL=https://ollama.com/api
 OLLAMA_API_KEY=
 OLLAMA_MODEL=gpt-oss:120b
 ```
+
+### Render Walrus SDK Payer Wallet
+
+The gateway uploads and reads Walrus blobs through the `@mysten/walrus`
+TypeScript SDK. Render does not need the `walrus` CLI, a Sui keystore file, or a
+Walrus client config file.
+
+For a short-lived demo, create a disposable Sui testnet wallet, fund it with the
+testnet SUI/WAL needed for storage, and set:
+
+```bash
+HIREME_WALRUS_PAYER_PRIVATE_KEY=suiprivkey...
+WALRUS_NETWORK=testnet
+SUI_NETWORK=testnet
+SUI_FULLNODE_URL=https://fullnode.testnet.sui.io:443
+WALRUS_UPLOAD_RELAY_URL=https://upload-relay.testnet.walrus.space
+WALRUS_UPLOAD_RELAY_TIP_MAX_MIST=1000
+HIREME_WALRUS_REQUIRED=1
+```
+
+`HIREME_WALRUS_REQUIRED=1` makes failed Walrus uploads fail the Agent creation
+request instead of silently falling back to local storage. Keep it enabled for a
+demo where you need to prove Render is writing to Walrus.
 
 If `HIREME_GATEWAY_API_KEY` is set, MCP/plugin calls must send the same key. Keep that value out of the public web bundle.
 

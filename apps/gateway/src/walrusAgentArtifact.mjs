@@ -8,9 +8,10 @@ import {
   rm,
   stat,
 } from "node:fs/promises";
-import { basename, dirname, join, relative, resolve } from "node:path";
+import { basename, join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
 import { createClient } from "@supabase/supabase-js";
+import { readWalrusBlobToFile } from "./walrusBlobStore.mjs";
 
 const execFileAsync = promisify(execFile);
 const runtimeRoot = resolve(".hireme/walrus/runtime");
@@ -161,19 +162,6 @@ export async function readAndExtractWalrusArchive({ blobId }) {
     archiveDigest,
     archiveSizeBytes: archiveInfo.size,
   };
-}
-
-async function readWalrusBlobToFile({ blobId, outPath }) {
-  await mkdir(dirname(outPath), { recursive: true });
-  const args = ["read", "--out", outPath];
-  if (process.env.WALRUS_CONTEXT) {
-    args.push("--context", process.env.WALRUS_CONTEXT);
-  }
-  if (process.env.WALRUS_CONFIG_PATH) {
-    args.push("--config", process.env.WALRUS_CONFIG_PATH);
-  }
-  args.push(blobId);
-  await runCommand(walrusCliPath(), args, { maxBuffer: 10 * 1024 * 1024 });
 }
 
 async function validateTarArchive(archivePath) {
@@ -360,10 +348,6 @@ async function runCommand(command, args, options = {}) {
       },
     );
   }
-}
-
-function walrusCliPath() {
-  return process.env.WALRUS_CLI_PATH || "walrus";
 }
 
 function safePathName(value) {

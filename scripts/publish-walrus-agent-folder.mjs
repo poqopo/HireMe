@@ -5,6 +5,11 @@ import { mkdir, readFile, readdir, stat } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { createClient } from "@supabase/supabase-js";
+import {
+  findFirstByKey,
+  findWalrusObjectId,
+  storeFileOnWalrus,
+} from "../apps/gateway/src/walrusBlobStore.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -34,14 +39,14 @@ await runCommand(
 const archive = await readFile(archivePath);
 const archiveDigest = `sha256:${sha256Hex(archive)}`;
 const archiveSizeBytes = archive.byteLength;
-const upload = await storeOnWalrus({ archivePath, epochs });
-const blobId = findFirstByKey(upload, [
+const upload = await storeFileOnWalrus({ filePath: archivePath, epochs });
+const blobId = upload.blobId || findFirstByKey(upload, [
   "blobId",
   "blob_id",
   "encodedBlobId",
   "encoded_blob_id",
 ]);
-const suiObjectId = findWalrusObjectId(upload);
+const suiObjectId = upload.suiObjectId || findWalrusObjectId(upload);
 
 if (!blobId) {
   throw new Error(
@@ -94,29 +99,6 @@ async function assertValidAgentFolder(path) {
   if (entries.length === 0) {
     throw new Error(`Agent folder is empty: ${path}`);
   }
-}
-
-async function storeOnWalrus({ archivePath, epochs }) {
-  const args = ["store", "--json", "--epochs", String(epochs)];
-  if (process.env.WALRUS_CONTEXT) {
-    args.push("--context", process.env.WALRUS_CONTEXT);
-  }
-  if (process.env.WALRUS_CONFIG_PATH) {
-    args.push("--config", process.env.WALRUS_CONFIG_PATH);
-  }
-  if (process.env.WALRUS_UPLOAD_RELAY_URL) {
-    args.push(
-      "--upload-relay",
-      process.env.WALRUS_UPLOAD_RELAY_URL,
-      "--skip-tip-confirmation",
-    );
-  }
-  args.push(archivePath);
-
-  const { stdout } = await runCommand(walrusCliPath(), args, {
-    maxBuffer: 20 * 1024 * 1024,
-  });
-  return parseJsonOutput(stdout);
 }
 
 async function upsertSupabaseRecord({
@@ -194,86 +176,6 @@ async function runCommand(command, args, options = {}) {
   }
 }
 
-function parseJsonOutput(stdout) {
-  const trimmed = String(stdout || "").trim();
-  if (!trimmed) {
-    throw new Error("Walrus CLI returned empty stdout");
-  }
-
-  try {
-    return JSON.parse(trimmed);
-  } catch {
-    const firstBrace = trimmed.indexOf("{");
-    const firstBracket = trimmed.indexOf("[");
-    const start = [firstBrace, firstBracket]
-      .filter((index) => index >= 0)
-      .sort((left, right) => left - right)[0];
-    if (start === undefined) {
-      throw new Error(`Walrus CLI did not return JSON: ${trimmed.slice(0, 500)}`);
-    }
-    return JSON.parse(trimmed.slice(start));
-  }
-}
-
-function findFirstByKey(value, keys) {
-  if (!value || typeof value !== "object") return null;
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      const found = findFirstByKey(item, keys);
-      if (found) return found;
-    }
-    return null;
-  }
-
-  for (const [key, child] of Object.entries(value)) {
-    if (keys.includes(key) && typeof child === "string" && child) {
-      return child;
-    }
-  }
-
-  for (const child of Object.values(value)) {
-    const found = findFirstByKey(child, keys);
-    if (found) return found;
-  }
-
-  return null;
-}
-
-function findWalrusObjectId(value) {
-  if (!value || typeof value !== "object") return null;
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      const found = findWalrusObjectId(item);
-      if (found) return found;
-    }
-    return null;
-  }
-
-  for (const key of [
-    "suiObjectId",
-    "sui_object_id",
-    "objectId",
-    "object_id",
-    "storageObjectId",
-  ]) {
-    const candidate = value[key];
-    if (typeof candidate === "string" && candidate.startsWith("0x")) {
-      return candidate;
-    }
-  }
-
-  if (value.blobObject?.id && String(value.blobObject.id).startsWith("0x")) {
-    return value.blobObject.id;
-  }
-
-  for (const child of Object.values(value)) {
-    const found = findWalrusObjectId(child);
-    if (found) return found;
-  }
-
-  return null;
-}
-
 function parseArgs(args) {
   const parsed = { _: [] };
   for (let index = 0; index < args.length; index += 1) {
@@ -292,10 +194,6 @@ function parseArgs(args) {
     index += 1;
   }
   return parsed;
-}
-
-function walrusCliPath() {
-  return process.env.WALRUS_CLI_PATH || "walrus";
 }
 
 function sha256Hex(value) {

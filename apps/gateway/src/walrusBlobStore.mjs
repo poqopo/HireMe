@@ -1,68 +1,68 @@
-import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { mkdir, readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
-import { promisify } from "node:util";
+import { decodeSuiPrivateKey } from "@mysten/sui/cryptography";
+import { SuiGrpcClient } from "@mysten/sui/grpc";
+import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
+import { Secp256k1Keypair } from "@mysten/sui/keypairs/secp256k1";
+import { Secp256r1Keypair } from "@mysten/sui/keypairs/secp256r1";
+import { RetryableWalrusClientError, walrus } from "@mysten/walrus";
 
-const execFileAsync = promisify(execFile);
 const defaultRuntimeDir = ".hireme/walrus/protected-runtime";
+let walrusClient = null;
+let walrusSigner = null;
 
 loadEnvFile(".env");
 loadEnvFile(".env.local");
 
 export async function storeFileOnWalrus({ filePath, epochs = 3 }) {
-  const args = ["store", "--json", "--epochs", String(epochs)];
-  if (process.env.WALRUS_CONTEXT) {
-    args.push("--context", process.env.WALRUS_CONTEXT);
-  }
-  if (process.env.WALRUS_CONFIG_PATH) {
-    args.push("--config", process.env.WALRUS_CONFIG_PATH);
-  }
-  if (process.env.WALRUS_UPLOAD_RELAY_URL) {
-    args.push(
-      "--upload-relay",
-      process.env.WALRUS_UPLOAD_RELAY_URL,
-      "--skip-tip-confirmation",
-    );
-  }
-  args.push(resolve(filePath));
+  const blob = await readFile(resolve(filePath));
+  const signer = getWalrusSigner();
+  const steps = [];
+  const result = await runWalrusOperation(async (client) =>
+    client.walrus.writeBlob({
+      blob,
+      deletable: isWalrusBlobDeletable(),
+      epochs,
+      signer,
+      owner: cleanEnv(process.env.HIREME_WALRUS_OWNER_ADDRESS) || undefined,
+      onStep: (step) => {
+        steps.push(step);
+      },
+    }),
+  );
 
-  const { stdout } = await runCommand(walrusCliPath(), args, {
-    maxBuffer: 20 * 1024 * 1024,
-  });
-  const result = parseJsonOutput(stdout);
-  const blobId = findFirstByKey(result, [
-    "blobId",
-    "blob_id",
-    "encodedBlobId",
-    "encoded_blob_id",
-  ]);
-
+  const blobId = result.blobId;
   if (!blobId) {
     throw new Error(
-      `Walrus upload did not return a blob id. Raw output: ${JSON.stringify(result).slice(0, 2000)}`,
+      `Walrus SDK upload did not return a blob id. Raw output: ${JSON.stringify(result).slice(0, 2000)}`,
     );
   }
 
+  const uploadResult = {
+    ...result,
+    blobObject: result.blobObject || null,
+    payerAddress: signer.toSuiAddress(),
+    storageEpochs: epochs,
+    storageNetwork: walrusNetwork(),
+    uploadRelayUrl: cleanEnv(process.env.WALRUS_UPLOAD_RELAY_URL) || null,
+    steps,
+  };
+
   return {
-    result,
+    result: uploadResult,
     blobId,
-    suiObjectId: findWalrusObjectId(result),
+    suiObjectId: result.blobObject?.id || findWalrusObjectId(result),
   };
 }
 
 export async function readWalrusBlobToFile({ blobId, outPath }) {
+  const bytes = await runWalrusOperation((client) =>
+    client.walrus.readBlob({ blobId }),
+  );
   await mkdir(dirname(resolve(outPath)), { recursive: true });
-  const args = ["read", "--out", resolve(outPath)];
-  if (process.env.WALRUS_CONTEXT) {
-    args.push("--context", process.env.WALRUS_CONTEXT);
-  }
-  if (process.env.WALRUS_CONFIG_PATH) {
-    args.push("--config", process.env.WALRUS_CONFIG_PATH);
-  }
-  args.push(blobId);
-  await runCommand(walrusCliPath(), args, { maxBuffer: 20 * 1024 * 1024 });
+  await writeFile(resolve(outPath), Buffer.from(bytes));
   return resolve(outPath);
 }
 
@@ -80,6 +80,16 @@ export async function readWalrusBlobBytes({
     digest: `sha256:${sha256Hex(bytes)}`,
     sizeBytes: bytes.length,
   };
+}
+
+export function isWalrusPayerConfigured() {
+  return Boolean(
+    firstEnvValue([
+      "HIREME_WALRUS_PAYER_PRIVATE_KEY",
+      "WALRUS_PAYER_PRIVATE_KEY",
+      "SUI_PRIVATE_KEY",
+    ]),
+  );
 }
 
 export function findFirstByKey(value, keys) {
@@ -141,41 +151,193 @@ export function findWalrusObjectId(value) {
   return null;
 }
 
-function runCommand(command, args, options = {}) {
-  return execFileAsync(command, args, {
-    ...options,
-    maxBuffer: options.maxBuffer || 5 * 1024 * 1024,
-  }).catch((err) => {
-    const stderr = err.stderr ? String(err.stderr).trim() : "";
-    const stdout = err.stdout ? String(err.stdout).trim() : "";
-    const detail = [stderr, stdout].filter(Boolean).join("\n");
-    throw new Error(`${command} ${args.join(" ")} failed${detail ? `: ${detail}` : ""}`);
-  });
+async function runWalrusOperation(operation) {
+  const client = getWalrusClient();
+  try {
+    return await operation(client);
+  } catch (err) {
+    if (err instanceof RetryableWalrusClientError) {
+      client.walrus.reset();
+      return operation(client);
+    }
+    throw err;
+  }
 }
 
-function parseJsonOutput(stdout) {
-  const trimmed = String(stdout || "").trim();
-  if (!trimmed) {
-    throw new Error("Walrus CLI returned empty stdout");
+function getWalrusClient() {
+  walrusClient ||= new SuiGrpcClient({
+    network: walrusNetwork(),
+    baseUrl: suiFullnodeUrl(),
+  }).$extend(
+    walrus({
+      packageConfig: walrusPackageConfig(),
+      uploadRelay: walrusUploadRelayConfig(),
+      storageNodeClientOptions: {
+        timeout: positiveIntegerEnv("HIREME_WALRUS_STORAGE_NODE_TIMEOUT_MS", 60_000),
+      },
+    }),
+  );
+  return walrusClient;
+}
+
+function getWalrusSigner() {
+  walrusSigner ||= createWalrusSigner();
+  return walrusSigner;
+}
+
+function createWalrusSigner() {
+  const { name, value } = firstEnvEntry([
+    "HIREME_WALRUS_PAYER_PRIVATE_KEY",
+    "WALRUS_PAYER_PRIVATE_KEY",
+    "SUI_PRIVATE_KEY",
+  ]);
+
+  if (!value) {
+    throw new Error(
+      "Walrus SDK upload needs a payer private key. Set HIREME_WALRUS_PAYER_PRIVATE_KEY to a Sui suiprivkey value.",
+    );
   }
 
   try {
-    return JSON.parse(trimmed);
-  } catch {
-    const firstBrace = trimmed.indexOf("{");
-    const firstBracket = trimmed.indexOf("[");
-    const start = [firstBrace, firstBracket]
-      .filter((index) => index >= 0)
-      .sort((left, right) => left - right)[0];
-    if (start === undefined) {
-      throw new Error(`Walrus CLI did not return JSON: ${trimmed.slice(0, 500)}`);
-    }
-    return JSON.parse(trimmed.slice(start));
+    const parsed = parseSuiPrivateKey(value);
+    return keypairFromSecretKey(parsed);
+  } catch (err) {
+    throw new Error(
+      `Invalid Walrus payer private key in ${name}: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
   }
 }
 
-function walrusCliPath() {
-  return process.env.WALRUS_CLI_PATH || "walrus";
+function parseSuiPrivateKey(value) {
+  const trimmed = cleanEnv(value);
+  if (trimmed.startsWith("suiprivkey")) {
+    return decodeSuiPrivateKey(trimmed);
+  }
+
+  const bytes = decodeRawPrivateKeyBytes(trimmed);
+  if (bytes.length === 33) {
+    return {
+      scheme: schemeFromFlag(bytes[0]),
+      secretKey: bytes.subarray(1),
+    };
+  }
+  if (bytes.length === 32) {
+    return {
+      scheme: process.env.HIREME_WALRUS_PAYER_KEY_SCHEME || "ED25519",
+      secretKey: bytes,
+    };
+  }
+
+  throw new Error("expected suiprivkey, 32-byte raw key, or 33-byte Sui keystore key");
+}
+
+function decodeRawPrivateKeyBytes(value) {
+  const normalized = value.replace(/^0x/, "");
+  if (/^[0-9a-fA-F]+$/.test(normalized) && normalized.length % 2 === 0) {
+    return Buffer.from(normalized, "hex");
+  }
+  if (/^[A-Za-z0-9+/]+={0,2}$/.test(value)) {
+    return Buffer.from(value, "base64");
+  }
+  throw new Error("unsupported private key encoding");
+}
+
+function schemeFromFlag(flag) {
+  if (flag === 0) return "ED25519";
+  if (flag === 1) return "Secp256k1";
+  if (flag === 2) return "Secp256r1";
+  throw new Error(`unsupported Sui private key scheme flag: ${flag}`);
+}
+
+function keypairFromSecretKey({ scheme, secretKey }) {
+  const normalizedScheme = String(scheme || "").toLowerCase();
+  if (normalizedScheme === "ed25519") {
+    return Ed25519Keypair.fromSecretKey(secretKey);
+  }
+  if (normalizedScheme === "secp256k1") {
+    return Secp256k1Keypair.fromSecretKey(secretKey);
+  }
+  if (normalizedScheme === "secp256r1") {
+    return Secp256r1Keypair.fromSecretKey(secretKey);
+  }
+  throw new Error(`unsupported key scheme: ${scheme}`);
+}
+
+function walrusNetwork() {
+  const value = cleanEnv(
+    process.env.WALRUS_NETWORK ||
+      process.env.WALRUS_CONTEXT ||
+      process.env.SUI_NETWORK ||
+      "testnet",
+  ).replace(/^sui-/, "");
+  return value === "mainnet" ? "mainnet" : "testnet";
+}
+
+function suiFullnodeUrl() {
+  return (
+    cleanEnv(
+      process.env.HIREME_SUI_FULLNODE_URL ||
+        process.env.SUI_FULLNODE_URL ||
+        process.env.VITE_SUI_FULLNODE_URL,
+    ) || `https://fullnode.${walrusNetwork()}.sui.io:443`
+  );
+}
+
+function walrusPackageConfig() {
+  const systemObjectId = cleanEnv(process.env.WALRUS_SYSTEM_OBJECT_ID);
+  const stakingPoolId = cleanEnv(process.env.WALRUS_STAKING_POOL_ID);
+  if (!systemObjectId && !stakingPoolId) return undefined;
+  if (!systemObjectId || !stakingPoolId) {
+    throw new Error(
+      "Set both WALRUS_SYSTEM_OBJECT_ID and WALRUS_STAKING_POOL_ID, or neither.",
+    );
+  }
+  return {
+    systemObjectId,
+    stakingPoolId,
+    exchangeIds: cleanEnv(process.env.WALRUS_EXCHANGE_IDS)
+      .split(",")
+      .map((id) => id.trim())
+      .filter(Boolean),
+  };
+}
+
+function walrusUploadRelayConfig() {
+  const host = cleanEnv(process.env.WALRUS_UPLOAD_RELAY_URL).replace(/\/$/, "");
+  if (!host) return undefined;
+
+  const tipMax = positiveIntegerEnv("WALRUS_UPLOAD_RELAY_TIP_MAX_MIST", 1_000);
+  return {
+    host,
+    ...(tipMax > 0 ? { sendTip: { max: tipMax } } : {}),
+  };
+}
+
+function isWalrusBlobDeletable() {
+  return /^(1|true|yes)$/i.test(process.env.HIREME_WALRUS_DELETABLE || "");
+}
+
+function positiveIntegerEnv(name, fallback) {
+  const parsed = Number.parseInt(process.env[name] || "", 10);
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
+function firstEnvValue(names) {
+  return firstEnvEntry(names).value;
+}
+
+function firstEnvEntry(names) {
+  for (const name of names) {
+    const value = cleanEnv(process.env[name]);
+    if (value) return { name, value };
+  }
+  return { name: names[0], value: "" };
+}
+
+function cleanEnv(value) {
+  return String(value || "").trim();
 }
 
 function safePathName(value) {
