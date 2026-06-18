@@ -127,14 +127,6 @@ const docsToc = [
 const authStorageKey = "hireme-demo-auth-user";
 const accessStorageKey = "hireme-demo-agent-access-v1";
 const createdAgentsStorageKey = "hireme-demo-created-agents-v1";
-const authCallbackSteps = [
-  { label: "Checking your secure session", progress: 24 },
-  { label: "Syncing your HireMe gateway session", progress: 58 },
-  { label: "Saving your profile", progress: 82 },
-  { label: "Opening your dashboard", progress: 100 },
-] as const;
-const authCallbackStepDurationMs = 2_000;
-const authCallbackFinalDelayMs = 900;
 const typicalOutputStorageBucket =
   import.meta.env.VITE_HIREME_TYPICAL_OUTPUT_BUCKET || "hireme-agent-media";
 const gatewayUrl = (
@@ -1723,32 +1715,11 @@ function AuthCallbackPage({
   const locationHash = location.hash;
   const locationSearch = location.search;
   const [error, setError] = useState<string | null>(null);
-  const [activeStep, setActiveStep] = useState(0);
-  const [progress, setProgress] = useState<number>(
-    authCallbackSteps[0].progress,
-  );
 
   useEffect(() => {
     let cancelled = false;
-    let stepStartedAt = Date.now();
-    function moveToStep(index: number) {
-      if (cancelled) return;
-      stepStartedAt = Date.now();
-      setActiveStep(index);
-      setProgress(authCallbackSteps[index].progress);
-    }
-    async function holdCurrentStep(minDurationMs = authCallbackStepDurationMs) {
-      const elapsedMs = Date.now() - stepStartedAt;
-      const remainingMs = Math.max(0, minDurationMs - elapsedMs);
-      if (remainingMs > 0) {
-        await new Promise<void>((resolve) => {
-          window.setTimeout(resolve, remainingMs);
-        });
-      }
-    }
 
     async function completeLogin() {
-      moveToStep(0);
       const callbackError = readAuthCallbackError({
         hash: locationHash,
         search: locationSearch,
@@ -1764,9 +1735,7 @@ function AuthCallbackPage({
         throw new Error("No Supabase session was returned.");
       }
 
-      await holdCurrentStep();
       if (cancelled) return;
-      moveToStep(1);
       const user = authUserFromSupabaseSession(data.session);
       await syncGatewayWebSession(
         data.session.access_token,
@@ -1774,18 +1743,12 @@ function AuthCallbackPage({
         user.displayName,
       );
 
-      await holdCurrentStep();
       if (cancelled) return;
-      moveToStep(2);
       onLogin(user);
       writeStoredAuthUser(user);
 
       const params = new URLSearchParams(locationSearch);
       const returnTo = safeReturnTo(params.get("return_to"));
-      await holdCurrentStep();
-      if (cancelled) return;
-      moveToStep(3);
-      await holdCurrentStep(authCallbackFinalDelayMs);
       if (cancelled) return;
       if (returnTo) {
         window.location.assign(returnTo);
@@ -1805,8 +1768,6 @@ function AuthCallbackPage({
     };
   }, [locationHash, locationSearch, navigate, onLogin]);
 
-  const currentStep = authCallbackSteps[activeStep] ?? authCallbackSteps[0];
-
   return (
     <main className="flex min-h-[calc(100svh-5rem)] items-center justify-center bg-secondary px-4 py-10">
       <section className="w-full max-w-md rounded-xl border border-border bg-white p-6 app-shadow">
@@ -1821,53 +1782,18 @@ function AuthCallbackPage({
           Securing your HireMe session. This can take a few seconds.
         </p>
         <div className="mt-6" aria-live="polite">
-          <div className="flex items-center justify-between gap-4 text-xs font-medium text-[#5a6078]">
-            <span>{error ? "Action needed" : currentStep.label}</span>
-            <span>{error ? "Stopped" : `${progress}%`}</span>
-          </div>
           <div
             aria-label="Sign-in progress"
-            aria-valuemax={100}
-            aria-valuemin={0}
-            aria-valuenow={error ? undefined : progress}
-            className="mt-3 h-2 overflow-hidden rounded-full bg-[#e8ebf3]"
+            className="h-2 overflow-hidden rounded-full bg-[#e8ebf3]"
             role={error ? "presentation" : "progressbar"}
           >
             <div
-              className={`h-full rounded-full transition-all duration-1000 ease-out ${
+              className={`h-full rounded-full ${
                 error
-                  ? "bg-[#ea2261]"
-                  : "bg-[#635bff] shadow-[0_0_18px_rgba(99,91,255,0.28)]"
+                  ? "w-1/3 bg-[#ea2261]"
+                  : "auth-callback-progress bg-[#635bff] shadow-[0_0_18px_rgba(99,91,255,0.28)]"
               }`}
-              style={{ width: `${error ? Math.max(progress, 24) : progress}%` }}
             />
-          </div>
-          <div className="mt-4 grid gap-2">
-            {authCallbackSteps.map((step, index) => {
-              const isComplete = index < activeStep && !error;
-              const isCurrent = index === activeStep && !error;
-              return (
-                <div
-                  className="flex items-center gap-2 text-sm text-muted-foreground"
-                  key={step.label}
-                >
-                  <span
-                    className={`flex size-5 shrink-0 items-center justify-center rounded-full border text-[10px] ${
-                      isComplete
-                        ? "border-[#635bff] bg-[#635bff] text-white"
-                        : isCurrent
-                          ? "border-[#635bff] bg-white text-[#635bff]"
-                          : "border-[#d8dbe8] bg-white text-[#8a90a6]"
-                    }`}
-                  >
-                    {isComplete ? <CheckCircle2 className="size-3" /> : index + 1}
-                  </span>
-                  <span className={isCurrent ? "font-medium text-[#1c1e54]" : ""}>
-                    {step.label}
-                  </span>
-                </div>
-              );
-            })}
           </div>
         </div>
         {error ? (
@@ -4549,7 +4475,7 @@ function CreateAgentPage({ user }: { user: AuthUser | null }) {
     try {
       const harnessFile = agentFiles[0];
       if (!harnessFile) {
-        throw new Error("Upload a .tar.gz Agent Harness before creating.");
+        throw new Error("Upload a .zip or .tar.gz Agent Harness before creating.");
       }
 
       const typicalOutputUpload = typicalOutputMedia
