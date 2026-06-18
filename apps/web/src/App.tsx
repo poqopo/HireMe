@@ -3296,7 +3296,7 @@ function ExploreAgentsPage({
 
           {catalogView === "teams" ? (
             teamResults.length ? (
-              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              <div className="grid items-start gap-4 md:grid-cols-2 xl:grid-cols-3">
                 {teamResults.map((result) => (
                   <TeamMarketCard
                     agents={result.agents}
@@ -3309,7 +3309,7 @@ function ExploreAgentsPage({
               <EmptyResult label="No teams match the current filters." />
             )
           ) : agentResults.length ? (
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            <div className="grid items-start gap-4 md:grid-cols-2 xl:grid-cols-3">
               {agentResults.map((agent) => (
                 <AgentMarketCard
                   access={accessFor(agent)}
@@ -4448,7 +4448,7 @@ function TeamMarketCard({
   const [isExpanded, setIsExpanded] = useState(false);
 
   return (
-    <Card className="transition">
+    <Card className="self-start transition">
       <CardHeader className="pb-3">
         <div className="flex items-start justify-between gap-4">
           <div className="flex min-w-0 items-center gap-3">
@@ -4552,7 +4552,7 @@ function AgentMarketCard({
   return (
     <Card
       aria-label={`View ${agent.name} details`}
-      className="interactive-card clickable-card cursor-pointer transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8f82e8]/35 focus-visible:ring-offset-2"
+      className="interactive-card clickable-card self-start cursor-pointer transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8f82e8]/35 focus-visible:ring-offset-2"
       onClick={(event) => {
         const target = event.target;
         if (

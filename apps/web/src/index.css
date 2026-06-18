@@ -53,14 +53,20 @@
 }
 
 html {
-  background: var(--background);
+  background:
+    radial-gradient(circle at top, rgba(49, 130, 246, 0.06) 0%, transparent 34%),
+    radial-gradient(circle at bottom, rgba(49, 130, 246, 0.04) 0%, transparent 30%),
+    var(--background);
   scroll-behavior: smooth;
 }
 
 body {
   min-width: 320px;
   margin: 0;
-  background: var(--background);
+  background:
+    radial-gradient(circle at 12% 8%, rgba(232, 243, 255, 0.78) 0%, transparent 24%),
+    radial-gradient(circle at 88% 16%, rgba(246, 250, 255, 0.84) 0%, transparent 18%),
+    linear-gradient(180deg, #f9fbff 0%, #f8fbff 12%, #f9fafb 100%);
   color: var(--foreground);
   font-family: var(--font-sans);
   font-feature-settings: "ss01", "tnum";
@@ -78,7 +84,7 @@ select {
 .hero-visual {
   isolation: isolate;
   background-image:
-    linear-gradient(90deg, rgba(255, 255, 255, 1) 0%, rgba(255, 255, 255, 0.98) 48%, rgba(255, 255, 255, 0.72) 76%, rgba(255, 255, 255, 0.24) 100%),
+    linear-gradient(90deg, rgba(255, 255, 255, 1) 0%, rgba(255, 255, 255, 0.98) 44%, rgba(255, 255, 255, 0.8) 68%, rgba(255, 255, 255, 0.28) 100%),
     url("/assets/hireme-hero.png");
   background-position: center;
   background-size: cover;
@@ -89,8 +95,8 @@ select {
   right: 0;
   bottom: -1px;
   left: 0;
-  height: 120px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0) 0%, rgba(244, 249, 255, 0.82) 72%, rgba(244, 249, 255, 1) 100%);
+  height: 132px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0) 0%, rgba(244, 249, 255, 0.72) 68%, rgba(244, 249, 255, 1) 100%);
   content: "";
   pointer-events: none;
 }
@@ -112,7 +118,7 @@ select {
   background: linear-gradient(145deg, rgba(255, 255, 255, 0.5), rgba(186, 230, 253, 0.08));
   box-shadow:
     inset 0 1px 1px rgba(255, 255, 255, 0.55),
-    0 32px 80px rgba(1, 35, 101, 0.3);
+    0 28px 72px rgba(1, 35, 101, 0.24);
   backdrop-filter: blur(10px);
   animation: landing-float 7s ease-in-out infinite;
 }
@@ -160,30 +166,30 @@ select {
 .landing-wave::before {
   position: absolute;
   z-index: -1;
-  top: -42px;
+  top: -36px;
   left: -5%;
   width: 110%;
-  height: 84px;
+  height: 72px;
   border-radius: 50% 50% 0 0 / 100% 100% 0 0;
   content: "";
   pointer-events: none;
-  filter: blur(2px);
-  opacity: 0.95;
+  filter: blur(1px);
+  opacity: 0.9;
 }
 
 .landing-wave::after {
   position: absolute;
   z-index: -1;
   right: -5%;
-  bottom: -42px;
+  bottom: -36px;
   left: -5%;
   width: 110%;
-  height: 84px;
+  height: 72px;
   border-radius: 0 0 50% 50% / 0 0 100% 100%;
   content: "";
   pointer-events: none;
-  filter: blur(2px);
-  opacity: 0.9;
+  filter: blur(1px);
+  opacity: 0.88;
 }
 
 .landing-wave-light::before {
@@ -336,47 +342,51 @@ select {
 
 .surface-card {
   border-radius: 30px;
-  border: 1px solid rgba(49, 130, 246, 0.12);
-  background: rgba(255, 255, 255, 0.78);
-  box-shadow: 0 24px 80px rgba(15, 52, 96, 0.08);
+  border: 1px solid rgba(49, 130, 246, 0.11);
+  background: rgba(255, 255, 255, 0.84);
+  box-shadow: 0 22px 72px rgba(15, 52, 96, 0.08);
   backdrop-filter: blur(18px);
+  overflow: hidden;
 }
 
 .surface-card-soft {
   border-radius: 30px;
-  border: 1px solid rgba(49, 130, 246, 0.12);
-  background: linear-gradient(180deg, rgba(246, 250, 255, 0.92) 0%, rgba(255, 255, 255, 0.96) 100%);
-  box-shadow: 0 24px 80px rgba(15, 52, 96, 0.08);
+  border: 1px solid rgba(49, 130, 246, 0.11);
+  background: linear-gradient(180deg, rgba(246, 250, 255, 0.94) 0%, rgba(255, 255, 255, 0.98) 100%);
+  box-shadow: 0 22px 72px rgba(15, 52, 96, 0.08);
   backdrop-filter: blur(18px);
+  overflow: hidden;
 }
 
 .landing-glass {
   border-radius: 30px;
-  border: 1px solid rgba(49, 130, 246, 0.12);
-  background: rgba(255, 255, 255, 0.78);
-  box-shadow: 0 24px 80px rgba(15, 52, 96, 0.08);
+  border: 1px solid rgba(49, 130, 246, 0.11);
+  background: rgba(255, 255, 255, 0.84);
+  box-shadow: 0 22px 72px rgba(15, 52, 96, 0.08);
   backdrop-filter: blur(18px);
+  overflow: hidden;
 }
 
 .landing-glass-dark {
   border-radius: 30px;
   border: 1px solid rgba(191, 219, 254, 0.14);
-  background: rgba(255, 255, 255, 0.08);
-  box-shadow: 0 24px 80px rgba(2, 6, 23, 0.14);
+  background: rgba(255, 255, 255, 0.09);
+  box-shadow: 0 24px 76px rgba(2, 6, 23, 0.14);
   backdrop-filter: blur(18px);
+  overflow: hidden;
 }
 
 .section-divider {
   height: 1px;
-  background: linear-gradient(90deg, transparent 0%, rgba(49, 130, 246, 0.2) 18%, rgba(49, 130, 246, 0.12) 50%, rgba(49, 130, 246, 0.2) 82%, transparent 100%);
+  background: linear-gradient(90deg, transparent 0%, rgba(49, 130, 246, 0.16) 16%, rgba(49, 130, 246, 0.1) 50%, rgba(49, 130, 246, 0.16) 84%, transparent 100%);
 }
 
 .card-title {
   color: #191f28;
   font-size: clamp(1.25rem, 1.5vw, 1.375rem);
   font-weight: 700;
-  line-height: 1.35;
-  letter-spacing: -0.02em;
+  line-height: 1.3;
+  letter-spacing: -0.03em;
 }
 
 .card-body {
@@ -400,7 +410,7 @@ select {
   padding-inline: 28px;
   border-radius: 999px;
   border: 1px solid rgba(49, 130, 246, 0.28);
-  background: rgba(255, 255, 255, 0.78);
+  background: rgba(255, 255, 255, 0.84);
   color: #3182f6;
   box-shadow: 0 16px 32px rgba(15, 52, 96, 0.08);
   backdrop-filter: blur(12px);

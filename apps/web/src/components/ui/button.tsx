@@ -9,11 +9,11 @@ const buttonVariants = cva(
     variants: {
       variant: {
         default:
-          "h-14 border border-transparent bg-gradient-to-r from-[#3182f6] to-[#2272eb] px-7 text-white shadow-[0_18px_40px_rgba(49,130,246,0.22)] hover:-translate-y-0.5 hover:shadow-[0_22px_46px_rgba(49,130,246,0.26)] active:translate-y-0 active:shadow-[0_12px_24px_rgba(49,130,246,0.18)]",
+          "h-14 border border-transparent bg-gradient-to-r from-[#3182f6] via-[#2a78ef] to-[#2272eb] px-7 text-white shadow-[0_18px_40px_rgba(49,130,246,0.22)] hover:-translate-y-0.5 hover:shadow-[0_24px_52px_rgba(49,130,246,0.28)] active:translate-y-0 active:shadow-[0_12px_24px_rgba(49,130,246,0.18)]",
         secondary:
-          "h-14 border border-[rgba(49,130,246,0.28)] bg-[rgba(255,255,255,0.78)] px-7 text-[#3182f6] shadow-[0_16px_32px_rgba(15,52,96,0.08)] backdrop-blur-md hover:-translate-y-0.5 hover:bg-[#f6faff] hover:shadow-[0_20px_38px_rgba(15,52,96,0.1)] active:translate-y-0",
+          "h-14 border border-[rgba(49,130,246,0.22)] bg-[rgba(255,255,255,0.82)] px-7 text-[#2a75ee] shadow-[0_16px_32px_rgba(15,52,96,0.08)] backdrop-blur-md hover:-translate-y-0.5 hover:bg-[#f6faff] hover:shadow-[0_20px_40px_rgba(15,52,96,0.1)] active:translate-y-0",
         ghost: "h-12 border border-transparent bg-transparent px-5 text-[#6b7684] hover:bg-[#f6faff] hover:text-[#4e5968]",
-        dark: "h-14 border border-white/12 bg-[#1c1e54] px-7 text-white shadow-[0_18px_40px_rgba(8,27,61,0.26)] hover:-translate-y-0.5 hover:bg-[#13285a] active:translate-y-0",
+        dark: "h-14 border border-white/12 bg-[#101d47] px-7 text-white shadow-[0_18px_40px_rgba(8,27,61,0.26)] hover:-translate-y-0.5 hover:bg-[#13285a] active:translate-y-0",
       },
       size: {
         default: "h-14 px-7",
