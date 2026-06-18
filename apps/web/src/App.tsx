@@ -1,9 +1,12 @@
 import {
   useEffect,
   useMemo,
+  useRef,
   useState,
+  type CSSProperties,
   type ChangeEvent,
   type ReactNode,
+  type RefObject,
 } from "react";
 import type { Session } from "@supabase/supabase-js";
 import {
@@ -123,6 +126,66 @@ const docsToc = [
   { id: "paid", label: "How to Get Paid" },
   { id: "roadmap", label: "Roadmap" },
 ] as const;
+
+function useScrollReveal(scopeRef: RefObject<HTMLElement | null>) {
+  useEffect(() => {
+    const scope = scopeRef.current;
+
+    if (!scope) {
+      return;
+    }
+
+    const targets = Array.from(
+      scope.querySelectorAll<HTMLElement>("[data-reveal]"),
+    );
+
+    if (!targets.length) {
+      return;
+    }
+
+    if (
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches ||
+      !("IntersectionObserver" in window)
+    ) {
+      targets.forEach((target) => {
+        target.classList.add("reveal-visible");
+      });
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (!entry.isIntersecting) {
+            return;
+          }
+
+          entry.target.classList.add("reveal-visible");
+          observer.unobserve(entry.target);
+        });
+      },
+      {
+        root: null,
+        rootMargin: "0px 0px -12% 0px",
+        threshold: 0.16,
+      },
+    );
+
+    targets.forEach((target) => {
+      observer.observe(target);
+    });
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [scopeRef]);
+}
+
+function revealDelayStyle(delayMs: number): CSSProperties {
+  return {
+    ["--reveal-delay" as "--reveal-delay"]: `${delayMs}ms`,
+  } as CSSProperties;
+}
 
 const authStorageKey = "hireme-demo-auth-user";
 const accessStorageKey = "hireme-demo-agent-access-v1";
@@ -1319,18 +1382,18 @@ function TopNav({
   const isAgents = location.pathname === "/agents";
 
   return (
-    <header className="sticky top-0 z-40 border-b border-border bg-white/92 px-4 backdrop-blur md:px-8">
+    <header className={`sticky top-0 z-40 border-b px-4 backdrop-blur-xl md:px-8 ${isLanding ? "border-[#bfdbfe]/50 bg-white/88" : "border-border bg-white/92"}`}>
       <div className="mx-auto flex min-h-16 max-w-7xl flex-wrap items-center justify-between gap-3 py-2">
         <Link className="flex items-center gap-2" to="/">
-          <span className="flex size-9 items-center justify-center rounded-full bg-[#1c1e54] text-white">
+          <span className={`flex size-9 items-center justify-center rounded-full text-white ${isLanding ? "bg-gradient-to-br from-[#0753d6] to-[#38a8f7] shadow-[rgba(7,83,214,0.24)_0_8px_20px]" : "bg-[#1c1e54]"}`}>
             <Bot className="size-4" />
           </span>
-          <span className="text-sm font-medium text-[#0d253d]">HireMe</span>
+          <span className={`text-sm font-medium ${isLanding ? "text-[#082b63]" : "text-[#0d253d]"}`}>HireMe</span>
         </Link>
 
         {isLanding ? (
           <Link
-            className="text-xs font-medium text-muted-foreground transition hover:text-primary"
+            className="text-xs font-medium text-[#42658f] transition hover:text-[#0753d6]"
             to="/docs"
           >
             Docs
@@ -1771,33 +1834,58 @@ function EnokiCallbackPage() {
 }
 
 function LandingPage() {
+  const revealScopeRef = useRef<HTMLElement | null>(null);
+
+  useScrollReveal(revealScopeRef);
+
   return (
-    <main>
+    <main
+      ref={revealScopeRef}
+      className="overflow-hidden bg-gradient-to-b from-[#f7fbff] via-[#f7fbff] to-[#edf5ff]"
+    >
       <section className="hero-visual relative overflow-hidden px-4 py-12 md:px-8 md:py-16 xl:py-20">
         <div className="mx-auto flex min-h-[calc(100svh-12rem)] max-w-7xl items-center">
-          <div className="max-w-3xl py-8 md:py-12">
-            <h1 className="balanced-text max-w-4xl text-5xl font-normal leading-[1.03] text-[#0d253d] md:text-6xl">
-              Hire Agents that already know the job.
-            </h1>
-            <p className="pretty-text mt-6 max-w-2xl text-base font-normal leading-7 text-[#20364f] md:text-lg">
-              Hire protected AI Agents, not copyable prompts. Creators keep
-              private playbooks hidden while buyers get reliable results
-              through secure execution.
-            </p>
-            <div className="mt-8 flex flex-wrap gap-3">
-              <Button asChild size="lg">
-                <Link to="/agents">
-                  <Bot /> Hire an Agent
-                </Link>
-              </Button>
-              <Button asChild size="lg" variant="secondary">
-                <Link to="/agents/create">
-                  <UploadCloud /> Publish an Agent
-                </Link>
-              </Button>
+          <div className="landing-hero-copy max-w-3xl py-8 md:py-12">
+            <div className="reveal stagger-item" data-reveal>
+              <h1 className="balanced-text max-w-4xl text-5xl font-normal leading-[1.03] text-[#0d253d] md:text-6xl">
+                Hire Agents that already know the job.
+              </h1>
+            </div>
+            <div
+              className="reveal stagger-item"
+              data-reveal
+              style={revealDelayStyle(140)}
+            >
+              <p className="pretty-text mt-6 max-w-2xl text-base font-normal leading-7 text-[#20364f] md:text-lg">
+                Hire protected AI Agents, not copyable prompts. Creators keep
+                private playbooks hidden while buyers get reliable results
+                through secure execution.
+              </p>
+            </div>
+            <div
+              className="reveal stagger-item"
+              data-reveal
+              style={revealDelayStyle(240)}
+            >
+              <div className="mt-8 flex flex-wrap gap-3">
+                <Button asChild size="lg">
+                  <Link to="/agents">
+                    <Bot /> Hire an Agent
+                  </Link>
+                </Button>
+                <Button asChild size="lg" variant="secondary">
+                  <Link to="/agents/create">
+                    <UploadCloud /> Publish an Agent
+                  </Link>
+                </Button>
+              </div>
             </div>
           </div>
         </div>
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-x-0 bottom-0 h-28 bg-gradient-to-b from-transparent via-white/75 to-[#f4f9ff]"
+        />
       </section>
 
       <AudienceValueSection />
@@ -1813,30 +1901,45 @@ function LandingPage() {
 
 function AudienceValueSection() {
   return (
-    <section className="border-y border-border bg-white px-4 py-12 md:px-8 md:py-16">
-      <div className="mx-auto max-w-7xl">
+    <section className="landing-wave landing-wave-light landing-soft-grid relative bg-gradient-to-b from-[#f4f9ff] via-[#f7fbff] to-[#edf5ff] px-4 pb-16 pt-20 shadow-[inset_0_1px_0_rgba(255,255,255,0.9)] md:px-8 md:pb-20 md:pt-24">
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-x-0 top-0 h-40 bg-gradient-to-b from-[#f4f9ff] via-[#f7fbff]/96 to-transparent md:h-52"
+      />
+      <div className="relative z-10 mx-auto max-w-7xl">
         <div className="grid gap-4 md:grid-cols-2">
-          <div className="rounded-2xl border border-[#d9d5ff] bg-[#f8f5ff] p-5 md:p-6">
-            <div className="flex items-center gap-3 text-sm font-semibold text-[#2e2b8c]">
-              <span className="flex size-10 items-center justify-center rounded-xl bg-white text-[#533afd]"><BriefcaseBusiness className="size-5" /></span>
+          <div
+            className="reveal landing-glass rounded-3xl p-6 md:p-8"
+            data-reveal
+          >
+            <div className="flex items-center gap-3 text-sm font-semibold text-[#0b4a91]">
+              <span className="flex size-11 items-center justify-center rounded-2xl bg-gradient-to-br from-[#e0f2fe] to-white text-[#0877ec] shadow-sm"><BriefcaseBusiness className="size-5" /></span>
               For Buyers
             </div>
-            <p className="mt-4 max-w-lg text-xl font-normal leading-7 text-[#0d253d]">
+            <p className="mt-5 max-w-lg text-xl font-normal leading-8 text-[#082b63]">
               Use expert-built Agents without exposing your private work to the creator.
             </p>
           </div>
-          <div className="rounded-2xl border border-[#d9d5ff] bg-[#f8f5ff] p-5 md:p-6">
-            <div className="flex items-center gap-3 text-sm font-semibold text-[#2e2b8c]">
-              <span className="flex size-10 items-center justify-center rounded-xl bg-white text-[#533afd]"><CircleDollarSign className="size-5" /></span>
+          <div
+            className="reveal stagger-item landing-glass rounded-3xl p-6 md:p-8"
+            data-reveal
+            style={revealDelayStyle(140)}
+          >
+            <div className="flex items-center gap-3 text-sm font-semibold text-[#0b4a91]">
+              <span className="flex size-11 items-center justify-center rounded-2xl bg-gradient-to-br from-[#dbeafe] to-white text-[#0753d6] shadow-sm"><CircleDollarSign className="size-5" /></span>
               For Creators
             </div>
-            <p className="mt-4 max-w-lg text-xl font-normal leading-7 text-[#171452]">
+            <p className="mt-5 max-w-lg text-xl font-normal leading-8 text-[#082b63]">
               Monetize Agent know-how without giving away prompts, skills, examples, or rubrics.
             </p>
           </div>
         </div>
-        <div className="mt-5 flex items-center justify-center gap-2 text-center text-sm font-semibold text-[#273951]">
-          <LockKeyhole className="size-4 text-primary" /> Your work and the creator’s playbook stay separate.
+        <div
+          className="reveal stagger-item mt-7 flex items-center justify-center gap-2 text-center text-sm font-semibold text-[#31577f]"
+          data-reveal
+          style={revealDelayStyle(220)}
+        >
+          <LockKeyhole className="size-4 text-[#0877ec]" /> Your work and the creator’s playbook stay separate.
         </div>
       </div>
     </section>
@@ -1852,10 +1955,10 @@ function ProtectedExecutionSection() {
   ];
 
   return (
-    <section className="bg-[#17133f] px-4 py-14 text-white md:px-8 md:py-20">
-      <div className="mx-auto max-w-7xl">
-        <div className="max-w-2xl">
-          <div className="text-sm font-semibold text-[#c4b5fd]">Protected execution</div>
+    <section className="landing-wave landing-wave-navy border-y border-white/8 bg-gradient-to-b from-[#0a63d6] via-[#074b9e] to-[#082b63] px-4 py-16 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] md:px-8 md:py-24">
+      <div className="relative z-10 mx-auto max-w-7xl">
+        <div className="reveal max-w-2xl" data-reveal>
+          <div className="text-sm font-semibold text-[#93c5fd]">Protected execution</div>
           <h2 className="mt-3 balanced-text text-3xl font-normal leading-tight md:text-5xl">The Agent works. The playbook never leaves.</h2>
           <p className="mt-4 max-w-xl text-sm leading-6 text-white/70 md:text-base">Buyer input is processed by HireMe, not sent directly to the creator. The private Harness stays protected inside the runner.</p>
         </div>
@@ -1863,22 +1966,26 @@ function ProtectedExecutionSection() {
         <div className="mt-10 grid gap-3 md:grid-cols-[1fr_auto_1fr_auto_1fr_auto_1fr] md:items-center">
           {steps.map((step, index) => (
             <div className="contents" key={step.label}>
-              <div className={`rounded-2xl border p-4 ${index === 2 ? "border-[#a78bfa]/60 bg-[#533afd]/24" : "border-white/15 bg-white/[0.07]"}`}>
-                <step.icon className="size-5 text-[#c4b5fd]" />
+              <div
+                className={`reveal stagger-item landing-glass-dark rounded-2xl p-5 ${index === 2 ? "border-[#93c5fd]/55 bg-[#60a5fa]/18" : ""}`}
+                data-reveal
+                style={revealDelayStyle(120 * index)}
+              >
+                <step.icon className="size-5 text-[#93c5fd]" />
                 <div className="mt-4 text-sm font-semibold text-white">{step.label}</div>
                 <div className="mt-1 text-xs text-white/55">{step.note}</div>
               </div>
-              {index < steps.length - 1 ? <ArrowRight className="mx-auto hidden size-4 text-[#a78bfa] md:block" /> : null}
+              {index < steps.length - 1 ? <ArrowRight className="mx-auto hidden size-4 text-[#7dd3fc] md:block" /> : null}
             </div>
           ))}
         </div>
 
         <div className="mt-5 grid gap-3 md:grid-cols-2">
-          <div className="flex items-start gap-3 rounded-xl border border-white/12 bg-white/[0.05] p-4 text-sm text-white/76">
-            <EyeOff className="mt-0.5 size-4 shrink-0 text-[#c4b5fd]" /> Creator cannot see the buyer’s task or private work.
+          <div className="reveal landing-glass-dark flex items-start gap-3 rounded-2xl p-4 text-sm text-white/76" data-reveal>
+            <EyeOff className="mt-0.5 size-4 shrink-0 text-[#93c5fd]" /> Creator cannot see the buyer’s task or private work.
           </div>
-          <div className="flex items-start gap-3 rounded-xl border border-white/12 bg-white/[0.05] p-4 text-sm text-white/76">
-            <ShieldCheck className="mt-0.5 size-4 shrink-0 text-[#c4b5fd]" /> Buyer cannot inspect or copy the creator’s Harness.
+          <div className="reveal stagger-item landing-glass-dark flex items-start gap-3 rounded-2xl p-4 text-sm text-white/76" data-reveal style={revealDelayStyle(140)}>
+            <ShieldCheck className="mt-0.5 size-4 shrink-0 text-[#93c5fd]" /> Buyer cannot inspect or copy the creator’s Harness.
           </div>
         </div>
       </div>
@@ -1888,11 +1995,11 @@ function ProtectedExecutionSection() {
 
 function AgentPerformanceSection() {
   return (
-    <section id="agent-performance" className="bg-[#fbfdff] px-4 py-14 md:px-8 md:py-20">
-      <div className="mx-auto max-w-7xl">
-        <div>
-          <div className="mb-5 flex items-center gap-3 text-sm font-semibold text-[#2e2b8c]">
-            <span className="flex size-11 items-center justify-center rounded-xl bg-[#eeeaff] text-[#533afd]">
+    <section id="agent-performance" className="landing-wave landing-wave-white bg-gradient-to-b from-[#f4f9ff] via-[#f8fbff] to-[#eef4ff] px-4 py-16 shadow-[inset_0_1px_0_rgba(255,255,255,0.9)] md:px-8 md:py-24">
+      <div className="relative z-10 mx-auto max-w-7xl">
+        <div className="reveal" data-reveal>
+          <div className="mb-5 flex items-center gap-3 text-sm font-semibold text-[#0b4a91]">
+            <span className="flex size-11 items-center justify-center rounded-2xl bg-[#eaf5ff] text-[#0877ec] shadow-sm">
               <TrendingUp className="size-5" />
             </span>
             Agent performance
@@ -1907,26 +2014,30 @@ function AgentPerformanceSection() {
         </div>
 
         <div className="mt-10 grid gap-5 lg:grid-cols-2">
-          <HarnessImageCard
-            caption="Same prompt without Harness"
-            image="/assets/harness-before.svg"
-            label="Before"
-          />
-          <HarnessImageCard
-            caption="Same prompt with Harness"
-            image="/assets/harness-after.svg"
-            label="After"
-          />
+          <div className="reveal" data-reveal>
+            <HarnessImageCard
+              caption="Same prompt without Harness"
+              image="/assets/harness-before.svg"
+              label="Before"
+            />
+          </div>
+          <div className="reveal stagger-item" data-reveal style={revealDelayStyle(140)}>
+            <HarnessImageCard
+              caption="Same prompt with Harness"
+              image="/assets/harness-after.svg"
+              label="After"
+            />
+          </div>
         </div>
 
-        <div className="mt-6 rounded-xl border border-[#d9d5ff] bg-[#f8f5ff] p-5">
-          <div className="text-sm font-semibold text-[#2e2b8c]">
+        <div className="reveal stagger-item landing-glass mt-7 rounded-3xl p-6 md:p-7" data-reveal style={revealDelayStyle(220)}>
+          <div className="text-sm font-semibold text-[#0b4a91]">
             Why Harness matters
           </div>
           <div className="mt-4 grid gap-3 text-sm leading-6 text-[#273951] md:grid-cols-3">
-            <div><strong className="block text-[#2e2b8c]">Clear hierarchy</strong> CTA, content, and conversion flow follow a tested structure.</div>
-            <div><strong className="block text-[#2e2b8c]">Real requirements</strong> Specs, trust signals, and mobile rules are not skipped.</div>
-            <div><strong className="block text-[#2e2b8c]">Repeatable quality</strong> Hidden checks catch incomplete work before delivery.</div>
+            <div><strong className="block text-[#0b4a91]">Clear hierarchy</strong> CTA, content, and conversion flow follow a tested structure.</div>
+            <div><strong className="block text-[#0b4a91]">Real requirements</strong> Specs, trust signals, and mobile rules are not skipped.</div>
+            <div><strong className="block text-[#0b4a91]">Repeatable quality</strong> Hidden checks catch incomplete work before delivery.</div>
           </div>
         </div>
       </div>
@@ -1944,12 +2055,12 @@ function HarnessImageCard({
   label: string;
 }) {
   return (
-    <figure className="overflow-hidden rounded-xl border border-border bg-white app-shadow">
+    <figure className="overflow-hidden rounded-3xl border border-[#cfe3f8] bg-white shadow-[rgba(30,64,175,0.11)_0_20px_50px]">
       <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
         <figcaption className="text-sm font-medium text-[#1c1e54]">
           {caption}
         </figcaption>
-        <span className="rounded-lg bg-secondary px-3 py-1.5 text-xs font-medium text-primary">
+        <span className="rounded-full bg-[#eaf5ff] px-3 py-1.5 text-xs font-medium text-[#0753d6]">
           {label}
         </span>
       </div>
@@ -1964,16 +2075,16 @@ function HarnessImageCard({
 
 function MakeAgentSection() {
   return (
-    <section id="make-agent" className="bg-[#f8f5ff] px-4 py-14 md:px-8 md:py-20">
-      <div className="mx-auto grid max-w-7xl gap-10 lg:grid-cols-[0.78fr_1.22fr] lg:items-start">
-        <div>
-          <div className="mb-5 flex items-center gap-3 text-sm font-semibold text-[#2e2b8c]">
-            <span className="flex size-11 items-center justify-center rounded-xl bg-white text-[#533afd]">
+    <section id="make-agent" className="landing-wave landing-wave-sky landing-soft-grid bg-gradient-to-b from-[#eef6ff] via-[#f7fbff] to-[#eaf4ff] px-4 py-16 shadow-[inset_0_1px_0_rgba(255,255,255,0.9)] md:px-8 md:py-24">
+      <div className="relative z-10 mx-auto grid max-w-7xl gap-10 lg:grid-cols-[0.78fr_1.22fr] lg:items-start">
+        <div className="reveal" data-reveal>
+          <div className="mb-5 flex items-center gap-3 text-sm font-semibold text-[#0b4a91]">
+            <span className="flex size-11 items-center justify-center rounded-2xl bg-white text-[#0877ec] shadow-sm">
               <UploadCloud className="size-5" />
             </span>
             How to create one
           </div>
-          <h2 className="balanced-text text-3xl font-normal leading-tight text-[#171452] md:text-5xl">
+          <h2 className="balanced-text text-3xl font-normal leading-tight text-[#082b63] md:text-5xl">
             Make an Agent in four steps.
           </h2>
           <p className="pretty-text mt-5 max-w-2xl text-base font-normal leading-7 text-[#3f3b6f]">
@@ -1982,7 +2093,7 @@ function MakeAgentSection() {
           </p>
         </div>
 
-        <div className="rounded-xl border border-[#d9d5ff] bg-white p-5 app-shadow">
+        <div className="reveal stagger-item landing-glass rounded-3xl p-6 md:p-8" data-reveal style={revealDelayStyle(140)}>
           <div className="space-y-5">
             {makeAgentSteps.map((step) => (
               <div
@@ -1990,10 +2101,10 @@ function MakeAgentSection() {
                 key={step.title}
               >
                 <div className="mb-3 flex items-center gap-3">
-                  <span className="flex size-10 items-center justify-center rounded-xl bg-[#eeeaff] text-[#533afd]">
+                  <span className="flex size-10 items-center justify-center rounded-2xl bg-[#eaf5ff] text-[#0877ec]">
                     <step.icon className="size-5" />
                   </span>
-                  <h3 className="text-xl font-normal text-[#171452]">
+                  <h3 className="text-xl font-normal text-[#082b63]">
                     {step.title}
                   </h3>
                 </div>
@@ -2003,8 +2114,8 @@ function MakeAgentSection() {
               </div>
             ))}
           </div>
-          <div className="mt-6 rounded-xl border border-[#533afd]/20 bg-[#f0edff] p-4 text-xs leading-5 text-[#3f3b6f]">
-            <span className="font-semibold text-[#171452]">Built for existing Agent workflows.</span>{" "}
+          <div className="mt-6 rounded-2xl border border-[#bfdbfe] bg-[#eaf5ff]/80 p-4 text-xs leading-5 text-[#31577f]">
+            <span className="font-semibold text-[#082b63]">Built for existing Agent workflows.</span>{" "}
             Start from Codex, AGENTS.md, skills, or MCP tools—then package the know-how as a protected Harness.
           </div>
         </div>
@@ -2015,11 +2126,11 @@ function MakeAgentSection() {
 
 function CreatorIpSection() {
   return (
-    <section id="creator-ip" className="bg-[#15133f] px-4 py-14 text-white md:px-8 md:py-20">
+    <section id="creator-ip" className="landing-wave landing-wave-white overflow-hidden bg-gradient-to-b from-[#eef5ff] via-[#f7fbff] to-[#eaf4ff] px-4 py-16 text-[#0d253d] shadow-[inset_0_1px_0_rgba(255,255,255,0.9)] md:px-8 md:py-24">
       <div className="mx-auto grid max-w-7xl gap-10 lg:grid-cols-[0.86fr_1.14fr] lg:items-center">
-        <div>
-          <div className="mb-5 flex items-center gap-3 text-sm font-semibold text-[#ddd6fe]">
-            <span className="flex size-11 items-center justify-center rounded-xl bg-white/12 text-[#c4b5fd]">
+        <div className="reveal" data-reveal>
+          <div className="mb-5 flex items-center gap-3 text-sm font-semibold text-[#0b4a91]">
+            <span className="flex size-11 items-center justify-center rounded-2xl bg-white text-[#0877ec] shadow-sm">
               <LockKeyhole className="size-5" />
             </span>
             Private by design
@@ -2027,17 +2138,17 @@ function CreatorIpSection() {
           <h2 className="balanced-text max-w-xl text-3xl font-normal leading-tight md:text-5xl">
             Publish the Agent. Keep the recipe.
           </h2>
-          <p className="pretty-text mt-5 max-w-2xl text-base font-normal leading-7 text-white/82">
+          <p className="pretty-text mt-5 max-w-2xl text-base font-normal leading-7 text-[#324a63]">
             Buyers see what the Agent can do and what a result looks like.
             Everything that makes it work stays behind the execution boundary.
           </p>
         </div>
 
-        <div className="rounded-xl border border-white/15 bg-white/9 p-5 app-shadow">
+        <div className="reveal stagger-item landing-glass rounded-3xl p-5 md:p-7" data-reveal style={revealDelayStyle(140)}>
           <div className="grid gap-4 md:grid-cols-[1fr_auto_1fr] md:items-stretch">
             <CreatorIpPanel layer={creatorIpLayers[0]} />
             <div className="flex items-center justify-center">
-              <div className="rounded-full border border-[#a78bfa]/40 bg-[#a78bfa]/10 px-4 py-2 text-xs font-medium text-[#ddd6fe]">
+              <div className="rounded-full border border-[#bfdbfe] bg-[#eaf5ff] px-4 py-2 text-xs font-medium text-[#0b4a91]">
                 gateway boundary
               </div>
             </div>
@@ -2055,14 +2166,14 @@ function CreatorIpPanel({
   layer: (typeof creatorIpLayers)[number];
 }) {
   return (
-    <div className="rounded-xl border border-white/12 bg-[#202052] p-4">
-      <div className="mb-4 text-sm font-semibold text-[#ddd6fe]">
+    <div className="rounded-2xl border border-[#dbeafe] bg-white/85 p-4 shadow-[rgba(30,64,175,0.08)_0_16px_36px]">
+      <div className="mb-4 text-sm font-semibold text-[#0b4a91]">
         {layer.label}
       </div>
       <div className="space-y-2">
         {layer.items.map((item) => (
           <div
-            className="rounded-lg bg-white/10 px-3 py-2 text-xs font-medium text-white/86"
+            className="rounded-lg bg-[#f4f9ff] px-3 py-2 text-xs font-medium text-[#324a63]"
             key={item}
           >
             {item}
@@ -2082,22 +2193,22 @@ function ProofLayerSection() {
   ];
 
   return (
-    <section className="border-t border-border bg-white px-4 py-14 md:px-8 md:py-20">
-      <div className="mx-auto grid max-w-7xl gap-8 lg:grid-cols-[0.85fr_1.15fr] lg:items-center">
-        <div>
-          <div className="text-sm font-semibold text-[#533afd]">Verifiable work</div>
+    <section className="landing-wave landing-wave-white bg-gradient-to-b from-[#f7fbff] via-[#f8fbff] to-[#eef5ff] px-4 py-16 shadow-[inset_0_1px_0_rgba(255,255,255,0.9)] md:px-8 md:py-24">
+      <div className="relative z-10 mx-auto grid max-w-7xl gap-8 lg:grid-cols-[0.85fr_1.15fr] lg:items-center">
+        <div className="reveal" data-reveal>
+          <div className="text-sm font-semibold text-[#0877ec]">Verifiable work</div>
           <h2 className="mt-3 balanced-text text-3xl font-normal leading-tight text-[#0d253d] md:text-5xl">Proof, not just storage.</h2>
           <p className="mt-5 max-w-xl text-sm leading-6 text-muted-foreground md:text-base">Walrus stores protected Agent artifacts and execution records, while Sui tracks access, usage, and payout receipts.</p>
         </div>
-        <div className="rounded-2xl border border-[#d9d5ff] bg-[#f8f5ff] p-5 app-shadow">
+        <div className="reveal landing-glass rounded-3xl p-5 md:p-7" data-reveal style={revealDelayStyle(140)}>
           <div className="grid gap-3 sm:grid-cols-2">
-            {records.map((record) => (
-              <div className="flex items-center gap-3 rounded-xl border border-white bg-white p-4 text-sm font-medium text-[#273951]" key={record}>
-                <CheckCircle2 className="size-4 shrink-0 text-[#533afd]" /> {record}
+            {records.map((record, index) => (
+              <div className="reveal stagger-item flex items-center gap-3 rounded-2xl border border-[#dbeafe] bg-white/85 p-4 text-sm font-medium text-[#273951] shadow-sm" key={record} data-reveal style={revealDelayStyle(index * 100)}>
+                <CheckCircle2 className="size-4 shrink-0 text-[#0877ec]" /> {record}
               </div>
             ))}
           </div>
-          <div className="mt-4 rounded-xl border border-[#533afd]/20 bg-[#ede9ff] px-4 py-3 text-sm font-semibold text-[#2e2b8c]">
+          <div className="mt-4 rounded-2xl border border-[#bfdbfe] bg-[#eaf5ff] px-4 py-3 text-sm font-semibold text-[#0b4a91]">
             Proves which Agent version produced each result.
           </div>
         </div>
@@ -2108,26 +2219,46 @@ function ProofLayerSection() {
 
 function LandingFooter() {
   return (
-    <footer className="border-t border-white/10 bg-[#100d24] px-4 py-8 text-white md:px-8">
-      <div className="mx-auto flex max-w-7xl flex-col gap-4 md:flex-row md:items-center md:justify-between">
-        <div>
+    <footer className="landing-footer-wave bg-gradient-to-b from-[#061b3d] via-[#06192f] to-[#03101f] px-4 py-14 text-white md:px-8 md:py-16">
+      <div className="mx-auto grid max-w-7xl gap-10 lg:grid-cols-[1.2fr_0.8fr_0.8fr]">
+        <div className="max-w-xl">
           <div className="flex items-center gap-2 text-sm font-medium">
-            <Bot className="size-4 text-[#a78bfa]" />
+            <Bot className="size-4 text-[#93c5fd]" />
             HireMe
           </div>
-          <p className="mt-2 max-w-xl text-xs font-medium leading-5 text-white/70">
+          <p className="mt-3 text-sm leading-7 text-white/72">
             Build protected Agent Harnesses, publish them as paid tools, and let
             Codex users hire them without copying your private IP.
           </p>
         </div>
-        <div className="flex flex-wrap gap-3 text-xs font-medium text-white/76">
-          <Link className="hover:text-white" to="/agents">
-            Explore agents
-          </Link>
-          <a className="hover:text-white" href="#make-agent">
-            Make an Agent
-          </a>
-          <span className="text-white/40">Sui + Walrus MVP</span>
+        <div>
+          <div className="text-xs font-semibold uppercase tracking-[0.18em] text-white/50">
+            Navigate
+          </div>
+          <div className="mt-4 grid gap-3 text-sm text-white/78">
+            <Link className="hover:text-white" to="/agents">
+              Explore agents
+            </Link>
+            <a className="hover:text-white" href="#make-agent">
+              Make an Agent
+            </a>
+            <Link className="hover:text-white" to="/agents/create">
+              Publish an Agent
+            </Link>
+          </div>
+        </div>
+        <div>
+          <div className="text-xs font-semibold uppercase tracking-[0.18em] text-white/50">
+            Platform
+          </div>
+          <div className="mt-4 grid gap-3 text-sm text-white/78">
+            <span>Sui + Walrus MVP</span>
+            <span>Protected Harness execution</span>
+            <span>Creator receipts and payouts</span>
+          </div>
+          <div className="mt-8 text-xs leading-5 text-white/42">
+            © HireMe. Protected AI work marketplace.
+          </div>
         </div>
       </div>
     </footer>
@@ -3025,7 +3156,6 @@ function AgentDetailPage({
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="rounded-full border border-[#d8d4e2] bg-[#f3f1f8] px-2.5 py-1 text-[11px] font-semibold uppercase text-[#494556]">{agent.category}</span>
-                    <span className="rounded-full border border-[#d8d4e2] bg-white px-2.5 py-1 text-[11px] font-semibold text-[#494556]">Verified Harness</span>
                   </div>
                   <h1 className="mt-3 balanced-text text-4xl font-light leading-tight text-[#171452] md:text-5xl">{agent.name}</h1>
                   <p className="mt-2 text-sm text-muted-foreground">{agent.handle} · by {agent.creator}</p>
@@ -3959,7 +4089,7 @@ function TeamMarketCard({
   const [isExpanded, setIsExpanded] = useState(false);
 
   return (
-    <Card className="transition hover:-translate-y-0.5 hover:border-[#533afd]/35 hover:shadow-[rgba(83,58,253,0.10)_0_8px_24px]">
+    <Card className="transition hover:border-[#533afd]/35 hover:shadow-[rgba(83,58,253,0.10)_0_8px_24px]">
       <CardHeader className="pb-3">
         <div className="flex items-start justify-between gap-4">
           <div className="flex min-w-0 items-center gap-3">
@@ -4005,13 +4135,10 @@ function TeamMarketCard({
           </div>
         </div>
 
-        <div className="mt-4 grid grid-cols-[1fr_auto] gap-2">
-          <Button className="w-full" onClick={() => setIsExpanded(true)} type="button" variant="secondary">
+        <div className="mt-4">
+          <Button aria-expanded={isExpanded} className="w-full" onClick={() => setIsExpanded((value) => !value)} type="button" variant="secondary">
             <BriefcaseBusiness /> View {agents.length || team.agentCount} Agents
-          </Button>
-          <Button aria-expanded={isExpanded} className="px-3" onClick={() => setIsExpanded((value) => !value)} type="button" variant="ghost">
             <ChevronDown className={`transition ${isExpanded ? "rotate-180" : ""}`} />
-            <span className="text-xs">Details</span>
           </Button>
         </div>
 
@@ -4059,13 +4186,14 @@ function AgentMarketCard({
   const isHired = access?.accessType === "hired";
   const isTrying = access?.accessType === "trial";
   const hasGatewayAccess = access?.source === "gateway";
+  const [isExpanded, setIsExpanded] = useState(false);
   const navigate = useNavigate();
   const detailPath = `/agents/${agent.id}`;
 
   return (
     <Card
       aria-label={`View ${agent.name} details`}
-      className="cursor-pointer transition duration-200 hover:-translate-y-0.5 hover:border-[#c9c2f5] hover:shadow-[rgba(28,30,84,0.08)_0_8px_22px] active:translate-y-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8f82e8]/35 focus-visible:ring-offset-2"
+      className="interactive-card clickable-card cursor-pointer transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8f82e8]/35 focus-visible:ring-offset-2"
       onClick={(event) => {
         const target = event.target;
         if (
@@ -4123,12 +4251,11 @@ function AgentMarketCard({
           {agent.headline}
         </p>
 
-        <div className="mt-3 flex items-center justify-between gap-3 border-t border-border pt-3">
+        <div className="mt-3 border-t border-border pt-3">
           <div className="number-cell text-sm font-semibold text-[#0d253d]">{formatAgentPriceShort(agent.pricePer1MTokensSui ?? agent.pricePerCallUsd)}<span className="text-[11px] font-normal text-muted-foreground"> / 1M tokens</span></div>
-          <span className="rounded-full border border-[#d8d4e2] bg-[#f3f1f8] px-2 py-1 text-[10px] font-semibold text-[#494556]">Verified Harness</span>
         </div>
 
-        <div className="mt-3 grid grid-cols-2 gap-2">
+        <div className="mt-3 grid grid-cols-[1fr_1fr_auto] gap-2">
           <Button
             className="w-full"
             disabled={isBusy || (hasGatewayAccess && (isTrying || isHired))}
@@ -4154,7 +4281,45 @@ function AgentMarketCard({
           >
             <PackageOpen /> Hire
           </Button>
+          <Button
+            aria-expanded={isExpanded}
+            className="px-3"
+            onClick={(event) => {
+              event.stopPropagation();
+              setIsExpanded((value) => !value);
+            }}
+            size="sm"
+            type="button"
+            variant="ghost"
+          >
+            <ChevronDown className={`transition ${isExpanded ? "rotate-180" : ""}`} />
+            Details
+          </Button>
         </div>
+
+        {isExpanded ? (
+          <div
+            className="mt-3 rounded-xl border border-[#d8d4e2] bg-[#f8f7fb] p-4"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="text-sm font-semibold text-[#171452]">{agent.name}</div>
+            <p className="mt-2 text-sm leading-5 text-[#273951]">{agent.headline}</p>
+            <dl className="mt-4 grid gap-2 border-t border-[#d8d4e2] pt-4 text-xs">
+              <div className="flex items-center justify-between gap-3">
+                <dt className="text-muted-foreground">Rating / trust</dt>
+                <dd className="number-cell font-medium text-[#171452]">{agent.rating ? `${agent.rating.toFixed(1)} / 5` : "New"}</dd>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <dt className="text-muted-foreground">Completed runs</dt>
+                <dd className="number-cell font-medium text-[#171452]">{formatRuns(agent.calls)}</dd>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <dt className="text-muted-foreground">Price</dt>
+                <dd className="number-cell font-medium text-[#171452]">{formatAgentPrice(agent.pricePer1MTokensSui ?? agent.pricePerCallUsd)}</dd>
+              </div>
+            </dl>
+          </div>
+        ) : null}
 
         {access ? (
           <div className="mt-3 rounded-lg border border-border bg-white px-3 py-2 text-xs leading-5 text-muted-foreground">
