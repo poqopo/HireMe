@@ -58,9 +58,7 @@ export async function storeFileOnWalrus({ filePath, epochs = 3 }) {
 }
 
 export async function readWalrusBlobToFile({ blobId, outPath }) {
-  const bytes = await runWalrusOperation((client) =>
-    client.walrus.readBlob({ blobId }),
-  );
+  const { bytes } = await readWalrusBlobFromNetwork({ blobId });
   await mkdir(dirname(resolve(outPath)), { recursive: true });
   await writeFile(resolve(outPath), Buffer.from(bytes));
   return resolve(outPath);
@@ -72,13 +70,17 @@ export async function readWalrusBlobBytes({
   fileName = `${safePathName(blobId)}.platform-encryption.json`,
 }) {
   const outPath = join(runtimeDir, fileName);
-  await readWalrusBlobToFile({ blobId, outPath });
-  const bytes = await readFile(outPath);
+  const read = await readWalrusBlobFromNetwork({ blobId });
+  const bytes = Buffer.from(read.bytes);
+  await mkdir(dirname(resolve(outPath)), { recursive: true });
+  await writeFile(resolve(outPath), bytes);
   return {
     bytes,
     outPath: resolve(outPath),
     digest: `sha256:${sha256Hex(bytes)}`,
     sizeBytes: bytes.length,
+    source: read.source,
+    aggregatorUrl: read.aggregatorUrl || null,
   };
 }
 
@@ -164,6 +166,55 @@ async function runWalrusOperation(operation) {
   }
 }
 
+async function readWalrusBlobFromNetwork({ blobId }) {
+  const aggregatorErrors = [];
+  for (const aggregatorUrl of walrusAggregatorUrls()) {
+    try {
+      const bytes = await readWalrusBlobWithAggregator({ blobId, aggregatorUrl });
+      return {
+        bytes,
+        source: "walrus-aggregator",
+        aggregatorUrl,
+      };
+    } catch (err) {
+      aggregatorErrors.push(`${aggregatorUrl}: ${formatErrorMessage(err)}`);
+    }
+  }
+
+  if (walrusSdkReadFallbackEnabled()) {
+    const bytes = await runWalrusOperation((client) =>
+      client.walrus.readBlob({ blobId }),
+    );
+    return {
+      bytes,
+      source: "walrus-sdk",
+      aggregatorUrl: null,
+    };
+  }
+
+  throw new Error(
+    `Walrus aggregator read failed for blob ${blobId}: ${aggregatorErrors.join("; ")}`,
+  );
+}
+
+async function readWalrusBlobWithAggregator({ blobId, aggregatorUrl }) {
+  const url = `${aggregatorUrl.replace(/\/+$/, "")}/v1/blobs/${encodeURIComponent(blobId)}`;
+  const response = await fetch(url, {
+    signal: AbortSignal.timeout(
+      positiveIntegerEnv("HIREME_WALRUS_READ_TIMEOUT_MS", 30_000),
+    ),
+  });
+
+  if (!response.ok) {
+    const responseText = await response.text().catch(() => "");
+    throw new Error(
+      `HTTP ${response.status}${responseText ? ` ${responseText.slice(0, 200)}` : ""}`,
+    );
+  }
+
+  return new Uint8Array(await response.arrayBuffer());
+}
+
 function getWalrusClient() {
   walrusClient ||= new SuiGrpcClient({
     network: walrusNetwork(),
@@ -178,6 +229,31 @@ function getWalrusClient() {
     }),
   );
   return walrusClient;
+}
+
+function walrusAggregatorUrls() {
+  const configured = cleanEnv(
+    process.env.WALRUS_AGGREGATOR_URLS || process.env.WALRUS_AGGREGATOR_URL,
+  );
+  const urls = configured
+    ? configured
+        .split(",")
+        .map((url) => url.trim())
+        .filter(Boolean)
+    : [defaultWalrusAggregatorUrl()];
+  return [...new Set(urls)];
+}
+
+function defaultWalrusAggregatorUrl() {
+  return `https://aggregator.walrus-${walrusNetwork()}.walrus.space`;
+}
+
+function walrusSdkReadFallbackEnabled() {
+  return /^(1|true|yes)$/i.test(process.env.HIREME_WALRUS_SDK_READ_FALLBACK || "");
+}
+
+function formatErrorMessage(err) {
+  return err instanceof Error ? err.message : String(err);
 }
 
 function getWalrusSigner() {

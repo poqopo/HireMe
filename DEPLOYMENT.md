@@ -150,11 +150,13 @@ HIREME_DEFAULT_HIRE_PRICE_SUI=0.05
 HIREME_PLATFORM_FEE_BPS=0
 
 WALRUS_NETWORK=testnet
+WALRUS_AGGREGATOR_URL=https://aggregator.walrus-testnet.walrus.space
 WALRUS_UPLOAD_RELAY_URL=
 WALRUS_UPLOAD_RELAY_TIP_MAX_MIST=1000
 HIREME_WALRUS_REQUIRED=1
 HIREME_WALRUS_PAYER_PRIVATE_KEY=
 HIREME_WALRUS_DELETABLE=0
+HIREME_WALRUS_READ_TIMEOUT_MS=30000
 
 HIREME_PLATFORM_KMS_KEY=
 HIREME_PLATFORM_KMS_KEY_ID=platform:production-key
@@ -169,9 +171,10 @@ OLLAMA_MODEL=gpt-oss:120b
 
 ### Render Walrus SDK Payer Wallet
 
-The gateway uploads and reads Walrus blobs through the `@mysten/walrus`
-TypeScript SDK. Render does not need the `walrus` CLI, a Sui keystore file, or a
-Walrus client config file.
+The gateway uploads Walrus blobs through the `@mysten/walrus` TypeScript SDK
+and upload relay. Runtime reads use the Walrus HTTP aggregator to avoid opening
+hundreds of storage-node requests during an Agent call. Render does not need the
+`walrus` CLI, a Sui keystore file, or a Walrus client config file.
 
 For a short-lived demo, create a disposable Sui testnet wallet, fund it with the
 testnet SUI/WAL needed for storage, and set:
@@ -181,14 +184,21 @@ HIREME_WALRUS_PAYER_PRIVATE_KEY=suiprivkey...
 WALRUS_NETWORK=testnet
 SUI_NETWORK=testnet
 SUI_FULLNODE_URL=https://fullnode.testnet.sui.io:443
+WALRUS_AGGREGATOR_URL=https://aggregator.walrus-testnet.walrus.space
 WALRUS_UPLOAD_RELAY_URL=https://upload-relay.testnet.walrus.space
 WALRUS_UPLOAD_RELAY_TIP_MAX_MIST=1000
 HIREME_WALRUS_REQUIRED=1
+HIREME_WALRUS_READ_TIMEOUT_MS=30000
 ```
 
 `HIREME_WALRUS_REQUIRED=1` makes failed Walrus uploads fail the Agent creation
 request instead of silently falling back to local storage. Keep it enabled for a
 demo where you need to prove Render is writing to Walrus.
+
+Set `WALRUS_AGGREGATOR_URLS` to a comma-separated list if you want read
+failover across multiple aggregators. `HIREME_WALRUS_SDK_READ_FALLBACK=1` can
+re-enable SDK reads for local debugging, but it is intentionally off by default
+because SDK reads create many network requests.
 
 If `HIREME_GATEWAY_API_KEY` is set, MCP/plugin calls must send the same key. Keep that value out of the public web bundle.
 
