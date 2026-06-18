@@ -34,7 +34,6 @@ import {
   ChevronDown,
   CircleDollarSign,
   Clock3,
-  Eye,
   EyeOff,
   FileCheck2,
   LockKeyhole,
@@ -2725,7 +2724,7 @@ function ExploreAgentsPage({
                       aria-pressed={isSelected}
                       className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] font-semibold leading-none transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6b7280]/40 focus-visible:ring-offset-2 ${
                         isSelected
-                          ? "border-[#374151] bg-[#111827] text-white hover:bg-[#1f2937] active:bg-black"
+                          ? "border-[#d8d4e2] bg-[#f3f1f8] text-[#494556] shadow-[inset_0_0_0_1px_rgba(73,69,86,0.03)] hover:bg-[#eeebf4] active:bg-[#e9e5f0]"
                           : "border-[#d1d5db] bg-white text-[#374151] hover:border-[#c4c9d0] hover:bg-[#f3f4f6] active:bg-[#e5e7eb]"
                       }`}
                       key={view.id}
@@ -2738,7 +2737,7 @@ function ExploreAgentsPage({
                     >
                       <span
                         className={`size-1.5 rounded-full ${
-                          isSelected ? "bg-white" : "bg-[#c9d3e2]"
+                          isSelected ? "bg-[#777184]" : "bg-[#c9d3e2]"
                         }`}
                       />
                       {view.label}
@@ -2758,7 +2757,7 @@ function ExploreAgentsPage({
                       aria-pressed={isSelected}
                       className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] font-semibold leading-none transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6b7280]/40 focus-visible:ring-offset-2 ${
                         isSelected
-                          ? "border-[#374151] bg-[#111827] text-white hover:bg-[#1f2937] active:bg-black"
+                          ? "border-[#d8d4e2] bg-[#f3f1f8] text-[#494556] shadow-[inset_0_0_0_1px_rgba(73,69,86,0.03)] hover:bg-[#eeebf4] active:bg-[#e9e5f0]"
                           : "border-[#d1d5db] bg-white text-[#374151] hover:border-[#c4c9d0] hover:bg-[#f3f4f6] active:bg-[#e5e7eb]"
                       }`}
                       key={topic}
@@ -2769,7 +2768,7 @@ function ExploreAgentsPage({
                     >
                       <span
                         className={`size-1.5 rounded-full ${
-                          isSelected ? "bg-white" : "bg-[#c9d3e2]"
+                          isSelected ? "bg-[#777184]" : "bg-[#c9d3e2]"
                         }`}
                       />
                       {topic}
@@ -2967,7 +2966,7 @@ function AgentDetailPage({
           </p>
           <Button asChild className="mt-5" type="button">
             <Link to="/agents">
-              <Bot /> Explore Agents
+              <Search /> Back to marketplace
             </Link>
           </Button>
         </section>
@@ -2978,257 +2977,143 @@ function AgentDetailPage({
   const isHired = access?.accessType === "hired";
   const isTrying = access?.accessType === "trial";
   const hasGatewayAccess = access?.source === "gateway";
+  const tokenPrice = agent.pricePer1MTokensSui ?? agent.pricePerCallUsd;
+  const averageTokens = totalAverageTokens(agent);
+  const estimatedRunCost = (tokenPrice * averageTokens) / 1_000_000;
+  const estimatedRunPrice = estimatedRunCost
+    ? `${estimatedRunCost.toFixed(estimatedRunCost >= 0.1 ? 2 : 3)} SUI`
+    : "Calculated at run time";
+  const useCases = agent.skills.slice(0, 3).map((skill) =>
+    `${skill} work that needs a repeatable process, clear output, and built-in review.`,
+  );
+  const privateItems = Array.from(
+    new Set([
+      "AGENTS.md",
+      "Private prompts",
+      "Private skills",
+      "Examples",
+      "Rubrics",
+      "Workflow rules",
+      "Hidden checks",
+      ...agent.protectedAssets,
+    ]),
+  );
+  const buyerDeliverables = [
+    "Ready-to-run Agent access",
+    "Result output",
+    "MCP and tool access",
+    "Protected execution",
+    "Usage record and execution receipt",
+  ];
 
   return (
     <main className="min-h-screen bg-[#f6f9fc]">
-      <section className="border-b border-border bg-white px-4 py-8 md:px-8">
+      <section className="border-b border-[#dedbea] bg-white px-4 py-8 md:px-8 md:py-10">
         <div className="mx-auto max-w-7xl">
           <Button asChild size="sm" type="button" variant="ghost">
-            <Link to="/agents">
-              <Search /> Back to agents
-            </Link>
+            <Link to="/agents"><Search /> Back to marketplace</Link>
           </Button>
 
-          <div className="mt-6 grid gap-6 lg:grid-cols-[1fr_360px] lg:items-start">
+          <div className="mt-7 grid gap-7 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start">
             <div>
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="rounded-full border border-[#533afd]/20 bg-secondary px-3 py-1 text-xs font-semibold text-[#1c1e54]">
-                  {agent.category}
-                </span>
-                <span className="rounded-full border border-border bg-white px-3 py-1 text-xs font-medium text-muted-foreground">
-                  {agent.status}
-                </span>
-                <span className="rounded-full border border-border bg-white px-3 py-1 text-xs font-medium text-muted-foreground">
-                  {agent.team.name}
-                </span>
-              </div>
-
-              <div className="mt-5 flex items-start gap-4">
-                <Avatar className="size-16">
-                  <AvatarFallback
-                    className={`bg-gradient-to-br ${agent.accent} text-lg text-white`}
-                  >
-                    {agent.name
-                      .split(" ")
-                      .map((word) => word[0])
-                      .join("")}
+              <div className="flex items-start gap-4">
+                <Avatar className="size-16 shrink-0 md:size-20">
+                  <AvatarFallback className="bg-gradient-to-br from-[#533afd] to-[#7c6cf6] text-lg text-white md:text-xl">
+                    {agent.name.split(" ").map((word) => word[0]).join("")}
                   </AvatarFallback>
                 </Avatar>
                 <div className="min-w-0">
-                  <h1 className="balanced-text text-4xl font-light leading-tight text-[#1c1e54] md:text-5xl">
-                    {agent.name}
-                  </h1>
-                  <p className="mt-2 text-sm text-muted-foreground">
-                    {agent.handle} · by {agent.creator}
-                  </p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="rounded-full border border-[#d8d4e2] bg-[#f3f1f8] px-2.5 py-1 text-[11px] font-semibold uppercase text-[#494556]">{agent.category}</span>
+                    <span className="rounded-full border border-[#d8d4e2] bg-white px-2.5 py-1 text-[11px] font-semibold text-[#494556]">Verified Harness</span>
+                  </div>
+                  <h1 className="mt-3 balanced-text text-4xl font-light leading-tight text-[#171452] md:text-5xl">{agent.name}</h1>
+                  <p className="mt-2 text-sm text-muted-foreground">{agent.handle} · by {agent.creator}</p>
                 </div>
               </div>
-
-              <p className="pretty-text mt-6 max-w-3xl text-xl font-light leading-8 text-[#1c1e54]">
-                {agent.headline}
-              </p>
-              <p className="pretty-text mt-3 max-w-3xl text-sm leading-6 text-muted-foreground md:text-base">
-                {agent.publicSummary}
-              </p>
+              <p className="pretty-text mt-7 max-w-3xl text-xl font-light leading-8 text-[#1c1e54] md:text-2xl">{agent.headline}</p>
+              <p className="pretty-text mt-3 max-w-3xl text-sm leading-6 text-[#4e5d77] md:text-base">{agent.publicSummary}</p>
+              <div className="mt-5 flex flex-wrap gap-x-6 gap-y-2 text-sm text-[#494556]">
+                <span><strong className="number-cell text-[#171452]">{agent.rating ? agent.rating.toFixed(1) : "New"}</strong> rating</span>
+                <span><strong className="number-cell text-[#171452]">{formatRuns(agent.calls)}</strong> completed runs</span>
+              </div>
             </div>
 
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-2xl">
-                  {formatAgentPrice(agent.pricePerCallUsd)}
-                </CardTitle>
-                <CardDescription>
-                  Token-based fee for protected MCP execution from Codex.
-                </CardDescription>
+            <Card className="border-[#d8d4e2] bg-[#fbfaff] shadow-[rgba(28,30,84,0.06)_0_10px_30px]">
+              <CardHeader className="pb-3">
+                <CardDescription>Estimated cost per run</CardDescription>
+                <CardTitle className="number-cell text-3xl text-[#171452]">From {estimatedRunPrice}</CardTitle>
+                <p className="text-xs leading-5 text-muted-foreground">Based on {formatTokens(averageTokens)} average tokens at {formatAgentPrice(tokenPrice)}.</p>
               </CardHeader>
               <CardContent>
-                <div className="grid grid-cols-3 gap-3">
-                  <Metric icon={Clock3} label="Avg time" value={formatDuration(agent.latencyMs)} />
-                  <Metric icon={Braces} label="Avg tokens" value={formatTokens(totalAverageTokens(agent))} />
-                  <Metric icon={UserRound} label="Users" value={formatUsers(estimateActiveUsers(agent))} />
+                <div className="grid grid-cols-2 gap-3">
+                  <Button className="w-full" disabled={Boolean(accessActionType) || (hasGatewayAccess && (isTrying || isHired))} onClick={() => void updateAgentAccess("trial")} type="button" variant="secondary"><Terminal /> Try Agent</Button>
+                  <Button className="w-full" disabled={Boolean(accessActionType) || (hasGatewayAccess && isHired)} onClick={() => void updateAgentAccess("hired")} type="button"><PackageOpen /> Hire Agent</Button>
                 </div>
-                <div className="mt-5 grid grid-cols-2 gap-3">
-                  <Button
-                    className="w-full"
-                    disabled={
-                      Boolean(accessActionType) ||
-                      (hasGatewayAccess && (isTrying || isHired))
-                    }
-                    onClick={() => {
-                      void updateAgentAccess("trial");
-                    }}
-                    type="button"
-                    variant="secondary"
-                  >
-                    <Terminal /> Try!
-                  </Button>
-                  <Button
-                    className="w-full"
-                    disabled={Boolean(accessActionType) || (hasGatewayAccess && isHired)}
-                    onClick={() => {
-                      void updateAgentAccess("hired");
-                    }}
-                    type="button"
-                  >
-                    <PackageOpen /> Hire!
-                  </Button>
-                </div>
-                {access ? (
-                  <div className="mt-4 rounded-lg border border-border bg-secondary px-3 py-2 text-xs leading-5 text-muted-foreground">
-                    {access.source === "gateway"
-                      ? "Authorized by gateway for Codex calls."
-                      : "Saved locally. Start gateway and press Try! or Hire! again for Codex authorization."}
-                  </div>
-                ) : null}
-                {accessActionError ? (
-                  <div className="mt-4 rounded-lg border border-[#ea2261]/25 bg-[#fff8fb] px-3 py-2 text-xs leading-5 text-[#9f1239]">
-                    {accessActionError}
-                  </div>
-                ) : null}
+                {access ? <div className="mt-4 rounded-lg border border-[#d8d4e2] bg-white px-3 py-2 text-xs leading-5 text-muted-foreground">{access.source === "gateway" ? "Authorized for protected Codex execution." : "Saved locally. Connect the gateway to authorize Codex access."}</div> : null}
+                {accessActionError ? <div className="mt-4 rounded-lg border border-[#d8d4e2] bg-[#f3f1f8] px-3 py-2 text-xs leading-5 text-[#494556]">{accessActionError}</div> : null}
               </CardContent>
             </Card>
           </div>
         </div>
       </section>
 
-      <section className="px-4 py-8 md:px-8">
-        <div className="mx-auto grid max-w-7xl gap-5 lg:grid-cols-[1fr_360px]">
-          <div className="space-y-5">
+      <section className="px-4 py-8 md:px-8 md:py-10">
+        <div className="mx-auto grid max-w-7xl gap-6 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start">
+          <div className="space-y-6">
             <Card>
-              <CardHeader>
-                <CardTitle>How to use</CardTitle>
-                <CardDescription>
-                  Use natural language in Codex after Try! or Hire! authorization.
-                </CardDescription>
-              </CardHeader>
+              <CardHeader><CardTitle>What this Agent does</CardTitle><CardDescription>A prepared specialist for repeatable work—not a blank chatbot that needs every rule explained again.</CardDescription></CardHeader>
               <CardContent>
-                <div className="rounded-lg border border-border bg-secondary p-4 text-sm leading-6 text-[#1c1e54]">
-                  HireMe MCP에서 {agent.id} agent를 호출해서 원하는 작업을
-                  맡겨줘.
-                </div>
-                <div className="mt-3 rounded-lg border border-border bg-white p-4">
-                  <div className="mb-2 text-xs font-medium text-muted-foreground">
-                    Public MCP contract
-                  </div>
-                  <code className="block break-all text-sm text-[#1c1e54]">
-                    {agent.publicContract}
-                  </code>
-                </div>
-                <div className="mt-4 rounded-lg border border-border bg-white p-4">
-                  <div className="mb-2 text-xs font-medium text-muted-foreground">
-                    Result preview
-                  </div>
-                  <div className="text-sm font-medium text-[#1c1e54]">
-                    {agent.resultPreview.title}
-                  </div>
-                  {agent.resultPreview.mediaUrl ? (
-                    <div className="mt-3 overflow-hidden rounded-lg border border-border bg-secondary">
-                      {agent.resultPreview.mediaType === "video" ? (
-                        <video
-                          className="aspect-video w-full bg-black object-contain"
-                          controls
-                          src={agent.resultPreview.mediaUrl}
-                        />
-                      ) : (
-                        <img
-                          alt={`${agent.name} result preview`}
-                          className="aspect-video w-full object-cover"
-                          src={agent.resultPreview.mediaUrl}
-                        />
-                      )}
-                    </div>
-                  ) : null}
-                  <p className="mt-2 text-sm leading-6 text-[#273951]">
-                    {agent.resultPreview.summary}
-                  </p>
-                  <div className="mt-4 rounded-lg border border-border bg-secondary p-4 text-sm leading-6 text-[#1c1e54]">
-                    {agent.resultPreview.sample}
-                  </div>
+                <p className="text-sm leading-6 text-[#273951]">{agent.publicSummary} Its private Harness applies the creator’s standards, workflow rules, examples, and review checks on every run.</p>
+                <div className="mt-5 grid gap-3 sm:grid-cols-3">
+                  {useCases.map((useCase, index) => <div className="rounded-xl border border-[#dedbea] bg-[#fbfaff] p-4" key={useCase}><div className="text-xs font-semibold uppercase text-[#6b6580]">Use case {index + 1}</div><p className="mt-2 text-sm leading-6 text-[#273951]">{useCase}</p></div>)}
                 </div>
               </CardContent>
             </Card>
 
             <Card>
-              <CardHeader>
-                <CardTitle>Statistics</CardTitle>
-                <CardDescription>
-                  Recent marketplace averages from successful runs.
-                </CardDescription>
-              </CardHeader>
+              <CardHeader><CardTitle>Sample input / Sample output</CardTitle><CardDescription>Review the expected request and result shape before you try the Agent.</CardDescription></CardHeader>
               <CardContent>
-                <div className="grid gap-3 sm:grid-cols-3">
-                  <Metric
-                    icon={Clock3}
-                    label="Thinking + answer"
-                    value={formatDuration(agent.latencyMs)}
-                  />
-                  <Metric
-                    icon={Braces}
-                    label="Avg tokens"
-                    value={formatTokens(totalAverageTokens(agent))}
-                  />
-                  <Metric
-                    icon={UserRound}
-                    label="Active users"
-                    value={formatUsers(estimateActiveUsers(agent))}
-                  />
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="rounded-xl border border-[#dedbea] bg-[#f8f7fb] p-4"><div className="text-xs font-semibold uppercase text-[#6b6580]">Sample input</div><p className="mt-3 text-sm leading-6 text-[#273951]">Use {agent.name} to handle a {agent.category.toLowerCase()} task. Apply the public requirements, identify risks, and return a result with clear next steps.</p></div>
+                  <div className="rounded-xl border border-[#d8d4e2] bg-[#f3f1f8] p-4"><div className="text-xs font-semibold uppercase text-[#6b6580]">{agent.resultPreview.title}</div><p className="mt-3 text-sm leading-6 text-[#273951]">{agent.resultPreview.summary}</p><div className="mt-3 border-t border-[#d8d4e2] pt-3 text-sm leading-6 text-[#494556]">{agent.resultPreview.sample}</div></div>
                 </div>
+                {agent.resultPreview.mediaUrl ? <div className="mt-4 overflow-hidden rounded-xl border border-[#dedbea] bg-[#f8f7fb]">{agent.resultPreview.mediaType === "video" ? <video className="aspect-video w-full bg-[#171452] object-contain" controls src={agent.resultPreview.mediaUrl} /> : <img alt={`${agent.name} sample output`} className="aspect-video w-full object-cover" src={agent.resultPreview.mediaUrl} />}</div> : null}
               </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader><CardTitle>Public skills</CardTitle><CardDescription>Capabilities you can evaluate before hiring.</CardDescription></CardHeader>
+              <CardContent><div className="flex flex-wrap gap-2">{agent.skills.map((skill) => <span className="rounded-full border border-[#d8d4e2] bg-[#f8f7fb] px-3 py-1.5 text-xs font-medium text-[#494556]" key={skill}>{skill}</span>)}</div></CardContent>
+            </Card>
+
+            <div className="grid gap-6 md:grid-cols-2">
+              <Card>
+                <CardHeader><CardTitle>What stays private</CardTitle><CardDescription>The buyer receives capability and results, never the creator’s private playbook.</CardDescription></CardHeader>
+                <CardContent><ul className="grid gap-2 text-sm text-[#273951]">{privateItems.map((item) => <li className="rounded-lg border border-[#dedbea] bg-[#f8f7fb] px-3 py-2" key={item}>{item}</li>)}</ul></CardContent>
+              </Card>
+              <Card>
+                <CardHeader><CardTitle>What you get</CardTitle><CardDescription>Everything needed to use the Agent without copying its Harness.</CardDescription></CardHeader>
+                <CardContent><ul className="grid gap-2 text-sm text-[#273951]">{buyerDeliverables.map((item) => <li className="rounded-lg border border-[#d8d4e2] bg-[#f3f1f8] px-3 py-2" key={item}>{item}</li>)}</ul></CardContent>
+              </Card>
+            </div>
+
+            <Card className="border-[#d8d4e2] bg-gradient-to-br from-[#f8f5ff] to-white">
+              <CardHeader><CardTitle>Ready to work with {agent.name}?</CardTitle><CardDescription>Try the Agent first, then hire it when the result fits your workflow.</CardDescription></CardHeader>
+              <CardContent><div className="grid gap-3 sm:grid-cols-2"><Button className="w-full" disabled={Boolean(accessActionType) || (hasGatewayAccess && (isTrying || isHired))} onClick={() => void updateAgentAccess("trial")} type="button" variant="secondary"><Terminal /> Try Agent</Button><Button className="w-full" disabled={Boolean(accessActionType) || (hasGatewayAccess && isHired)} onClick={() => void updateAgentAccess("hired")} type="button"><PackageOpen /> Hire Agent</Button></div></CardContent>
             </Card>
           </div>
 
-          <div className="space-y-5">
+          <aside className="space-y-5 lg:sticky lg:top-24">
             <Card>
-              <CardHeader>
-                <CardTitle>Skills</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="flex flex-wrap gap-2">
-                  {agent.skills.map((skill) => (
-                    <span
-                      className="rounded-full border border-border bg-white px-3 py-1 text-xs font-medium text-[#273951]"
-                      key={skill}
-                    >
-                      {skill}
-                    </span>
-                  ))}
-                </div>
-              </CardContent>
+              <CardHeader><CardTitle>Performance & usage</CardTitle><CardDescription>Marketplace averages from completed runs.</CardDescription></CardHeader>
+              <CardContent><dl className="grid gap-3 text-sm">{[["Average time", formatDuration(agent.latencyMs)], ["Average usage", formatTokens(averageTokens)], ["Last updated", "Current release"], ["Version", "v1.0"], ["Completed runs", formatRuns(agent.calls)], ["Rating", agent.rating ? `${agent.rating.toFixed(1)} / 5` : "New"]].map(([label, value]) => <div className="flex items-center justify-between gap-4 border-b border-border pb-3 last:border-0 last:pb-0" key={label}><dt className="text-muted-foreground">{label}</dt><dd className="number-cell font-medium text-[#171452]">{value}</dd></div>)}</dl></CardContent>
             </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Protected Harness</CardTitle>
-                <CardDescription>{agent.sealedHarness.visibility}</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-3 text-xs leading-5 text-muted-foreground">
-                  <DetailMetaRow label="Network" value={agent.sealedHarness.network} />
-                  <DetailMetaRow label="Walrus blob" value={agent.sealedHarness.walrusBlobId} />
-                  <DetailMetaRow label="Sui object" value={agent.sealedHarness.suiObjectId} />
-                  <DetailMetaRow label="Digest" value={agent.sealedHarness.ciphertextDigest} />
-                </div>
-              </CardContent>
+            <Card className="border-[#d8d4e2] bg-[#fbfaff]">
+              <CardHeader><CardTitle>Pricing</CardTitle><CardDescription>Estimated from this Agent’s average usage.</CardDescription></CardHeader>
+              <CardContent><div className="number-cell text-2xl font-semibold text-[#171452]">From {estimatedRunPrice} / run</div><p className="mt-2 text-xs leading-5 text-muted-foreground">Actual cost varies with input and output length. Token rate: {formatAgentPrice(tokenPrice)}.</p><div className="mt-5 grid gap-2"><Button className="w-full" disabled={Boolean(accessActionType) || (hasGatewayAccess && isHired)} onClick={() => void updateAgentAccess("hired")} type="button"><PackageOpen /> Hire Agent</Button><Button className="w-full" disabled={Boolean(accessActionType) || (hasGatewayAccess && (isTrying || isHired))} onClick={() => void updateAgentAccess("trial")} type="button" variant="secondary"><Terminal /> Try Agent</Button></div></CardContent>
             </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Hidden from hirers</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="flex flex-wrap gap-2">
-                  {agent.protectedAssets.map((asset) => (
-                    <span
-                      className="rounded-full border border-[#ea2261]/20 bg-[#fff8fb] px-3 py-1 text-xs font-medium text-[#9f1239]"
-                      key={asset}
-                    >
-                      {asset}
-                    </span>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-          </div>
+          </aside>
         </div>
       </section>
     </main>
@@ -4056,15 +3941,6 @@ function ActivityRow({ item }: { item: MyActivityItem }) {
   );
 }
 
-function DetailMetaRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-lg border border-border bg-secondary px-3 py-2">
-      <div className="text-muted-foreground">{label}</div>
-      <div className="mt-1 break-all font-mono text-[#273951]">{value}</div>
-    </div>
-  );
-}
-
 function TeamMarketCard({
   agents,
   team,
@@ -4183,18 +4059,40 @@ function AgentMarketCard({
   const isHired = access?.accessType === "hired";
   const isTrying = access?.accessType === "trial";
   const hasGatewayAccess = access?.source === "gateway";
-  const [isExpanded, setIsExpanded] = useState(false);
-  const [showSample, setShowSample] = useState(false);
+  const navigate = useNavigate();
+  const detailPath = `/agents/${agent.id}`;
 
   return (
-    <Card className="transition hover:-translate-y-0.5 hover:border-[#533afd]/35 hover:shadow-[rgba(0,55,112,0.08)_0_8px_24px]">
-      <CardHeader className="pb-3">
+    <Card
+      aria-label={`View ${agent.name} details`}
+      className="cursor-pointer transition duration-200 hover:-translate-y-0.5 hover:border-[#c9c2f5] hover:shadow-[rgba(28,30,84,0.08)_0_8px_22px] active:translate-y-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8f82e8]/35 focus-visible:ring-offset-2"
+      onClick={(event) => {
+        const target = event.target;
+        if (
+          target instanceof Element &&
+          target.closest("button, a, input, textarea, select, [role='button']")
+        ) {
+          return;
+        }
+        navigate(detailPath);
+      }}
+      onKeyDown={(event) => {
+        if (
+          event.target === event.currentTarget &&
+          (event.key === "Enter" || event.key === " ")
+        ) {
+          event.preventDefault();
+          navigate(detailPath);
+        }
+      }}
+      role="link"
+      tabIndex={0}
+    >
+      <CardHeader className="pb-2.5">
         <div className="flex items-start justify-between gap-4">
           <div className="flex min-w-0 items-center gap-3">
             <Avatar className="size-11 shrink-0">
-              <AvatarFallback
-                className={`bg-gradient-to-br ${agent.accent} text-white`}
-              >
+              <AvatarFallback className="bg-gradient-to-br from-[#533afd] to-[#7c6cf6] text-white">
                 {agent.name
                   .split(" ")
                   .map((word) => word[0])
@@ -4204,41 +4102,41 @@ function AgentMarketCard({
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
                 <CardTitle className="truncate text-base">{agent.name}</CardTitle>
-                <span className="number-cell inline-flex items-center gap-1 rounded-full border border-[#533afd]/20 bg-[#f0edff] px-2 py-0.5 text-[11px] font-medium text-[#2e2b8c]" title="Based on buyer feedback, repeat usage, and completed runs.">
+                <span className="number-cell inline-flex items-center gap-1 text-xs font-medium text-[#494556]" title="Based on buyer feedback and completed runs.">
                   <Star className="size-3 fill-[#533afd] text-[#533afd]" />
-                  {agent.rating.toFixed(1)}
+                  {agent.rating ? agent.rating.toFixed(1) : "New"}
                 </span>
               </div>
-              <CardDescription className="truncate">{agent.handle}</CardDescription>
+              <CardDescription className="truncate">by {agent.creator}</CardDescription>
             </div>
           </div>
         </div>
       </CardHeader>
 
       <CardContent>
-        <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-          {agentCategories(agent).slice(0, 2).map((category) => (
-            <span className="rounded-full border border-[#533afd]/15 bg-secondary px-2 py-0.5 text-[10px] font-semibold uppercase text-[#273951]" key={category}>{category}</span>
-          ))}
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <span className="rounded-full border border-[#d8d4e2] bg-[#f3f1f8] px-2 py-0.5 text-[10px] font-semibold uppercase text-[#494556]">{agent.category}</span>
           <span>{formatRuns(agent.calls)} runs</span>
         </div>
 
-        <p className="mt-3 line-clamp-2 min-h-10 text-sm leading-5 text-[#273951]">
+        <p className="mt-3 truncate text-sm leading-5 text-[#273951]">
           {agent.headline}
         </p>
 
-        <div className="mt-4 border-t border-border pt-4">
-          <div>
-            <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">From</div>
-            <div className="number-cell mt-0.5 text-base font-semibold text-[#0d253d]">{formatAgentPriceShort(agent.pricePerCallUsd)}<span className="text-xs font-normal text-muted-foreground"> / 1M tokens</span></div>
-          </div>
+        <div className="mt-3 flex items-center justify-between gap-3 border-t border-border pt-3">
+          <div className="number-cell text-sm font-semibold text-[#0d253d]">{formatAgentPriceShort(agent.pricePer1MTokensSui ?? agent.pricePerCallUsd)}<span className="text-[11px] font-normal text-muted-foreground"> / 1M tokens</span></div>
+          <span className="rounded-full border border-[#d8d4e2] bg-[#f3f1f8] px-2 py-1 text-[10px] font-semibold text-[#494556]">Verified Harness</span>
         </div>
 
-        <div className="mt-4 grid grid-cols-[1fr_1fr_auto] gap-2">
+        <div className="mt-3 grid grid-cols-2 gap-2">
           <Button
             className="w-full"
             disabled={isBusy || (hasGatewayAccess && (isTrying || isHired))}
-            onClick={onTry}
+            onClick={(event) => {
+              event.stopPropagation();
+              onTry();
+            }}
+            size="sm"
             type="button"
             variant="secondary"
           >
@@ -4247,40 +4145,16 @@ function AgentMarketCard({
           <Button
             className="w-full"
             disabled={isBusy || (hasGatewayAccess && isHired)}
-            onClick={onHire}
+            onClick={(event) => {
+              event.stopPropagation();
+              onHire();
+            }}
+            size="sm"
             type="button"
           >
             <PackageOpen /> Hire
           </Button>
-          <Button aria-expanded={isExpanded} className="px-3" onClick={() => setIsExpanded((value) => !value)} type="button" variant="ghost">
-            <ChevronDown className={`transition ${isExpanded ? "rotate-180" : ""}`} />
-            <span className="text-xs">Details</span>
-          </Button>
         </div>
-
-        {isExpanded ? (
-          <div className="mt-4 rounded-xl border border-[#d9d5ff] bg-[#f8f5ff] p-4">
-            <div className="grid grid-cols-2 gap-x-4 gap-y-4 text-sm">
-              <Metric icon={Clock3} label="Average time" value={formatDuration(agent.latencyMs)} />
-              <Metric icon={Braces} label="Average usage" value={formatTokenUsage(totalAverageTokens(agent))} />
-              <Metric icon={CircleDollarSign} label="Token price" value={formatAgentPriceShort(agent.pricePerCallUsd)} />
-              <Metric icon={Clock3} label="Last updated" value="Current release" />
-            </div>
-            <div className="mt-4 grid gap-2 border-t border-[#d9d5ff] pt-4 text-xs">
-              <div className="flex items-center justify-between gap-3"><span className="text-muted-foreground">Harness status</span><span className="inline-flex items-center gap-1 font-semibold text-[#533afd]"><ShieldCheck className="size-3" /> Protected</span></div>
-              <div className="flex items-center justify-between gap-3"><span className="text-muted-foreground">Creator</span><span className="font-medium text-[#273951]">{agent.creator || agent.handle}</span></div>
-            </div>
-            <Button className="mt-4 w-full" onClick={() => setShowSample((value) => !value)} size="sm" type="button" variant="secondary">
-              <Eye /> {showSample ? "Hide sample result" : "View sample result"}
-            </Button>
-            {showSample ? (
-              <div className="mt-3 rounded-lg border border-border bg-white p-3 text-xs leading-5 text-[#273951]">
-                <strong className="block text-[#1c1e54]">{agent.resultPreview.title}</strong>
-                <span className="mt-1 block text-muted-foreground">{agent.resultPreview.summary}</span>
-              </div>
-            ) : null}
-          </div>
-        ) : null}
 
         {access ? (
           <div className="mt-3 rounded-lg border border-border bg-white px-3 py-2 text-xs leading-5 text-muted-foreground">
@@ -4358,25 +4232,10 @@ function formatTokens(tokens: number) {
   return tokens.toLocaleString();
 }
 
-function formatTokenUsage(tokens: number) {
-  return `${formatTokens(tokens)} token`;
-}
-
 function formatRuns(runs: number) {
   if (runs >= 1_000_000) return `${(runs / 1_000_000).toFixed(1)}M`;
   if (runs >= 1000) return `${(runs / 1000).toFixed(runs >= 10_000 ? 0 : 1)}K`;
   return runs.toLocaleString();
-}
-
-function formatUsers(users: number) {
-  if (users >= 1_000_000) return `${(users / 1_000_000).toFixed(1)}M`;
-  if (users >= 1000) return `${(users / 1000).toFixed(users >= 10_000 ? 0 : 1)}K`;
-  return users.toLocaleString();
-}
-
-function estimateActiveUsers(agent: Agent) {
-  if (agent.activeUsers !== undefined) return agent.activeUsers;
-  return Math.max(1, Math.round(agent.calls / 42));
 }
 
 function formatDuration(ms: number) {
