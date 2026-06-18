@@ -127,6 +127,12 @@ const docsToc = [
 const authStorageKey = "hireme-demo-auth-user";
 const accessStorageKey = "hireme-demo-agent-access-v1";
 const createdAgentsStorageKey = "hireme-demo-created-agents-v1";
+const authCallbackSteps = [
+  { label: "Checking your secure session", progress: 24 },
+  { label: "Syncing your HireMe gateway session", progress: 58 },
+  { label: "Saving your profile", progress: 82 },
+  { label: "Opening your dashboard", progress: 100 },
+] as const;
 const typicalOutputStorageBucket =
   import.meta.env.VITE_HIREME_TYPICAL_OUTPUT_BUCKET || "hireme-agent-media";
 const gatewayUrl = (
@@ -631,6 +637,32 @@ async function signInWithGoogle(returnTo?: string | null) {
     throw new Error("Supabase did not return a Google login URL.");
   }
   window.location.assign(data.url);
+}
+
+function readAuthCallbackError(location: { hash: string; search: string }) {
+  const searchParams = new URLSearchParams(location.search);
+  const hashParams = new URLSearchParams(location.hash.replace(/^#/, ""));
+  const error =
+    searchParams.get("error_description") ||
+    hashParams.get("error_description") ||
+    searchParams.get("error") ||
+    hashParams.get("error");
+  return error ? new Error(error) : null;
+}
+
+function formatAuthCallbackError(err: unknown) {
+  const message =
+    err instanceof Error ? err.message : "Could not complete Google sign-in.";
+  if (message.includes("No Supabase session")) {
+    return `Google returned to HireMe, but Supabase did not create a session. Add ${window.location.origin}/auth/callback to the Supabase Redirect URLs and try again.`;
+  }
+  if (message.includes("Gateway web session failed")) {
+    return `Google sign-in worked, but HireMe could not sync the gateway session. Check the gateway Supabase keys and try again. ${message}`;
+  }
+  if (message.includes("Supabase Auth is not configured")) {
+    return "Supabase Auth is not configured for this deployment.";
+  }
+  return message;
 }
 
 type EnokiWallets = ReturnType<typeof useWallets>;
@@ -1686,11 +1718,30 @@ function AuthCallbackPage({
 }) {
   const location = useLocation();
   const navigate = useNavigate();
+  const locationHash = location.hash;
+  const locationSearch = location.search;
   const [error, setError] = useState<string | null>(null);
+  const [activeStep, setActiveStep] = useState(0);
+  const [progress, setProgress] = useState<number>(
+    authCallbackSteps[0].progress,
+  );
 
   useEffect(() => {
     let cancelled = false;
+    function moveToStep(index: number) {
+      if (cancelled) return;
+      setActiveStep(index);
+      setProgress(authCallbackSteps[index].progress);
+    }
+
     async function completeLogin() {
+      moveToStep(0);
+      const callbackError = readAuthCallbackError({
+        hash: locationHash,
+        search: locationSearch,
+      });
+      if (callbackError) throw callbackError;
+
       if (!supabase) {
         throw new Error("Supabase Auth is not configured.");
       }
@@ -1699,17 +1750,22 @@ function AuthCallbackPage({
       if (!data.session) {
         throw new Error("No Supabase session was returned.");
       }
+
+      moveToStep(1);
       const user = authUserFromSupabaseSession(data.session);
       await syncGatewayWebSession(
         data.session.access_token,
         user.wallet,
         user.displayName,
       );
+
+      moveToStep(2);
       onLogin(user);
       writeStoredAuthUser(user);
 
-      const params = new URLSearchParams(location.search);
+      const params = new URLSearchParams(locationSearch);
       const returnTo = safeReturnTo(params.get("return_to"));
+      moveToStep(3);
       if (returnTo) {
         window.location.assign(returnTo);
         return;
@@ -1719,14 +1775,16 @@ function AuthCallbackPage({
 
     void completeLogin().catch((err) => {
       if (!cancelled) {
-        setError(err instanceof Error ? err.message : "Could not complete login.");
+        setError(formatAuthCallbackError(err));
       }
     });
 
     return () => {
       cancelled = true;
     };
-  }, [location.search, navigate, onLogin]);
+  }, [locationHash, locationSearch, navigate, onLogin]);
+
+  const currentStep = authCallbackSteps[activeStep] ?? authCallbackSteps[0];
 
   return (
     <main className="flex min-h-[calc(100svh-5rem)] items-center justify-center bg-secondary px-4 py-10">
@@ -1736,11 +1794,61 @@ function AuthCallbackPage({
           Login
         </div>
         <h1 className="mt-4 text-3xl font-light leading-tight text-[#0d253d]">
-          Connecting account
+          Signing you in
         </h1>
         <p className="mt-3 text-sm leading-6 text-muted-foreground">
-          Finalizing your HireMe web session for Codex.
+          Securing your HireMe session. This can take a few seconds.
         </p>
+        <div className="mt-6" aria-live="polite">
+          <div className="flex items-center justify-between gap-4 text-xs font-medium text-[#5a6078]">
+            <span>{error ? "Action needed" : currentStep.label}</span>
+            <span>{error ? "Stopped" : `${progress}%`}</span>
+          </div>
+          <div
+            aria-label="Sign-in progress"
+            aria-valuemax={100}
+            aria-valuemin={0}
+            aria-valuenow={error ? undefined : progress}
+            className="mt-3 h-2 overflow-hidden rounded-full bg-[#e8ebf3]"
+            role={error ? "presentation" : "progressbar"}
+          >
+            <div
+              className={`h-full rounded-full transition-all duration-500 ease-out ${
+                error
+                  ? "bg-[#ea2261]"
+                  : "bg-[#635bff] shadow-[0_0_18px_rgba(99,91,255,0.28)]"
+              }`}
+              style={{ width: `${error ? Math.max(progress, 24) : progress}%` }}
+            />
+          </div>
+          <div className="mt-4 grid gap-2">
+            {authCallbackSteps.map((step, index) => {
+              const isComplete = index < activeStep && !error;
+              const isCurrent = index === activeStep && !error;
+              return (
+                <div
+                  className="flex items-center gap-2 text-sm text-muted-foreground"
+                  key={step.label}
+                >
+                  <span
+                    className={`flex size-5 shrink-0 items-center justify-center rounded-full border text-[10px] ${
+                      isComplete
+                        ? "border-[#635bff] bg-[#635bff] text-white"
+                        : isCurrent
+                          ? "border-[#635bff] bg-white text-[#635bff]"
+                          : "border-[#d8dbe8] bg-white text-[#8a90a6]"
+                    }`}
+                  >
+                    {isComplete ? <CheckCircle2 className="size-3" /> : index + 1}
+                  </span>
+                  <span className={isCurrent ? "font-medium text-[#1c1e54]" : ""}>
+                    {step.label}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
         {error ? (
           <div className="mt-5 rounded-lg border border-[#ea2261]/20 bg-[#fff8fb] px-3 py-2 text-sm text-[#9f1239]">
             {error}
