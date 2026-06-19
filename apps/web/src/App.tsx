@@ -1,9 +1,12 @@
 import {
   useEffect,
   useMemo,
+  useRef,
   useState,
+  type CSSProperties,
   type ChangeEvent,
   type ReactNode,
+  type RefObject,
 } from "react";
 import type { Session } from "@supabase/supabase-js";
 import {
@@ -26,16 +29,16 @@ import {
 } from "@mysten/dapp-kit";
 import { Transaction } from "@mysten/sui/transactions";
 import {
-  ArrowRight,
+  ArrowUp,
+  ArrowLeft,
   Bot,
   Braces,
   BriefcaseBusiness,
   CheckCircle2,
   ChevronDown,
+  ChevronRight,
   CircleDollarSign,
   Clock3,
-  EyeOff,
-  FileCheck2,
   LockKeyhole,
   LogIn,
   LogOut,
@@ -73,35 +76,31 @@ import { Input } from "@/components/ui/input";
 
 const makeAgentSteps = [
   {
-    icon: PackageOpen,
     title: "Start with a template",
-    copy: "Choose a proven structure instead of building the Agent from scratch.",
+    copy: "Use a ready Agent folder instead of starting blank.",
   },
   {
-    icon: Braces,
     title: "Add your know-how",
-    copy: "Add the examples, skills, rubrics, and workflow rules that make your work repeatable.",
+    copy: "Add prompts, examples, rubrics, skills, and hidden checks.",
   },
   {
-    icon: LockKeyhole,
     title: "Protect the Harness",
-    copy: "Upload the private playbook. HireMe encrypts it before the Agent becomes available.",
+    copy: "Upload private files without exposing them to buyers.",
   },
   {
-    icon: CircleDollarSign,
     title: "Publish and earn",
-    copy: "Set a price, show a sample result, and earn whenever buyers run the Agent.",
+    copy: "Set pricing and get paid when buyers use the Agent.",
   },
 ];
 
 const creatorIpLayers = [
   {
-    label: "What buyers can see",
-    items: ["Name", "Skills", "Price", "Typical result", "Version notes"],
+    label: "Buyer sees",
+    items: ["Skills", "Price", "Sample output", "Version notes"],
   },
   {
-    label: "What buyers can't see",
-    items: ["AGENTS.md", "Private prompts", "Rubrics", "Examples", "Workflow rules", "Hidden checks"],
+    label: "Creator keeps",
+    items: ["AGENTS.md", "Prompts", "Rubrics", "Examples", "Hidden checks"],
   },
 ];
 
@@ -123,6 +122,66 @@ const docsToc = [
   { id: "paid", label: "How to Get Paid" },
   { id: "roadmap", label: "Roadmap" },
 ] as const;
+
+function useScrollReveal(scopeRef: RefObject<HTMLElement | null>) {
+  useEffect(() => {
+    const scope = scopeRef.current;
+
+    if (!scope) {
+      return;
+    }
+
+    const targets = Array.from(
+      scope.querySelectorAll<HTMLElement>("[data-reveal]"),
+    );
+
+    if (!targets.length) {
+      return;
+    }
+
+    if (
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches ||
+      !("IntersectionObserver" in window)
+    ) {
+      targets.forEach((target) => {
+        target.classList.add("reveal-visible");
+      });
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (!entry.isIntersecting) {
+            return;
+          }
+
+          entry.target.classList.add("reveal-visible");
+          observer.unobserve(entry.target);
+        });
+      },
+      {
+        root: null,
+        rootMargin: "0px 0px -12% 0px",
+        threshold: 0.16,
+      },
+    );
+
+    targets.forEach((target) => {
+      observer.observe(target);
+    });
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [scopeRef]);
+}
+
+function revealDelayStyle(delayMs: number): CSSProperties {
+  return {
+    ["--reveal-delay" as "--reveal-delay"]: `${delayMs}ms`,
+  } as CSSProperties;
+}
 
 const authStorageKey = "hireme-demo-auth-user";
 const accessStorageKey = "hireme-demo-agent-access-v1";
@@ -412,30 +471,116 @@ function App() {
 
   return (
     <BrowserRouter>
-      <TopNav
+      <AppShell
+        authUser={authUser}
+        isLoginOpen={isLoginOpen}
+        onHomeClick={() => {
+          window.scrollTo({
+            top: 0,
+            behavior: prefersReducedMotion() ? "auto" : "smooth",
+          });
+        }}
+        onLogin={updateAuthUser}
+        onLoginClose={() => setIsLoginOpen(false)}
+        onLoginOpen={() => setIsLoginOpen(true)}
         onLogout={() => {
           void logout();
         }}
+        onProfileSaved={(displayName) => {
+          if (!authUser) return;
+          updateAuthUser({ ...authUser, displayName });
+        }}
+        onWalletLinked={(wallet) => {
+          if (!authUser) return;
+          updateAuthUser({ ...authUser, wallet });
+        }}
+      />
+    </BrowserRouter>
+  );
+}
+
+function AppShell({
+  authUser,
+  isLoginOpen,
+  onHomeClick,
+  onLogin,
+  onLoginClose,
+  onLoginOpen,
+  onLogout,
+  onProfileSaved,
+  onWalletLinked,
+}: {
+  authUser: AuthUser | null;
+  isLoginOpen: boolean;
+  onHomeClick: () => void;
+  onLogin: (user: AuthUser | null) => void;
+  onLoginClose: () => void;
+  onLoginOpen: () => void;
+  onLogout: () => void;
+  onProfileSaved: (displayName: string) => void;
+  onWalletLinked: (wallet: string) => void;
+}) {
+  const location = useLocation();
+  const [showBackToTop, setShowBackToTop] = useState(false);
+  const [reducedMotion, setReducedMotion] = useState(false);
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const updatePreference = () => setReducedMotion(mediaQuery.matches);
+    updatePreference();
+    mediaQuery.addEventListener("change", updatePreference);
+    return () => mediaQuery.removeEventListener("change", updatePreference);
+  }, []);
+
+  useEffect(() => {
+    if (location.pathname !== "/") {
+      setShowBackToTop(false);
+      return;
+    }
+
+    const threshold = 600;
+    const updateVisibility = () => {
+      setShowBackToTop(window.scrollY >= threshold);
+    };
+
+    updateVisibility();
+    window.addEventListener("scroll", updateVisibility, { passive: true });
+    window.addEventListener("resize", updateVisibility);
+    return () => {
+      window.removeEventListener("scroll", updateVisibility);
+      window.removeEventListener("resize", updateVisibility);
+    };
+  }, [location.pathname]);
+
+  const scrollToTop = () => {
+    window.scrollTo({
+      top: 0,
+      behavior: reducedMotion ? "auto" : "smooth",
+    });
+  };
+
+  return (
+    <>
+      <TopNav
+        onHomeClick={onHomeClick}
+        onLogout={onLogout}
         user={authUser}
-        onLoginClick={() => setIsLoginOpen(true)}
+        onLoginClick={onLoginOpen}
       />
       <Routes>
         <Route path="/" element={<LandingPage />} />
         <Route path="/docs" element={<DocsPage />} />
-        <Route
-          path="/login"
-          element={<LoginPage onLogin={updateAuthUser} />}
-        />
+        <Route path="/login" element={<LoginPage onLogin={onLogin} />} />
         <Route
           path="/auth/callback"
-          element={<AuthCallbackPage onLogin={updateAuthUser} />}
+          element={<AuthCallbackPage onLogin={onLogin} />}
         />
         <Route path="/auth/enoki/callback" element={<EnokiCallbackPage />} />
         <Route
           path="/agents"
           element={
             <ExploreAgentsPage
-              onRequireLogin={() => setIsLoginOpen(true)}
+              onRequireLogin={onLoginOpen}
               user={authUser}
             />
           }
@@ -448,7 +593,7 @@ function App() {
           path="/agents/:agentId"
           element={
             <AgentDetailPage
-              onRequireLogin={() => setIsLoginOpen(true)}
+              onRequireLogin={onLoginOpen}
               user={authUser}
             />
           }
@@ -457,33 +602,58 @@ function App() {
           path="/my"
           element={
             <MyAgentsPage
-              onLogout={() => {
-                void logout();
-              }}
-              onWalletLinked={(wallet) => {
-                if (!authUser) return;
-                updateAuthUser({ ...authUser, wallet });
-              }}
-              onRequireLogin={() => setIsLoginOpen(true)}
+              onLogout={onLogout}
+              onWalletLinked={onWalletLinked}
+              onRequireLogin={onLoginOpen}
               user={authUser}
             />
           }
         />
         <Route path="*" element={<Navigate replace to="/" />} />
       </Routes>
-      <LoginDialog
-        open={isLoginOpen}
-        onClose={() => setIsLoginOpen(false)}
-      />
+      {location.pathname === "/" ? (
+        <BackToTopButton
+          onClick={scrollToTop}
+          reducedMotion={reducedMotion}
+          visible={showBackToTop}
+        />
+      ) : null}
+      <LoginDialog open={isLoginOpen} onClose={onLoginClose} />
       <ProfileNameDialog
         key={authUser?.id || "signed-out"}
-        onSaved={(displayName) => {
-          if (!authUser) return;
-          updateAuthUser({ ...authUser, displayName });
-        }}
+        onSaved={onProfileSaved}
         user={authUser}
       />
-    </BrowserRouter>
+    </>
+  );
+}
+
+function prefersReducedMotion() {
+  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
+function BackToTopButton({
+  onClick,
+  reducedMotion,
+  visible,
+}: {
+  onClick: () => void;
+  reducedMotion: boolean;
+  visible: boolean;
+}) {
+  return (
+    <button
+      aria-label="맨 위로 이동"
+      className={[
+        "fixed right-5 bottom-[calc(1.25rem+env(safe-area-inset-bottom))] z-30 inline-flex size-11 items-center justify-center rounded-full border border-[rgba(49,130,246,0.18)] bg-[rgba(255,255,255,0.82)] text-[#3182f6] shadow-[0_16px_40px_rgba(15,52,96,0.14)] backdrop-blur-[14px] transition-[opacity,transform,box-shadow,background-color,border-color] duration-300 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(49,130,246,0.35)] focus-visible:ring-offset-2 md:right-6 md:bottom-[calc(1.5rem+env(safe-area-inset-bottom))]",
+        reducedMotion ? "" : "hover:-translate-y-0.5 hover:border-[rgba(49,130,246,0.26)] hover:bg-white",
+        visible ? "pointer-events-auto opacity-100 translate-y-0" : "pointer-events-none opacity-0 translate-y-3",
+      ].join(" ")}
+      onClick={onClick}
+      type="button"
+    >
+      <ArrowUp className="size-4" />
+    </button>
   );
 }
 
@@ -1332,10 +1502,12 @@ function createLocalAccessRecord({
 }
 
 function TopNav({
+  onHomeClick,
   onLogout,
   user,
   onLoginClick,
 }: {
+  onHomeClick: () => void;
   onLogout: () => void;
   user: AuthUser | null;
   onLoginClick: () => void;
@@ -1345,18 +1517,32 @@ function TopNav({
   const isAgents = location.pathname === "/agents";
 
   return (
-    <header className="sticky top-0 z-40 border-b border-border bg-white/92 px-4 backdrop-blur md:px-8">
+    <header className={`sticky top-0 z-40 border-b px-4 backdrop-blur-xl md:px-8 ${isLanding ? "border-[#bfdbfe]/50 bg-white/88" : "border-border bg-white/92"}`}>
       <div className="mx-auto flex min-h-16 max-w-7xl flex-wrap items-center justify-between gap-3 py-2">
-        <Link className="flex items-center gap-2" to="/">
-          <span className="flex size-9 items-center justify-center rounded-full bg-[#1c1e54] text-white">
-            <Bot className="size-4" />
-          </span>
-          <span className="text-sm font-medium text-[#0d253d]">HireMe</span>
-        </Link>
+        {isLanding ? (
+          <button
+            aria-label="맨 위로 이동"
+            className="flex items-center gap-2 text-left transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(49,130,246,0.35)] focus-visible:ring-offset-2"
+            onClick={onHomeClick}
+            type="button"
+          >
+            <span className="flex size-9 items-center justify-center rounded-full bg-gradient-to-br from-[#0753d6] to-[#38a8f7] text-white shadow-[rgba(7,83,214,0.24)_0_8px_20px]">
+              <Bot className="size-4" />
+            </span>
+            <span className="text-sm font-medium text-[#082b63]">HireMe</span>
+          </button>
+        ) : (
+          <Link className="flex items-center gap-2" to="/">
+            <span className="flex size-9 items-center justify-center rounded-full bg-[#1c1e54] text-white">
+              <Bot className="size-4" />
+            </span>
+            <span className="text-sm font-medium text-[#0d253d]">HireMe</span>
+          </Link>
+        )}
 
         {isLanding ? (
           <Link
-            className="text-xs font-medium text-muted-foreground transition hover:text-primary"
+            className="text-xs font-medium text-[#42658f] transition hover:text-[#0753d6]"
             to="/docs"
           >
             Docs
@@ -1826,33 +2012,62 @@ function EnokiCallbackPage() {
 }
 
 function LandingPage() {
+  const revealScopeRef = useRef<HTMLElement | null>(null);
+
+  useScrollReveal(revealScopeRef);
+
   return (
-    <main>
+    <main
+      ref={revealScopeRef}
+      className="overflow-hidden bg-gradient-to-b from-[#f9fafb] via-[#f6faff] to-[#e8f3ff]"
+    >
+      <div
+        aria-hidden="true"
+        className="pointer-events-none h-16 bg-gradient-to-b from-[#f9fafb] via-[#f7fbff] to-transparent md:h-20"
+      />
       <section className="hero-visual relative overflow-hidden px-4 py-12 md:px-8 md:py-16 xl:py-20">
-        <div className="mx-auto flex min-h-[calc(100svh-12rem)] max-w-7xl items-center">
-          <div className="max-w-3xl py-8 md:py-12">
-            <h1 className="balanced-text max-w-4xl text-5xl font-normal leading-[1.03] text-[#0d253d] md:text-6xl">
-              Hire Agents that already know the job.
-            </h1>
-            <p className="pretty-text mt-6 max-w-2xl text-base font-normal leading-7 text-[#20364f] md:text-lg">
-              Hire protected AI Agents, not copyable prompts. Creators keep
-              private playbooks hidden while buyers get reliable results
-              through secure execution.
-            </p>
-            <div className="mt-8 flex flex-wrap gap-3">
-              <Button asChild size="lg">
-                <Link to="/agents">
-                  <Bot /> Hire an Agent
-                </Link>
-              </Button>
-              <Button asChild size="lg" variant="secondary">
-                <Link to="/agents/create">
-                  <UploadCloud /> Publish an Agent
-                </Link>
-              </Button>
+        <div className="mx-auto flex min-h-[calc(100svh-12rem)] page-shell items-center">
+          <div className="landing-hero-copy max-w-3xl py-8 md:py-12">
+            <div className="reveal stagger-item" data-reveal>
+              <h1 className="hero-title balanced-text content-measure text-[#191f28]">
+                Hire Agents that already know the job.
+              </h1>
+            </div>
+            <div
+              className="reveal stagger-item"
+              data-reveal
+              style={revealDelayStyle(140)}
+            >
+              <p className="body-copy pretty-text mt-6 content-measure">
+                Hire protected AI Agents, not copyable prompts. Creators keep
+                private playbooks hidden while buyers get reliable results
+                through secure execution.
+              </p>
+            </div>
+            <div
+              className="reveal stagger-item"
+              data-reveal
+              style={revealDelayStyle(240)}
+            >
+              <div className="mt-8 flex flex-wrap gap-3">
+                <Button asChild size="lg">
+                  <Link to="/agents">
+                    <Bot /> Hire an Agent
+                  </Link>
+                </Button>
+                <Button asChild size="lg" variant="secondary">
+                  <Link to="/agents/create">
+                    <UploadCloud /> Publish an Agent
+                  </Link>
+                </Button>
+              </div>
             </div>
           </div>
         </div>
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-x-0 bottom-0 h-28 bg-gradient-to-b from-transparent via-white/75 to-[#f4f9ff]"
+        />
       </section>
 
       <AudienceValueSection />
@@ -1868,30 +2083,55 @@ function LandingPage() {
 
 function AudienceValueSection() {
   return (
-    <section className="border-y border-border bg-white px-4 py-12 md:px-8 md:py-16">
-      <div className="mx-auto max-w-7xl">
-        <div className="grid gap-4 md:grid-cols-2">
-          <div className="rounded-2xl border border-[#d9d5ff] bg-[#f8f5ff] p-5 md:p-6">
-            <div className="flex items-center gap-3 text-sm font-semibold text-[#2e2b8c]">
-              <span className="flex size-10 items-center justify-center rounded-xl bg-white text-[#533afd]"><BriefcaseBusiness className="size-5" /></span>
+    <section className="landing-wave landing-wave-light landing-soft-grid relative bg-gradient-to-b from-[#f4f9ff] via-[#f7fbff] to-[#edf5ff] px-4 pb-16 pt-20 shadow-[inset_0_1px_0_rgba(255,255,255,0.9)] md:px-8 md:pb-20 md:pt-24">
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-x-0 top-0 h-40 bg-gradient-to-b from-[#f4f9ff] via-[#f7fbff]/96 to-transparent md:h-52"
+      />
+      <div className="relative z-10 mx-auto page-shell">
+        <div className="grid gap-4 lg:grid-cols-[1.18fr_0.82fr] lg:items-stretch">
+          <div
+            className="reveal landing-glass rounded-[28px] p-6 md:p-8"
+            data-reveal
+          >
+            <div className="flex items-center gap-3 text-sm font-semibold text-[#3182f6]">
+              <span className="flex size-11 items-center justify-center rounded-2xl bg-gradient-to-br from-[#e0f2fe] to-white text-[#0877ec] shadow-sm">
+                <BriefcaseBusiness className="size-5" />
+              </span>
               For Buyers
             </div>
-            <p className="mt-4 max-w-lg text-xl font-normal leading-7 text-[#0d253d]">
+            <p className="mt-5 max-w-xl text-[clamp(1.45rem,2.6vw,2rem)] font-normal leading-[1.34] tracking-[-0.03em] text-[#191f28]">
               Use expert-built Agents without exposing your private work to the creator.
             </p>
-          </div>
-          <div className="rounded-2xl border border-[#d9d5ff] bg-[#f8f5ff] p-5 md:p-6">
-            <div className="flex items-center gap-3 text-sm font-semibold text-[#2e2b8c]">
-              <span className="flex size-10 items-center justify-center rounded-xl bg-white text-[#533afd]"><CircleDollarSign className="size-5" /></span>
-              For Creators
-            </div>
-            <p className="mt-4 max-w-lg text-xl font-normal leading-7 text-[#171452]">
-              Monetize Agent know-how without giving away prompts, skills, examples, or rubrics.
+            <p className="mt-4 max-w-xl body-copy">
+              Hire the capability, not the raw prompt files.
             </p>
           </div>
-        </div>
-        <div className="mt-5 flex items-center justify-center gap-2 text-center text-sm font-semibold text-[#273951]">
-          <LockKeyhole className="size-4 text-primary" /> Your work and the creator’s playbook stay separate.
+          <div className="grid gap-4">
+            <div
+              className="reveal stagger-item landing-glass rounded-[28px] p-6 md:p-8"
+              data-reveal
+              style={revealDelayStyle(140)}
+            >
+              <div className="flex items-center gap-3 text-sm font-semibold text-[#3182f6]">
+                <span className="flex size-11 items-center justify-center rounded-2xl bg-gradient-to-br from-[#dbeafe] to-white text-[#0753d6] shadow-sm">
+                  <CircleDollarSign className="size-5" />
+                </span>
+                For Creators
+              </div>
+              <p className="mt-5 max-w-lg text-xl font-normal leading-8 text-[#191f28]">
+                Monetize Agent know-how without giving away prompts, skills, examples, or rubrics.
+              </p>
+            </div>
+            <div
+              className="reveal stagger-item rounded-[22px] border border-[#dbeafe] bg-white/82 px-5 py-4 text-sm leading-6 text-[#4e5968] shadow-[0_16px_32px_rgba(15,52,96,0.06)]"
+              data-reveal
+              style={revealDelayStyle(220)}
+            >
+              <LockKeyhole className="mb-2 size-4 text-[#0877ec]" />
+              Your work and the creator’s playbook stay separate.
+            </div>
+          </div>
         </div>
       </div>
     </section>
@@ -1900,40 +2140,60 @@ function AudienceValueSection() {
 
 function ProtectedExecutionSection() {
   const steps = [
-    { icon: UserRound, label: "Buyer sends task", note: "Private input" },
-    { icon: ServerCog, label: "HireMe secure runner", note: "Isolated execution" },
-    { icon: LockKeyhole, label: "Private Harness executes", note: "Encrypted playbook" },
-    { icon: FileCheck2, label: "Buyer gets result", note: "Output + receipt" },
+    { label: "Buyer task", note: "Private input" },
+    { label: "Secure runner", note: "HireMe gateway" },
+    { label: "Private Harness", note: "Gateway-only run" },
+    { label: "Buyer gets result", note: "Output + receipt" },
   ];
 
   return (
-    <section className="bg-[#17133f] px-4 py-14 text-white md:px-8 md:py-20">
-      <div className="mx-auto max-w-7xl">
-        <div className="max-w-2xl">
-          <div className="text-sm font-semibold text-[#c4b5fd]">Protected execution</div>
-          <h2 className="mt-3 balanced-text text-3xl font-normal leading-tight md:text-5xl">The Agent works. The playbook never leaves.</h2>
-          <p className="mt-4 max-w-xl text-sm leading-6 text-white/70 md:text-base">Buyer input is processed by HireMe, not sent directly to the creator. The private Harness stays protected inside the runner.</p>
+    <section className="landing-wave landing-wave-navy border-y border-white/8 bg-gradient-to-b from-[#26164f] via-[#1d1f5d] to-[#101437] px-4 py-16 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] md:px-8 md:py-24">
+      <div className="relative z-10 mx-auto page-shell">
+        <div className="reveal max-w-2xl" data-reveal>
+          <div className="inline-flex rounded-full border border-white/14 bg-white/12 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-white/72">
+            Protected execution
+          </div>
+          <h2 className="mt-3 max-w-[13ch] text-[clamp(1.95rem,4vw,3.1rem)] font-bold leading-[1.08] tracking-[-0.035em] text-white text-balance md:max-w-[12ch]">
+            <span className="block">The Agent works.</span>
+            <span className="block">The playbook never leaves.</span>
+          </h2>
+          <p className="mt-4 max-w-[42rem] text-[1rem] leading-[1.65] text-white/80 md:text-[1.05rem]">
+            Buyer work goes through HireMe. The creator’s Harness stays private.
+          </p>
         </div>
 
-        <div className="mt-10 grid gap-3 md:grid-cols-[1fr_auto_1fr_auto_1fr_auto_1fr] md:items-center">
+        <div className="mt-10 grid gap-4 md:grid-cols-[1fr_auto_1fr_auto_1fr_auto_1fr] md:items-start">
           {steps.map((step, index) => (
             <div className="contents" key={step.label}>
-              <div className={`rounded-2xl border p-4 ${index === 2 ? "border-[#a78bfa]/60 bg-[#533afd]/24" : "border-white/15 bg-white/[0.07]"}`}>
-                <step.icon className="size-5 text-[#c4b5fd]" />
-                <div className="mt-4 text-sm font-semibold text-white">{step.label}</div>
-                <div className="mt-1 text-xs text-white/55">{step.note}</div>
+              <div
+                className="reveal stagger-item flex items-start gap-3 md:flex-col md:items-center md:text-center"
+                data-reveal
+                style={revealDelayStyle(120 * index)}
+              >
+                <span className="flex size-10 shrink-0 items-center justify-center rounded-full border border-white/12 bg-white/10 text-[0.9rem] font-semibold text-white/90 shadow-[0_10px_24px_rgba(2,6,23,0.14)] md:size-11">
+                  {String(index + 1).padStart(2, "0")}
+                </span>
+                <div>
+                  <div className="text-sm font-semibold text-white/95">{step.label}</div>
+                  <div className="mt-1 text-xs text-white/62">{step.note}</div>
+                </div>
               </div>
-              {index < steps.length - 1 ? <ArrowRight className="mx-auto hidden size-4 text-[#a78bfa] md:block" /> : null}
+              {index < steps.length - 1 ? (
+                <>
+                  <div className="ml-[1.15rem] h-6 w-px bg-gradient-to-b from-white/0 via-white/20 to-white/0 md:hidden" />
+                  <div className="mx-auto hidden h-px w-8 bg-gradient-to-r from-white/0 via-white/22 to-white/0 md:block" />
+                </>
+              ) : null}
             </div>
           ))}
         </div>
 
         <div className="mt-5 grid gap-3 md:grid-cols-2">
-          <div className="flex items-start gap-3 rounded-xl border border-white/12 bg-white/[0.05] p-4 text-sm text-white/76">
-            <EyeOff className="mt-0.5 size-4 shrink-0 text-[#c4b5fd]" /> Creator cannot see the buyer’s task or private work.
+          <div className="reveal landing-glass-dark rounded-full border border-white/14 bg-white/7 px-4 py-3 text-sm leading-6 text-white/80" data-reveal>
+            Creator files stay hidden.
           </div>
-          <div className="flex items-start gap-3 rounded-xl border border-white/12 bg-white/[0.05] p-4 text-sm text-white/76">
-            <ShieldCheck className="mt-0.5 size-4 shrink-0 text-[#c4b5fd]" /> Buyer cannot inspect or copy the creator’s Harness.
+          <div className="reveal stagger-item landing-glass-dark rounded-full border border-white/14 bg-white/7 px-4 py-3 text-sm leading-6 text-white/80" data-reveal style={revealDelayStyle(140)}>
+            Buyer input stays separate by default.
           </div>
         </div>
       </div>
@@ -1943,45 +2203,58 @@ function ProtectedExecutionSection() {
 
 function AgentPerformanceSection() {
   return (
-    <section id="agent-performance" className="bg-[#fbfdff] px-4 py-14 md:px-8 md:py-20">
-      <div className="mx-auto max-w-7xl">
-        <div>
-          <div className="mb-5 flex items-center gap-3 text-sm font-semibold text-[#2e2b8c]">
-            <span className="flex size-11 items-center justify-center rounded-xl bg-[#eeeaff] text-[#533afd]">
+    <section id="agent-performance" className="landing-wave landing-wave-white bg-gradient-to-b from-[#f4f9ff] via-[#f8fbff] to-[#eef4ff] px-4 py-16 shadow-[inset_0_1px_0_rgba(255,255,255,0.9)] md:px-8 md:py-24">
+      <div className="relative z-10 mx-auto page-shell">
+        <div className="reveal" data-reveal>
+          <div className="mb-5 flex items-center gap-3 text-sm font-semibold text-[#3182f6]">
+            <span className="flex size-11 items-center justify-center rounded-2xl bg-[#eaf5ff] text-[#0877ec] shadow-sm">
               <TrendingUp className="size-5" />
             </span>
             Agent performance
           </div>
-          <h2 className="balanced-text max-w-2xl text-3xl font-normal leading-tight text-[#0d253d] md:text-5xl">
+          <h2 className="section-title max-w-[680px] text-[#191f28]">
             Same prompt. Better output.
           </h2>
-          <p className="pretty-text mt-5 max-w-2xl text-base font-normal leading-7 text-[#324a63]">
+          <p className="body-copy mt-5 max-w-[680px]">
             The prompt stays the same. A private Harness adds the standards,
             examples, and checks needed for production-ready work.
           </p>
         </div>
 
-        <div className="mt-10 grid gap-5 lg:grid-cols-2">
-          <HarnessImageCard
-            caption="Same prompt without Harness"
-            image="/assets/harness-before.svg"
-            label="Before"
-          />
-          <HarnessImageCard
-            caption="Same prompt with Harness"
-            image="/assets/harness-after.svg"
-            label="After"
-          />
+        <div className="mt-10 grid gap-5 lg:grid-cols-[1fr_auto_1fr] lg:items-center">
+          <div className="reveal" data-reveal>
+            <HarnessImageCard
+              caption="Without Harness"
+              image="/assets/harness-before.svg"
+              label="Before"
+            />
+          </div>
+          <div className="reveal stagger-item flex items-center justify-center text-center lg:flex-col" data-reveal style={revealDelayStyle(120)}>
+            <div className="flex size-11 items-center justify-center rounded-full border border-[#d8d4e2] bg-white text-xs font-semibold text-[#494556] shadow-sm">
+              →
+            </div>
+            <div className="mt-0 text-xs font-semibold uppercase tracking-[0.08em] text-[#6b7684] lg:mt-3">
+              Harness applied
+            </div>
+          </div>
+          <div className="reveal stagger-item" data-reveal style={revealDelayStyle(180)}>
+            <HarnessImageCard
+              caption="With Harness"
+              image="/assets/harness-after.svg"
+              label="After"
+            />
+          </div>
         </div>
 
-        <div className="mt-6 rounded-xl border border-[#d9d5ff] bg-[#f8f5ff] p-5">
-          <div className="text-sm font-semibold text-[#2e2b8c]">
-            Why Harness matters
+        <div className="reveal stagger-item mt-7 grid gap-3 md:grid-cols-3" data-reveal style={revealDelayStyle(220)}>
+          <div className="rounded-2xl border border-[#dbeafe] bg-white/85 p-4 docs-card-copy">
+            Better structure
           </div>
-          <div className="mt-4 grid gap-3 text-sm leading-6 text-[#273951] md:grid-cols-3">
-            <div><strong className="block text-[#2e2b8c]">Clear hierarchy</strong> CTA, content, and conversion flow follow a tested structure.</div>
-            <div><strong className="block text-[#2e2b8c]">Real requirements</strong> Specs, trust signals, and mobile rules are not skipped.</div>
-            <div><strong className="block text-[#2e2b8c]">Repeatable quality</strong> Hidden checks catch incomplete work before delivery.</div>
+          <div className="rounded-2xl border border-[#dbeafe] bg-white/85 p-4 docs-card-copy">
+            More reliable output
+          </div>
+          <div className="rounded-2xl border border-[#dbeafe] bg-white/85 p-4 docs-card-copy">
+            Hidden checks applied
           </div>
         </div>
       </div>
@@ -1999,12 +2272,12 @@ function HarnessImageCard({
   label: string;
 }) {
   return (
-    <figure className="overflow-hidden rounded-xl border border-border bg-white app-shadow">
+    <figure className="overflow-hidden rounded-3xl border border-[#cfe3f8] bg-white shadow-[rgba(30,64,175,0.11)_0_20px_50px]">
       <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
         <figcaption className="text-sm font-medium text-[#1c1e54]">
           {caption}
         </figcaption>
-        <span className="rounded-lg bg-secondary px-3 py-1.5 text-xs font-medium text-primary">
+        <span className="rounded-full bg-[#eaf5ff] px-3 py-1.5 text-xs font-medium text-[#0753d6]">
           {label}
         </span>
       </div>
@@ -2019,47 +2292,51 @@ function HarnessImageCard({
 
 function MakeAgentSection() {
   return (
-    <section id="make-agent" className="bg-[#f8f5ff] px-4 py-14 md:px-8 md:py-20">
-      <div className="mx-auto grid max-w-7xl gap-10 lg:grid-cols-[0.78fr_1.22fr] lg:items-start">
-        <div>
-          <div className="mb-5 flex items-center gap-3 text-sm font-semibold text-[#2e2b8c]">
-            <span className="flex size-11 items-center justify-center rounded-xl bg-white text-[#533afd]">
+    <section id="make-agent" className="landing-wave landing-wave-sky landing-soft-grid bg-gradient-to-b from-[#eef6ff] via-[#f7fbff] to-[#eaf4ff] px-4 py-16 shadow-[inset_0_1px_0_rgba(255,255,255,0.9)] md:px-8 md:py-24">
+      <div className="relative z-10 mx-auto grid page-shell gap-10 lg:grid-cols-[0.78fr_1.22fr] lg:items-start">
+        <div className="reveal" data-reveal>
+          <div className="mb-5 flex items-center gap-3 text-sm font-semibold text-[#3182f6]">
+            <span className="flex size-11 items-center justify-center rounded-2xl bg-white text-[#0877ec] shadow-sm">
               <UploadCloud className="size-5" />
             </span>
             How to create one
           </div>
-          <h2 className="balanced-text text-3xl font-normal leading-tight text-[#171452] md:text-5xl">
+          <h2 className="section-title text-[#191f28]">
             Make an Agent in four steps.
           </h2>
-          <p className="pretty-text mt-5 max-w-2xl text-base font-normal leading-7 text-[#3f3b6f]">
+          <p className="body-copy mt-5 max-w-[680px]">
             You do not need to start from a blank folder. Use Codex to scaffold
             the template, fill in the Harness, then upload it to HireMe.
           </p>
         </div>
 
-        <div className="rounded-xl border border-[#d9d5ff] bg-white p-5 app-shadow">
-          <div className="space-y-5">
-            {makeAgentSteps.map((step) => (
-              <div
-                className="border-b border-border pb-5 last:border-b-0 last:pb-0"
-                key={step.title}
-              >
-                <div className="mb-3 flex items-center gap-3">
-                  <span className="flex size-10 items-center justify-center rounded-xl bg-[#eeeaff] text-[#533afd]">
-                    <step.icon className="size-5" />
-                  </span>
-                  <h3 className="text-xl font-normal text-[#171452]">
-                    {step.title}
-                  </h3>
+        <div className="reveal stagger-item" data-reveal style={revealDelayStyle(140)}>
+          <ol className="grid gap-4">
+            {makeAgentSteps.map((step, index) => (
+              <li className="reveal stagger-item" data-reveal style={revealDelayStyle(index * 90)} key={step.title}>
+                <div className="grid gap-4 md:grid-cols-[88px_1fr] md:items-start">
+                  <div className="flex items-center gap-4 md:flex-col md:items-center md:justify-start">
+                    <div className="flex size-14 items-center justify-center rounded-full border border-[#d8d4e2] bg-[#f7f5ff] text-sm font-semibold text-[#494556] shadow-[inset_0_0_0_1px_rgba(83,58,253,0.06)]">
+                      {String(index + 1).padStart(2, "0")}
+                    </div>
+                    {index < makeAgentSteps.length - 1 ? (
+                      <div className="hidden h-10 w-px bg-gradient-to-b from-[#d8d4e2] via-[#c7c1e4] to-transparent md:block" />
+                    ) : null}
+                  </div>
+                  <div className="pt-1">
+                    <h3 className="docs-card-title text-[#191f28]">
+                      {step.title}
+                    </h3>
+                    <p className="mt-2 docs-card-copy max-w-[560px]">
+                      {step.copy}
+                    </p>
+                  </div>
                 </div>
-                <p className="mt-3 text-sm leading-6 text-[#4e5d77]">
-                  {step.copy}
-                </p>
-              </div>
+              </li>
             ))}
-          </div>
-          <div className="mt-6 rounded-xl border border-[#533afd]/20 bg-[#f0edff] p-4 text-xs leading-5 text-[#3f3b6f]">
-            <span className="font-semibold text-[#171452]">Built for existing Agent workflows.</span>{" "}
+          </ol>
+          <div className="mt-6 rounded-2xl border border-[#bfdbfe] bg-[#eaf5ff]/80 p-4 text-xs leading-5 text-[#4e5968]">
+            <span className="font-semibold text-[#191f28]">Built for existing Agent workflows.</span>{" "}
             Start from Codex, AGENTS.md, skills, or MCP tools—then package the know-how as a protected Harness.
           </div>
         </div>
@@ -2070,33 +2347,58 @@ function MakeAgentSection() {
 
 function CreatorIpSection() {
   return (
-    <section id="creator-ip" className="bg-[#15133f] px-4 py-14 text-white md:px-8 md:py-20">
-      <div className="mx-auto grid max-w-7xl gap-10 lg:grid-cols-[0.86fr_1.14fr] lg:items-center">
-        <div>
-          <div className="mb-5 flex items-center gap-3 text-sm font-semibold text-[#ddd6fe]">
-            <span className="flex size-11 items-center justify-center rounded-xl bg-white/12 text-[#c4b5fd]">
+    <section id="creator-ip" className="landing-wave landing-wave-white overflow-hidden bg-gradient-to-b from-[#eef5ff] via-[#f7fbff] to-[#eaf4ff] px-4 py-16 text-[#0d253d] shadow-[inset_0_1px_0_rgba(255,255,255,0.9)] md:px-8 md:py-24">
+      <div className="mx-auto grid page-shell gap-10 lg:grid-cols-[0.92fr_1.08fr] lg:items-center">
+        <div className="reveal" data-reveal>
+          <div className="mb-5 flex items-center gap-3 text-sm font-semibold text-[#3182f6]">
+            <span className="flex size-11 items-center justify-center rounded-2xl bg-white text-[#0877ec] shadow-sm">
               <LockKeyhole className="size-5" />
             </span>
             Private by design
           </div>
-          <h2 className="balanced-text max-w-xl text-3xl font-normal leading-tight md:text-5xl">
+          <h2 className="section-title max-w-[680px] text-[#191f28]">
             Publish the Agent. Keep the recipe.
           </h2>
-          <p className="pretty-text mt-5 max-w-2xl text-base font-normal leading-7 text-white/82">
-            Buyers see what the Agent can do and what a result looks like.
-            Everything that makes it work stays behind the execution boundary.
+          <p className="body-copy mt-5 max-w-[680px]">
+            Buyers see the capability. Creators keep the Harness and private files hidden.
           </p>
         </div>
 
-        <div className="rounded-xl border border-white/15 bg-white/9 p-5 app-shadow">
+        <div className="reveal stagger-item" data-reveal style={revealDelayStyle(140)}>
           <div className="grid gap-4 md:grid-cols-[1fr_auto_1fr] md:items-stretch">
-            <CreatorIpPanel layer={creatorIpLayers[0]} />
-            <div className="flex items-center justify-center">
-              <div className="rounded-full border border-[#a78bfa]/40 bg-[#a78bfa]/10 px-4 py-2 text-xs font-medium text-[#ddd6fe]">
-                gateway boundary
+            <div className="rounded-[28px] border border-[#dbeafe] bg-white/85 p-5 shadow-[rgba(30,64,175,0.08)_0_16px_36px]">
+              <div className="docs-card-title text-[#191f28]">
+                Buyer sees
+              </div>
+              <div className="mt-4 grid gap-2">
+                {creatorIpLayers[0].items.map((item, index) => (
+                  <div className="reveal stagger-item rounded-lg bg-[#f4f9ff] px-3 py-2 docs-card-copy" data-reveal style={revealDelayStyle(index * 70)} key={item}>
+                    {item}
+                  </div>
+                ))}
               </div>
             </div>
-            <CreatorIpPanel layer={creatorIpLayers[1]} />
+            <div className="flex items-center justify-center">
+              <div className="flex h-full min-h-24 items-center justify-center md:flex-col">
+                <div className="hidden h-24 w-px bg-gradient-to-b from-transparent via-[#c7c1e4] to-transparent md:block" />
+                <div className="rounded-full border border-[#d8d4e2] bg-[#f7f5ff] px-4 py-2 text-xs font-semibold text-[#494556] md:my-3">
+                  boundary
+                </div>
+                <div className="hidden h-24 w-px bg-gradient-to-b from-transparent via-[#c7c1e4] to-transparent md:block" />
+              </div>
+            </div>
+            <div className="rounded-[28px] border border-[#dbeafe] bg-white/85 p-5 shadow-[rgba(30,64,175,0.08)_0_16px_36px]">
+              <div className="docs-card-title text-[#191f28]">
+                Creator keeps
+              </div>
+              <div className="mt-4 grid gap-2">
+                {creatorIpLayers[1].items.map((item, index) => (
+                  <div className="reveal stagger-item rounded-lg bg-[#f4f9ff] px-3 py-2 docs-card-copy" data-reveal style={revealDelayStyle(index * 70)} key={item}>
+                    {item}
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -2104,57 +2406,52 @@ function CreatorIpSection() {
   );
 }
 
-function CreatorIpPanel({
-  layer,
-}: {
-  layer: (typeof creatorIpLayers)[number];
-}) {
-  return (
-    <div className="rounded-xl border border-white/12 bg-[#202052] p-4">
-      <div className="mb-4 text-sm font-semibold text-[#ddd6fe]">
-        {layer.label}
-      </div>
-      <div className="space-y-2">
-        {layer.items.map((item) => (
-          <div
-            className="rounded-lg bg-white/10 px-3 py-2 text-xs font-medium text-white/86"
-            key={item}
-          >
-            {item}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 function ProofLayerSection() {
-  const records = [
-    "Harness version record",
-    "Execution receipt",
-    "Access record",
-    "Usage + payout receipt",
+  const roadmap = [
+    {
+      title: "Now",
+      copy: "Platform gateway, protected artifacts, and execution receipts.",
+    },
+    {
+      title: "Next",
+      copy: "Seal, TEE, and ICP directions for stronger privacy and access control.",
+    },
+    {
+      title: "Later",
+      copy: "A platform-free Agent hiring protocol with lighter platform dependence.",
+    },
   ];
 
   return (
-    <section className="border-t border-border bg-white px-4 py-14 md:px-8 md:py-20">
-      <div className="mx-auto grid max-w-7xl gap-8 lg:grid-cols-[0.85fr_1.15fr] lg:items-center">
-        <div>
-          <div className="text-sm font-semibold text-[#533afd]">Verifiable work</div>
-          <h2 className="mt-3 balanced-text text-3xl font-normal leading-tight text-[#0d253d] md:text-5xl">Proof, not just storage.</h2>
-          <p className="mt-5 max-w-xl text-sm leading-6 text-muted-foreground md:text-base">Walrus stores protected Agent artifacts and execution records, while Sui tracks access, usage, and payout receipts.</p>
+    <section className="landing-wave landing-wave-white bg-gradient-to-b from-[#f7fbff] via-[#f8fbff] to-[#eef5ff] px-4 py-16 shadow-[inset_0_1px_0_rgba(255,255,255,0.9)] md:px-8 md:py-24">
+      <div className="relative z-10 mx-auto grid page-shell gap-8 lg:grid-cols-[0.82fr_1.18fr] lg:items-start">
+        <div className="reveal" data-reveal>
+          <div className="eyebrow-label">Verifiable work</div>
+          <h2 className="section-title mt-3 max-w-[680px] text-[#191f28]">Verification roadmap.</h2>
+          <p className="body-copy mt-5 max-w-[680px]">Walrus stores protected Agent artifacts and execution records. Sui tracks access, usage, and payout receipts.</p>
         </div>
-        <div className="rounded-2xl border border-[#d9d5ff] bg-[#f8f5ff] p-5 app-shadow">
-          <div className="grid gap-3 sm:grid-cols-2">
-            {records.map((record) => (
-              <div className="flex items-center gap-3 rounded-xl border border-white bg-white p-4 text-sm font-medium text-[#273951]" key={record}>
-                <CheckCircle2 className="size-4 shrink-0 text-[#533afd]" /> {record}
+        <div className="reveal" data-reveal style={revealDelayStyle(140)}>
+          <div className="relative grid gap-5">
+            {roadmap.map((item, index) => (
+              <div className="reveal stagger-item relative pl-8" data-reveal style={revealDelayStyle(index * 120)} key={item.title}>
+                <span className="absolute left-0 top-2 flex size-3 items-center justify-center rounded-full bg-[#c7c1e4] shadow-[0_0_0_6px_rgba(199,193,228,0.14)]" />
+                {index < roadmap.length - 1 ? (
+                  <span className="absolute left-[5px] top-5 h-[calc(100%+1.25rem)] w-px bg-gradient-to-b from-[#d8d4e2] via-[#c7c1e4] to-transparent" />
+                ) : null}
+                <div className="docs-card-title text-[#191f28]">{item.title}</div>
+                <p className="mt-2 docs-card-copy max-w-[620px]">{item.copy}</p>
               </div>
             ))}
           </div>
-          <div className="mt-4 rounded-xl border border-[#533afd]/20 bg-[#ede9ff] px-4 py-3 text-sm font-semibold text-[#2e2b8c]">
-            Proves which Agent version produced each result.
-          </div>
+          <details className="group mt-6 rounded-3xl border border-[#dbeafe] bg-white/85 p-5 shadow-[rgba(30,64,175,0.06)_0_10px_24px]">
+            <summary className="flex cursor-pointer list-none items-center justify-between gap-4 docs-card-title text-[#191f28] [&::-webkit-details-marker]:hidden">
+              Why this matters
+              <span className="text-lg text-primary transition group-open:rotate-45">+</span>
+            </summary>
+            <p className="mt-3 docs-card-copy">
+              Seal, TEE, ICP, and similar systems are part of the long-term direction for stronger privacy and access control.
+            </p>
+          </details>
         </div>
       </div>
     </section>
@@ -2162,27 +2459,59 @@ function ProofLayerSection() {
 }
 
 function LandingFooter() {
+  const scrollToTop = () => {
+    window.scrollTo({
+      top: 0,
+      behavior: prefersReducedMotion() ? "auto" : "smooth",
+    });
+  };
+
   return (
-    <footer className="border-t border-white/10 bg-[#100d24] px-4 py-8 text-white md:px-8">
-      <div className="mx-auto flex max-w-7xl flex-col gap-4 md:flex-row md:items-center md:justify-between">
-        <div>
-          <div className="flex items-center gap-2 text-sm font-medium">
-            <Bot className="size-4 text-[#a78bfa]" />
+    <footer className="landing-footer-wave bg-gradient-to-b from-[#061b3d] via-[#06192f] to-[#03101f] px-4 py-14 text-white md:px-8 md:py-16">
+      <div className="mx-auto grid page-shell gap-10 lg:grid-cols-[1.2fr_0.8fr_0.8fr]">
+        <div className="max-w-xl">
+          <button
+            aria-label="맨 위로 이동"
+            className="flex items-center gap-2 text-sm font-medium transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(147,197,253,0.4)] focus-visible:ring-offset-2 focus-visible:ring-offset-[#06192f]"
+            onClick={scrollToTop}
+            type="button"
+          >
+            <Bot className="size-4 text-[#93c5fd]" />
             HireMe
-          </div>
-          <p className="mt-2 max-w-xl text-xs font-medium leading-5 text-white/70">
+          </button>
+          <p className="mt-3 text-sm leading-7 text-white/72">
             Build protected Agent Harnesses, publish them as paid tools, and let
             Codex users hire them without copying your private IP.
           </p>
         </div>
-        <div className="flex flex-wrap gap-3 text-xs font-medium text-white/76">
-          <Link className="hover:text-white" to="/agents">
-            Explore agents
-          </Link>
-          <a className="hover:text-white" href="#make-agent">
-            Make an Agent
-          </a>
-          <span className="text-white/40">Sui + Walrus MVP</span>
+        <div>
+          <div className="text-xs font-semibold uppercase tracking-[0.08em] text-white/50">
+            Navigate
+          </div>
+          <div className="mt-4 grid gap-3 text-sm text-white/78">
+            <Link className="hover:text-white" to="/agents">
+              Explore agents
+            </Link>
+            <a className="hover:text-white" href="#make-agent">
+              Make an Agent
+            </a>
+            <Link className="hover:text-white" to="/agents/create">
+              Publish an Agent
+            </Link>
+          </div>
+        </div>
+        <div>
+          <div className="text-xs font-semibold uppercase tracking-[0.08em] text-white/50">
+            Platform
+          </div>
+          <div className="mt-4 grid gap-3 text-sm text-white/78">
+            <span>Sui + Walrus MVP</span>
+            <span>Protected Harness execution</span>
+            <span>Creator receipts and payouts</span>
+          </div>
+          <div className="mt-8 text-xs leading-5 text-white/42">
+            © HireMe. Protected AI work marketplace.
+          </div>
         </div>
       </div>
     </footer>
@@ -2191,9 +2520,9 @@ function LandingFooter() {
 
 function DocsPage() {
   return (
-    <main className="min-h-screen bg-[#f8fafc]">
-      <div className="mx-auto grid max-w-7xl gap-8 px-4 py-8 md:px-8 lg:grid-cols-[260px_1fr]">
-        <aside className="h-fit rounded-xl border border-border bg-white p-4 lg:sticky lg:top-24 lg:max-h-[calc(100vh-7rem)] lg:overflow-auto">
+    <main className="min-h-screen bg-gradient-to-b from-[#f9fafb] via-[#f6faff] to-[#e8f3ff]">
+      <div className="mx-auto grid page-shell gap-8 px-4 py-8 md:px-8 lg:grid-cols-[260px_1fr]">
+        <aside className="surface-card h-fit p-4 lg:sticky lg:top-24 lg:max-h-[calc(100vh-7rem)] lg:overflow-auto">
           <div className="mb-3 text-xs font-semibold uppercase text-muted-foreground">
             Contents
           </div>
@@ -2224,301 +2553,486 @@ function DocsPage() {
           </nav>
         </aside>
 
-        <article className="rounded-xl border border-border bg-white px-5 py-6 app-shadow md:px-8 md:py-8">
+        <article className="surface-card-soft px-5 py-6 md:px-8 md:py-8">
+          <div className="mb-8 rounded-[32px] border border-[#dbeafe] bg-gradient-to-br from-[#f6faff] via-white to-[#eef5ff] p-5 md:p-7">
+            <div className="max-w-3xl">
+              <div className="eyebrow-label">
+                HireMe docs
+              </div>
+              <h1 className="docs-page-hero-title mt-3 max-w-[680px] text-[#191f28]">
+                Protected Agents, not prompts.
+              </h1>
+              <p className="docs-summary-copy mt-4 max-w-[680px]">
+                Creators keep the Harness. Buyers hire the capability. HireMe runs the Agent between them.
+              </p>
+            </div>
+            <div className="mt-5 grid gap-4 lg:grid-cols-[1.1fr_0.9fr] lg:items-stretch">
+              <div className="surface-card p-5 md:p-6">
+                <div className="docs-card-title text-[#191f28]">
+                  How the product is framed
+                </div>
+                <div className="mt-4 grid gap-4">
+                  {[
+                    {
+                      title: "Model = engine",
+                      copy: "The model reasons, but the Agent is the product.",
+                    },
+                    {
+                      title: "Harness = working method",
+                      copy: "Private prompts, skills, examples, and rules make it repeatable.",
+                    },
+                    {
+                      title: "Gateway = secure runtime",
+                      copy: "HireMe runs the Agent through a protected execution layer.",
+                    },
+                  ].map((item, index) => (
+                    <div
+                      className={`grid gap-1.5 ${index > 0 ? "border-t border-[#dbeafe] pt-4" : ""}`}
+                      key={item.title}
+                    >
+                      <div className="docs-card-title text-[#191f28]">
+                        {item.title}
+                      </div>
+                      <p className="docs-card-copy">
+                        {item.copy}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="grid gap-4">
+                <div className="surface-card p-5 md:p-6">
+                  <div className="docs-card-title text-[#191f28]">
+                    What buyers see
+                  </div>
+                  <ul className="mt-3 grid gap-2 docs-card-copy">
+                    <li>Agent name</li>
+                    <li>Public skills</li>
+                    <li>Price</li>
+                    <li>Sample output</li>
+                  </ul>
+                </div>
+                <div className="surface-card p-5 md:p-6">
+                  <div className="docs-card-title text-[#191f28]">
+                    What stays private
+                  </div>
+                  <ul className="mt-3 grid gap-2 docs-card-copy">
+                    <li>AGENTS.md</li>
+                    <li>Private prompts</li>
+                    <li>Rubrics</li>
+                    <li>Examples</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <DocsArticleSection
             id="meet"
             kicker="01 / Meet HireMe"
-            title="Hire Agents that already know the job."
+            title="Hire Agents that already know the job"
           >
-            <p>
-              HireMe lets you hire AI Agents that are already prepared for a
-              job. You do not have to teach every rule from scratch. A creator
-              has already built the Agent's private working folder with
-              instructions, examples, skills, and checks.
-            </p>
-            <p>
-              It should feel closer to hiring a specialist than using a blank
-              chatbot. It can cost more, but once the Agent fits your work, it
-              can save a lot of setup time.
-            </p>
-            <p>
-              The important idea is simple: the creator owns the know-how, and
-              the buyer hires the result of that know-how. A buyer does not need
-              to copy the creator's prompts, skills, examples, or review rules.
-              They just ask the Agent to do the work from Codex.
-            </p>
-            <p>
-              In HireMe, an Agent is not the base model itself. The model is the
-              engine. The private Harness is the working method. The gateway is
-              the runtime. Memory and tools define what the Agent can remember
-              and do. Together, those pieces become a repeatable worker for a
-              specific job.
-            </p>
-            <div className="rounded-xl border border-[#533afd]/20 bg-[#f8f5ff] p-4 font-mono text-xs leading-6 text-[#1c1e54]">
-              HireMe lets you hire protected Agents, not prompts.
-              <br />
-              Each Agent is powered by private know-how, tools, memory rules,
-              and an execution contract.
-              <br />
-              The creator owns the Harness.
-              <br />
-              The buyer hires the capability.
-            </div>
-            <div className="grid gap-4 md:grid-cols-2">
-              <DocsMiniBlock
-                id="meet-creators"
-                title="For creators"
-                copy="Turn private prompts, skills, examples, review rules, and tool habits into a paid Agent. The buyer can hire the Agent, but does not get the original folder."
-              />
-              <DocsMiniBlock
-                id="meet-buyers"
-                title="For buyers"
-                copy="Use a ready Agent from Codex without building it from scratch. You pay more than a raw model call, but you skip the repeated training and setup work."
-              />
-              <DocsMiniBlock
-                id="meet-agent"
-                title="What counts as an Agent?"
-                copy="A HireMe Agent is a model-agnostic worker packaged with private instructions, skills, examples, tool habits, memory rules, and a public execution contract."
-              />
-              <DocsMiniBlock
-                id="meet-not-prompts"
-                title="Not a prompt file"
-                copy="A prompt marketplace sells text to copy. HireMe sells protected execution: the Harness stays hidden, the gateway runs it, and the buyer receives the result."
-              />
+            <div className="grid gap-5 lg:grid-cols-[1.05fr_0.95fr]">
+              <div className="surface-card p-5 md:p-6">
+                <div className="docs-card-title text-[#191f28]">
+                  For creators and buyers
+                </div>
+                <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                  <div className="rounded-2xl border border-[#dbeafe] bg-white p-4">
+                    <div className="docs-card-title text-[#191f28]">
+                      For creators
+                    </div>
+                    <p className="mt-2 docs-card-copy">
+                      Turn private know-how into a paid Agent.
+                    </p>
+                  </div>
+                  <div className="rounded-2xl border border-[#dbeafe] bg-[#fbfdff] p-4">
+                    <div className="docs-card-title text-[#191f28]">
+                      For buyers
+                    </div>
+                    <p className="mt-2 docs-card-copy">
+                      Use a ready Agent without rebuilding workflows.
+                    </p>
+                  </div>
+                </div>
+              </div>
+              <div className="grid gap-4">
+                <DocsMiniBlock
+                  id="meet-agent"
+                  title="What counts as an Agent?"
+                  copy="A model plus a private Harness, tool habits, and memory rules."
+                />
+                <DocsMiniBlock
+                  id="meet-not-prompts"
+                  title="Not a prompt file"
+                  copy="HireMe sells protected execution, not copyable text."
+                />
+              </div>
             </div>
           </DocsArticleSection>
 
           <DocsArticleSection
             id="why"
             kicker="02 / Why It Matters"
-            title="Your work and the creator's playbook should stay separate."
+            title="Your work and the creator's playbook stay separate"
           >
-            <p>
-              HireMe creates a safer way to use another person's Agent. The
-              buyer sends work to HireMe, not directly to the creator. The
-              creator's private Agent files stay protected and are not sent to
-              the buyer.
-            </p>
-            <p>
-              For example, a buyer can ask a code-review Agent to inspect a
-              private migration. The creator does not need to see that
-              migration. At the same time, the buyer does not receive the
-              creator's hidden checklist, examples, or review playbook.
-            </p>
-            <div className="grid gap-4 md:grid-cols-2">
-              <DocsMiniBlock
-                id="why-buyers"
-                title="Buyer benefit"
-                copy="Spend less time explaining the same rules. Try a prepared Agent, use it from Codex, and keep your task input away from the creator by default."
-              />
-              <DocsMiniBlock
-                id="why-creators"
-                title="Creator benefit"
-                copy="Earn from a useful Agent while keeping AGENTS.md, skills, prompts, examples, rubrics, and work rules behind HireMe."
-              />
-            </div>
-            <div className="rounded-xl border border-border bg-secondary p-4 font-mono text-xs leading-6 text-[#273951]">
-              Buyer input -&gt; HireMe runner -&gt; result
-              <br />
-              Creator files -&gt; encrypted storage -&gt; gateway-only run
+            <div className="grid gap-5 lg:grid-cols-[1.08fr_0.92fr]">
+              <div className="surface-card p-5 md:p-6">
+                <div className="docs-card-title text-[#191f28]">
+                  Buyers
+                </div>
+                <p className="mt-3 docs-summary-copy max-w-[34rem]">
+                  Use prepared Agents without exposing private work.
+                </p>
+                <details className="group mt-4 rounded-2xl border border-[#dbeafe] bg-white/90 p-4">
+                  <summary className="flex cursor-pointer list-none items-center justify-between gap-3 docs-card-title text-[#191f28] [&::-webkit-details-marker]:hidden">
+                    Why it works
+                    <span className="text-lg text-primary transition group-open:rotate-45">+</span>
+                  </summary>
+                  <ul className="mt-3 grid gap-2 docs-card-copy">
+                    <li>Send work to HireMe, not directly to the creator.</li>
+                    <li>Get results from a protected Agent run.</li>
+                  </ul>
+                </details>
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  <div className="rounded-2xl border border-[#dbeafe] bg-[#f7fbff] p-4">
+                    <div className="docs-card-title text-[#191f28]">
+                      Private by default
+                    </div>
+                    <p className="mt-2 docs-card-copy">
+                      Input stays inside the run.
+                    </p>
+                  </div>
+                  <div className="rounded-2xl border border-[#dbeafe] bg-white p-4">
+                    <div className="docs-card-title text-[#191f28]">
+                      Outcome first
+                    </div>
+                    <p className="mt-2 docs-card-copy">
+                      Buyers see result quality, not raw files.
+                    </p>
+                  </div>
+                </div>
+              </div>
+              <div className="grid gap-4">
+                <div className="surface-card p-5 md:p-6">
+                  <div className="docs-card-title text-[#191f28]">
+                    Creators
+                  </div>
+                  <p className="mt-3 docs-summary-copy max-w-[34rem]">
+                    Earn from Agents without revealing your private Harness.
+                  </p>
+                  <details className="group mt-4 rounded-2xl border border-[#dbeafe] bg-white/90 p-4">
+                    <summary className="flex cursor-pointer list-none items-center justify-between gap-3 docs-card-title text-[#191f28] [&::-webkit-details-marker]:hidden">
+                      What stays hidden
+                      <span className="text-lg text-primary transition group-open:rotate-45">+</span>
+                    </summary>
+                    <ul className="mt-3 grid gap-2 docs-card-copy">
+                      <li>AGENTS.md and Harness files stay hidden.</li>
+                      <li>Usage can still earn you money.</li>
+                    </ul>
+                  </details>
+                </div>
+                <div className="surface-card p-5 md:p-6">
+                  <div className="docs-card-title text-[#191f28]">
+                    Protected execution
+                  </div>
+                  <div className="mt-4 grid gap-3">
+                    {[
+                      "Buyer task",
+                      "Secure runner",
+                      "Private Harness",
+                      "Result",
+                    ].map((item, index) => (
+                      <div
+                        className="flex items-center gap-3 text-sm text-[#4e5968]"
+                        key={item}
+                      >
+                        <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-white text-xs font-semibold text-primary shadow-sm">
+                          {index + 1}
+                        </span>
+                        <span>{item}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
             </div>
           </DocsArticleSection>
 
           <DocsArticleSection
             id="features"
             kicker="03 / Features"
-            title="Four things make HireMe different."
+            title="What buyers can see and what stays private"
           >
-            <div className="grid gap-5 md:grid-cols-2">
-              <DocsMiniBlock
-                id="feature-harness"
-                title="Protected Agent Harness"
-                copy="The creator's private Agent folder is encrypted and stored with Walrus. The MVP gateway runs it for buyers, and Seal is the long-term direction for stronger access control. Buyers get results, not the raw Harness."
-              />
-              <DocsMiniBlock
-                id="feature-mcp"
-                title="MCP-Native Agent Hiring"
-                copy="Use hired Agents from Codex, Claude, and other MCP tools. HireMe is not a closed editor. It is the hiring and running layer for Agents you already want to call from your own AI workspace."
-              />
-              <DocsMiniBlock
-                id="feature-memory"
-                title="Memory Sharing With Team Agents"
-                copy="When several Agents work as a Team, HireMe uses memWal to share approved project memory. Research, design, code, and eval Agents can pass context forward while each creator's private files stay hidden."
-              />
-              <DocsMiniBlock
-                id="feature-payouts"
-                title="Creator Payouts"
-                copy="If your Agent helps people, it can earn money. Creators can see usage and earnings in My Page, then redeem available money to their wallet."
-              />
+            <div className="grid gap-5 lg:grid-cols-[0.9fr_1.1fr]">
+              <div className="surface-card p-5 md:p-6">
+                <div className="docs-card-title text-[#191f28]">
+                  Buyers can see
+                </div>
+                <ul className="mt-3 grid gap-2 docs-card-copy">
+                  <li>Skills</li>
+                  <li>Price</li>
+                  <li>Sample output</li>
+                  <li>Version notes</li>
+                </ul>
+              </div>
+              <div className="grid gap-4">
+                <div className="surface-card p-5 md:p-6">
+                  <div className="docs-card-title text-[#191f28]">
+                    Buyers can't see
+                  </div>
+                  <ul className="mt-3 grid gap-2 docs-card-copy">
+                    <li>AGENTS.md</li>
+                    <li>Prompts</li>
+                    <li>Rubrics</li>
+                    <li>Examples</li>
+                    <li>Hidden checks</li>
+                  </ul>
+                </div>
+                <div className="surface-card-soft p-5 md:p-6">
+                  <div className="docs-card-title text-[#191f28]">
+                    Walrus and Sui
+                  </div>
+                  <p className="mt-3 docs-card-copy">
+                    Walrus stores protected Agent artifacts and execution records.
+                    Sui tracks access, usage, and payout receipts.
+                  </p>
+                  <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                    {["Harness version record", "Execution receipt", "Access record", "Payout record"].map((item) => (
+                      <div className="rounded-2xl border border-[#dbeafe] bg-white p-4 docs-card-copy text-[#4e5968]" key={item}>
+                        {item}
+                      </div>
+                    ))}
+                  </div>
+                  <p className="mt-4 docs-card-copy">
+                    The proof trail shows that a specific Agent version produced a result.
+                  </p>
+                </div>
+              </div>
             </div>
           </DocsArticleSection>
 
           <DocsArticleSection
             id="hire"
             kicker="04 / How to Hire"
-            title="Try it first. Hire it when it fits."
+            title="Try it first. Hire it when it fits"
           >
-            <p>
-              Start from the marketplace. The Agent card shows what the Agent
-              does, how much it costs, and which public skill it offers. The
-              private files that make the Agent good stay hidden.
-            </p>
-            <DocsScreenshot
-              alt="HireMe marketplace showing Agent cards with Try and Hire buttons."
-              caption="Browse Agents, compare cards, press Try first, then Hire when the Agent is useful."
-              src="/docs/how-to-hire.png"
-            />
-            <ol className="grid gap-3">
-              {[
-                "Log in so HireMe can connect your web account, wallet, and MCP identity.",
-                "Find an Agent you like by checking its card, sample result, price, and public skill.",
-                "Press Try to test the Agent before paying for full access.",
-                "Open Codex and call the HireMe MCP server on a real task.",
-                "If the Agent is useful, add enough money to your connected wallet.",
-                "Press Hire and keep using the Agent through MCP.",
-              ].map((step, index) => (
-                <li className="flex gap-3 text-sm leading-6 text-[#273951]" key={step}>
-                  <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-[#eeeaff] text-xs font-semibold text-primary">
-                    {index + 1}
-                  </span>
-                  <span>{step}</span>
-                </li>
-              ))}
-            </ol>
-            <div className="rounded-xl border border-border bg-secondary p-4 font-mono text-xs leading-6 text-[#273951]">
-              Use my HireMe code-review Agent to review this migration diff.
+            <div className="grid gap-5 lg:grid-cols-[1fr_1fr]">
+              <div className="surface-card p-5 md:p-6">
+                <div className="docs-card-title text-[#191f28]">
+                  For buyers
+                </div>
+                <div className="mt-4 grid gap-3">
+                  {[
+                    ["Browse", "Compare cards, price, and skills."],
+                    ["Try", "Test the Agent before paying."],
+                    ["Hire", "Unlock full access when it fits."],
+                    ["Run from Codex / MCP", "Use it in your workflow."],
+                  ].map(([title, copy], index) => (
+                    <div className="flex gap-3" key={title}>
+                      <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-[#eef5ff] text-xs font-semibold text-primary">
+                        {index + 1}
+                      </span>
+                      <div>
+                        <div className="docs-card-title text-[#191f28]">
+                          {title}
+                        </div>
+                        <div className="docs-card-copy">
+                          {copy}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="grid gap-4">
+                <div className="surface-card p-5 md:p-6">
+                  <div className="docs-card-title text-[#191f28]">
+                    For creators
+                  </div>
+                  <div className="mt-4 grid gap-3">
+                    {[
+                      ["Build Harness", "Package the working method."],
+                      ["Upload protected folder", "Keep private files encrypted."],
+                      ["Set price", "Choose what it should earn."],
+                      ["Earn from usage", "Get paid as it is used."],
+                    ].map(([title, copy], index) => (
+                      <div className="flex gap-3" key={title}>
+                        <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-[#eef5ff] text-xs font-semibold text-primary">
+                          {index + 1}
+                        </span>
+                        <div>
+                          <div className="docs-card-title text-[#191f28]">
+                            {title}
+                          </div>
+                          <div className="docs-card-copy">
+                            {copy}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div className="rounded-[24px] border border-[#dbeafe] bg-[#f7fbff] p-5">
+                  <div className="docs-card-title text-[#191f28]">
+                    MCP hiring
+                  </div>
+                  <p className="mt-2 docs-card-copy">
+                    HireMe sits between the buyer and the creator’s private Harness.
+                  </p>
+                </div>
+              </div>
             </div>
-            <p>
-              This is the buyer promise: you can use a more prepared Agent
-              without asking the creator to manually join your project or read
-              your private input.
-            </p>
           </DocsArticleSection>
 
           <DocsArticleSection
             id="publish"
             kicker="05 / How to Publish"
-            title="Publish from the web or from Codex through MCP."
+            title="Publish from the web or from Codex through MCP"
           >
-            <p>
-              Both paths have the same goal: show what the Agent can do without
-              giving buyers the creator's private Agent files.
-            </p>
-            <DocsScreenshot
-              alt="HireMe Create Agent form for publishing a paid Agent."
-              caption="The web form collects the public card, example output, private Harness upload, model choice, and creator fee."
-              src="/docs/how-to-publish.png"
-            />
-            <div className="grid gap-5 md:grid-cols-2">
+            <div className="grid gap-5 lg:grid-cols-[1fr_1fr]">
               <DocsMiniBlock
                 id="publish-web"
                 title="Method 1: Web"
-                copy="Log in, write the public Agent card, add usage instructions, upload the protected Harness archive, choose the model, set your creator fee, review the final price, and submit."
+                copy="Write the card, upload the Harness, choose the model, set the fee, and publish."
               />
               <DocsMiniBlock
                 id="publish-mcp"
                 title="Method 2: MCP"
-                copy="Ask Codex to make a HireMe Agent template, edit AGENTS.md and skills locally, then publish the folder with hireme_create_agent_from_folder. If the artifact is already encrypted, register it with hireme_register_agent."
+                copy="Use Codex to build the folder, then publish through HireMe MCP."
               />
             </div>
-            <p>
-              Buyers see the Agent card, sample output, price, and public MCP
-              tools. They do not receive the original `AGENTS.md`, private
-              skills, prompts, examples, or work rules.
-            </p>
-            <p>
-              This is why the Agent can be shared safely. The creator is not
-              selling a prompt file. The creator is selling access to a prepared
-              worker that runs behind HireMe.
-            </p>
+            <div className="rounded-3xl border border-[#dbeafe] bg-white p-5">
+              <div className="docs-card-title text-[#191f28]">
+                Details
+              </div>
+              <ul className="mt-2 grid gap-2 docs-card-copy">
+                <li>Buyers see the Agent card, sample output, price, and public MCP tools.</li>
+                <li>They do not receive AGENTS.md, private skills, prompts, examples, or work rules.</li>
+              </ul>
+            </div>
           </DocsArticleSection>
 
           <DocsArticleSection
             id="paid"
             kicker="06 / How to Get Paid"
-            title="If your Agent works well, it should earn for you."
+            title="If your Agent works well, it should earn for you"
           >
-            <p>
-              Creators earn when buyers use or hire their Agents. The flow is
-              simple: check earnings in My Page, then redeem available money to
-              your wallet.
-            </p>
-            <DocsScreenshot
-              alt="HireMe My Agents page showing registered Agents, hired Agents, and activity."
-              caption="My Agents is where creators track published Agents, paid hires, usage activity, and payout state."
-              src="/docs/how-to-get-paid.png"
-            />
+            <div className="surface-card p-5 md:p-6">
+              <div className="docs-card-title text-[#191f28]">
+                What Walrus and Sui track
+              </div>
+              <ul className="mt-3 grid gap-2 docs-card-copy">
+                <li>Harness version record</li>
+                <li>Execution receipt</li>
+                <li>Access record</li>
+                <li>Payout record</li>
+                <li>Proof that a specific Agent version produced a result</li>
+              </ul>
+            </div>
             <div className="grid gap-4 md:grid-cols-3">
               <DocsMiniBlock
                 id="paid-earnings"
                 title="Check earnings"
-                copy="My Page shows your Agents, paid hires, usage, available money, and money that is still being settled. This is where creators can see whether an Agent is becoming valuable."
+                copy="My Page shows hires, usage, and available money."
               />
               <DocsMiniBlock
                 id="paid-redeem"
                 title="Redeem"
-                copy="When money is ready, press Redeem. HireMe checks the payment and usage records, then sends available money to your connected wallet."
+                copy="When money is ready, press Redeem to send it to your wallet."
               />
               <DocsMiniBlock
                 id="paid-records"
                 title="Payment records"
-                copy="Payouts are based on usage and payment records. The payout view does not need raw prompts, private outputs, or private Agent files."
+                copy="Payouts follow usage and payment records."
               />
             </div>
-            <p>
-              The product point is direct: if someone builds a strong Agent,
-              that work can become a paid asset. HireMe gives the creator a way
-              to keep improving the Agent while still earning from each hire or
-              paid run.
-            </p>
           </DocsArticleSection>
 
           <DocsArticleSection
             id="roadmap"
             kicker="07 / Trust & Roadmap"
-            title="The goal is a platform-free Agent hiring protocol."
+            title="The goal is a platform-free Agent hiring protocol"
           >
-            <p>
-              Today, HireMe still uses a platform gateway. The gateway checks
-              access, runs protected Agents, and keeps creator files away from
-              buyers. This is the current step, not the final goal.
-            </p>
-            <p>
-              The final goal is bigger than a marketplace. HireMe is moving
-              toward a platform-free Agent hiring protocol where Agent access,
-              private execution, memory, and payouts can work without trusting
-              one central platform forever.
-            </p>
-            <div className="grid gap-4 md:grid-cols-2">
-              <DocsMiniBlock
-                id="roadmap-goal"
-                title="Final goal"
-                copy="A platform-free, decentralized Agent hiring protocol where access, running Agents, memory, and payouts depend less on HireMe over time."
-              />
-              <DocsMiniBlock
-                id="roadmap-privacy"
-                title="Long-term privacy"
-                copy="TEE, ICP blockchain, Seal, and similar systems can move HireMe toward a future where even the platform cannot read plain user or creator data."
-              />
-              <DocsMiniBlock
-                id="roadmap-quality"
-                title="Agent quality signals"
-                copy="HireMe will add performance indicators for Agents, including task success, latency, repeat usage, buyer feedback, schema reliability, and cost per useful result."
-              />
-            </div>
-            <div className="grid gap-4 md:grid-cols-2">
-              <DocsMiniBlock
-                id="roadmap-2026-06-17"
-                title="Week of 2026-06-17"
-                copy="Docs, Features section, Try/Hire flow, publish flows, creator payout flow, token pricing, Sui payment direction, and platform encryption defaults."
-              />
-              <DocsMiniBlock
-                id="roadmap-2026-06-10"
-                title="Week of 2026-06-10"
-                copy="MVP base: database shape, protected Agent files, Agent Teams, OAuth MCP sessions, Try/Hire access, Walrus records, memWal records, and gateway runner."
-              />
+            <div className="grid gap-4 lg:grid-cols-[1fr_1fr_1fr]">
+              <div className="surface-card p-5 md:p-6">
+                <div className="docs-card-title text-[#191f28]">
+                  Final goal
+                </div>
+                <p className="mt-2 docs-card-copy">
+                  A platform-free hiring protocol where HireMe matters less over time.
+                </p>
+              </div>
+              <div className="surface-card p-5 md:p-6">
+                <div className="docs-card-title text-[#191f28]">
+                  Long-term privacy
+                </div>
+                <p className="mt-2 docs-card-copy">
+                  TEE, ICP, Seal, and similar systems can reduce what the platform can read.
+                </p>
+              </div>
+              <div className="surface-card p-5 md:p-6">
+                <div className="docs-card-title text-[#191f28]">
+                  Agent quality signals
+                </div>
+                <p className="mt-2 docs-card-copy">
+                  Task success, latency, repeats, feedback, reliability, and cost per result.
+                </p>
+              </div>
             </div>
           </DocsArticleSection>
+
+          <section className="scroll-mt-24 border-b border-border py-8 first:pt-0 last:border-b-0 last:pb-0" id="details">
+            <div className="eyebrow-label mb-4">
+              08 / Details
+            </div>
+            <h2 className="docs-section-title max-w-[680px] text-[#191f28]">
+              More detail lives here, not in the main path.
+            </h2>
+            <div className="mt-5 grid gap-4">
+              {[
+                {
+                  title: "What counts as an Agent?",
+                  copy: "A HireMe Agent is a model-agnostic worker packaged with private instructions, skills, examples, tool habits, memory rules, and a public execution contract.",
+                },
+                {
+                  title: "How does protected execution work?",
+                  copy: "Buyer input goes to the HireMe runner. The creator's Harness executes through a gateway-only run, and the buyer gets the result back without seeing the private files.",
+                },
+                {
+                  title: "How does MCP hiring work?",
+                  copy: "Buyers can call HireMe Agents from Codex and other MCP clients. HireMe is the hiring and execution layer, not a closed editor.",
+                },
+                {
+                  title: "How does team memory work with memWal?",
+                  copy: "Approved shared memory can move across Agents in a Team while each creator's private files stay hidden.",
+                },
+                {
+                  title: "How do payouts work?",
+                  copy: "Usage and payment records drive creator payouts. When funds are available, creators can redeem them to their wallet.",
+                },
+                {
+                  title: "What is the long-term protocol roadmap?",
+                  copy: "HireMe is moving toward a platform-free hiring protocol with stronger privacy, distributed access, and richer quality signals.",
+                },
+              ].map((item) => (
+                <details
+                  className="group rounded-3xl border border-[#dbeafe] bg-white p-5 shadow-[rgba(30,64,175,0.06)_0_10px_24px]"
+                  key={item.title}
+                >
+                  <summary className="flex cursor-pointer list-none items-center justify-between gap-4 docs-card-title text-[#191f28] [&::-webkit-details-marker]:hidden">
+                    <span>{item.title}</span>
+                    <span className="text-lg text-primary transition group-open:rotate-45">
+                      +
+                    </span>
+                  </summary>
+                  <p className="mt-3 docs-card-copy">
+                    {item.copy}
+                  </p>
+                </details>
+              ))}
+            </div>
+          </section>
         </article>
       </div>
     </main>
@@ -2538,13 +3052,13 @@ function DocsArticleSection({
 }) {
   return (
     <section className="scroll-mt-24 border-b border-border py-8 first:pt-0 last:border-b-0 last:pb-0" id={id}>
-      <div className="mb-4 text-xs font-semibold uppercase text-primary">
+      <div className="eyebrow-label mb-4">
         {kicker}
       </div>
-      <h2 className="balanced-text max-w-3xl text-2xl font-normal leading-tight text-[#0d253d] md:text-4xl">
+      <h2 className="docs-section-title max-w-[680px] text-[#191f28]">
         {title}
       </h2>
-      <div className="pretty-text mt-5 grid gap-4 text-sm leading-7 text-[#324a63] md:text-base">
+      <div className="docs-summary-copy mt-4 grid gap-3 md:gap-4">
         {children}
       </div>
     </section>
@@ -2562,33 +3076,9 @@ function DocsMiniBlock({
 }) {
   return (
     <div className="scroll-mt-24 border-l border-[#533afd]/30 pl-4" id={id}>
-      <h3 className="text-sm font-semibold text-[#1c1e54]">{title}</h3>
-      <p className="mt-2 text-sm leading-6 text-[#4e5d77]">{copy}</p>
+      <h3 className="docs-card-title text-[#191f28]">{title}</h3>
+      <p className="mt-1.5 docs-card-copy">{copy}</p>
     </div>
-  );
-}
-
-function DocsScreenshot({
-  alt,
-  caption,
-  src,
-}: {
-  alt: string;
-  caption: string;
-  src: string;
-}) {
-  return (
-    <figure className="overflow-hidden rounded-xl border border-border bg-white shadow-[rgba(15,23,42,0.05)_0_10px_30px]">
-      <img
-        alt={alt}
-        className="aspect-[1280/820] w-full bg-secondary object-cover object-top"
-        loading="lazy"
-        src={src}
-      />
-      <figcaption className="border-t border-border bg-secondary px-4 py-3 text-xs leading-5 text-[#52637a]">
-        {caption}
-      </figcaption>
-    </figure>
   );
 }
 
@@ -2861,7 +3351,7 @@ function ExploreAgentsPage({
 
           {catalogView === "teams" ? (
             teamResults.length ? (
-              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              <div className="grid items-start gap-4 md:grid-cols-2 xl:grid-cols-3">
                 {teamResults.map((result) => (
                   <TeamMarketCard
                     agents={result.agents}
@@ -2874,7 +3364,7 @@ function ExploreAgentsPage({
               <EmptyResult label="No teams match the current filters." />
             )
           ) : agentResults.length ? (
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            <div className="grid items-start gap-4 md:grid-cols-2 xl:grid-cols-3">
               {agentResults.map((agent) => (
                 <AgentMarketCard
                   access={accessFor(agent)}
@@ -3019,11 +3509,10 @@ function AgentDetailPage({
           <p className="mt-3 text-sm leading-6 text-muted-foreground">
             This Agent may be unavailable or hidden from the public marketplace.
           </p>
-          <Button asChild className="mt-5" type="button">
-            <Link to="/agents">
-              <Search /> Back to marketplace
-            </Link>
-          </Button>
+          <Link className="mt-5 inline-flex items-center gap-2 text-sm font-medium text-[#6b7684] transition hover:text-[#191f28]" to="/agents">
+            <ArrowLeft className="size-4" />
+            Marketplace
+          </Link>
         </section>
       </main>
     );
@@ -3065,9 +3554,10 @@ function AgentDetailPage({
     <main className="min-h-screen bg-[#f6f9fc]">
       <section className="border-b border-[#dedbea] bg-white px-4 py-8 md:px-8 md:py-10">
         <div className="mx-auto max-w-7xl">
-          <Button asChild size="sm" type="button" variant="ghost">
-            <Link to="/agents"><Search /> Back to marketplace</Link>
-          </Button>
+          <Link className="inline-flex items-center gap-2 text-sm font-medium text-[#6b7684] transition hover:text-[#191f28]" to="/agents">
+            <ArrowLeft className="size-4" />
+            Marketplace
+          </Link>
 
           <div className="mt-7 grid gap-7 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start">
             <div>
@@ -3080,7 +3570,6 @@ function AgentDetailPage({
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="rounded-full border border-[#d8d4e2] bg-[#f3f1f8] px-2.5 py-1 text-[11px] font-semibold uppercase text-[#494556]">{agent.category}</span>
-                    <span className="rounded-full border border-[#d8d4e2] bg-white px-2.5 py-1 text-[11px] font-semibold text-[#494556]">Verified Harness</span>
                   </div>
                   <h1 className="mt-3 balanced-text text-4xl font-light leading-tight text-[#171452] md:text-5xl">{agent.name}</h1>
                   <p className="mt-2 text-sm text-muted-foreground">{agent.handle} · by {agent.creator}</p>
@@ -4014,7 +4503,7 @@ function TeamMarketCard({
   const [isExpanded, setIsExpanded] = useState(false);
 
   return (
-    <Card className="transition hover:-translate-y-0.5 hover:border-[#533afd]/35 hover:shadow-[rgba(83,58,253,0.10)_0_8px_24px]">
+    <Card className="self-start transition">
       <CardHeader className="pb-3">
         <div className="flex items-start justify-between gap-4">
           <div className="flex min-w-0 items-center gap-3">
@@ -4060,13 +4549,10 @@ function TeamMarketCard({
           </div>
         </div>
 
-        <div className="mt-4 grid grid-cols-[1fr_auto] gap-2">
-          <Button className="w-full" onClick={() => setIsExpanded(true)} type="button" variant="secondary">
+        <div className="mt-4">
+          <Button aria-expanded={isExpanded} className="w-full" onClick={() => setIsExpanded((value) => !value)} type="button" variant="secondary">
             <BriefcaseBusiness /> View {agents.length || team.agentCount} Agents
-          </Button>
-          <Button aria-expanded={isExpanded} className="px-3" onClick={() => setIsExpanded((value) => !value)} type="button" variant="ghost">
             <ChevronDown className={`transition ${isExpanded ? "rotate-180" : ""}`} />
-            <span className="text-xs">Details</span>
           </Button>
         </div>
 
@@ -4114,13 +4600,14 @@ function AgentMarketCard({
   const isHired = access?.accessType === "hired";
   const isTrying = access?.accessType === "trial";
   const hasGatewayAccess = access?.source === "gateway";
+  const [isExpanded, setIsExpanded] = useState(false);
   const navigate = useNavigate();
   const detailPath = `/agents/${agent.id}`;
 
   return (
     <Card
       aria-label={`View ${agent.name} details`}
-      className="cursor-pointer transition duration-200 hover:-translate-y-0.5 hover:border-[#c9c2f5] hover:shadow-[rgba(28,30,84,0.08)_0_8px_22px] active:translate-y-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8f82e8]/35 focus-visible:ring-offset-2"
+      className="interactive-card clickable-card self-start cursor-pointer transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8f82e8]/35 focus-visible:ring-offset-2"
       onClick={(event) => {
         const target = event.target;
         if (
@@ -4178,12 +4665,11 @@ function AgentMarketCard({
           {agent.headline}
         </p>
 
-        <div className="mt-3 flex items-center justify-between gap-3 border-t border-border pt-3">
+        <div className="mt-3 border-t border-border pt-3">
           <div className="number-cell text-sm font-semibold text-[#0d253d]">{formatAgentPriceShort(agent.pricePer1MTokensSui ?? agent.pricePerCallUsd)}<span className="text-[11px] font-normal text-muted-foreground"> / 1M tokens</span></div>
-          <span className="rounded-full border border-[#d8d4e2] bg-[#f3f1f8] px-2 py-1 text-[10px] font-semibold text-[#494556]">Verified Harness</span>
         </div>
 
-        <div className="mt-3 grid grid-cols-2 gap-2">
+        <div className="mt-3 grid grid-cols-[1fr_1fr_auto] gap-2">
           <Button
             className="w-full"
             disabled={isBusy || (hasGatewayAccess && (isTrying || isHired))}
@@ -4209,7 +4695,45 @@ function AgentMarketCard({
           >
             <PackageOpen /> Hire
           </Button>
+          <Button
+            aria-expanded={isExpanded}
+            className="px-3"
+            onClick={(event) => {
+              event.stopPropagation();
+              setIsExpanded((value) => !value);
+            }}
+            size="sm"
+            type="button"
+            variant="ghost"
+          >
+            <ChevronDown className={`transition ${isExpanded ? "rotate-180" : ""}`} />
+            Details
+          </Button>
         </div>
+
+        {isExpanded ? (
+          <div
+            className="mt-3 rounded-xl border border-[#d8d4e2] bg-[#f8f7fb] p-4"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="text-sm font-semibold text-[#171452]">{agent.name}</div>
+            <p className="mt-2 text-sm leading-5 text-[#273951]">{agent.headline}</p>
+            <dl className="mt-4 grid gap-2 border-t border-[#d8d4e2] pt-4 text-xs">
+              <div className="flex items-center justify-between gap-3">
+                <dt className="text-muted-foreground">Rating / trust</dt>
+                <dd className="number-cell font-medium text-[#171452]">{agent.rating ? `${agent.rating.toFixed(1)} / 5` : "New"}</dd>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <dt className="text-muted-foreground">Completed runs</dt>
+                <dd className="number-cell font-medium text-[#171452]">{formatRuns(agent.calls)}</dd>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <dt className="text-muted-foreground">Price</dt>
+                <dd className="number-cell font-medium text-[#171452]">{formatAgentPrice(agent.pricePer1MTokensSui ?? agent.pricePerCallUsd)}</dd>
+              </div>
+            </dl>
+          </div>
+        ) : null}
 
         {access ? (
           <div className="mt-3 rounded-lg border border-border bg-white px-3 py-2 text-xs leading-5 text-muted-foreground">
@@ -4414,6 +4938,38 @@ async function uploadTypicalOutputMedia({
 
 function CreateAgentPage({ user }: { user: AuthUser | null }) {
   const navigate = useNavigate();
+  const stepRefs = useRef<(HTMLElement | null)[]>([]);
+  const stepNavRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const [activeStep, setActiveStep] = useState(0);
+  const [completedSteps, setCompletedSteps] = useState<boolean[]>([false, false, false, false, false]);
+  const [stepError, setStepError] = useState<string | null>(null);
+  const stepItems = [
+    {
+      label: "Agent Info",
+      id: "agent-info",
+      description: "Name, summary, and description.",
+    },
+    {
+      label: "Pricing",
+      id: "pricing",
+      description: "Model choice and creator fee.",
+    },
+    {
+      label: "Protection",
+      id: "protection",
+      description: "Upload the private Harness.",
+    },
+    {
+      label: "Review",
+      id: "review",
+      description: "Contract and sample output.",
+    },
+    {
+      label: "Publish",
+      id: "publish",
+      description: "Confirm and publish.",
+    },
+  ] as const;
   const [draft, setDraft] = useState({
     agentName: "Private Code Reviewer",
     headline: "Reviews pull requests and returns concrete risks, fixes, and verification steps.",
@@ -4468,6 +5024,95 @@ function CreateAgentPage({ user }: { user: AuthUser | null }) {
       }
     };
   }, [typicalOutputMediaPreviewUrl]);
+
+  useEffect(() => {
+    const activeButton = stepNavRefs.current[activeStep];
+    if (!activeButton) return;
+    if (window.matchMedia("(min-width: 768px)").matches) return;
+
+    activeButton.scrollIntoView({
+      behavior: prefersReducedMotion() ? "auto" : "smooth",
+      block: "nearest",
+      inline: "center",
+    });
+  }, [activeStep]);
+
+  useEffect(() => {
+    const activeSection = stepRefs.current[activeStep];
+    if (!activeSection) return;
+
+    activeSection.scrollIntoView({
+      behavior: prefersReducedMotion() ? "auto" : "smooth",
+      block: "start",
+    });
+  }, [activeStep]);
+
+  const maxAccessibleStep = activeStep;
+  const canAccessStep = (index: number) => index <= maxAccessibleStep;
+
+  const validateStep = (stepIndex: number) => {
+    switch (stepIndex) {
+      case 0: {
+        if (!draft.agentName.trim()) return "Add an agent name before continuing.";
+        if (!draft.headline.trim()) return "Add a one-line description before continuing.";
+        if (!draft.description.trim()) return "Add a description before continuing.";
+        return null;
+      }
+      case 1: {
+        if (!draft.modelId) return "Choose a model before continuing.";
+        if (Number.isNaN(creatorFeePerCallUsd) || creatorFeePerCallUsd < 0) {
+          return "Set a valid creator fee before continuing.";
+        }
+        return null;
+      }
+      case 2: {
+        if (!agentFiles[0]) return "Upload the private Harness before continuing.";
+        return null;
+      }
+      case 3: {
+        if (!draft.howToUse.trim()) return "Describe how buyers should use this Agent.";
+        if (!draft.typicalOutputTitle.trim()) return "Add a sample result title.";
+        if (!draft.typicalOutputSummary.trim()) return "Add a sample result summary.";
+        if (!draft.typicalOutputSample.trim()) return "Add a sample result.";
+        return null;
+      }
+      default:
+        return null;
+    }
+  };
+
+  const goToStep = (index: number) => {
+    if (!canAccessStep(index)) return;
+    setStepError(null);
+    setActiveStep(index);
+  };
+
+  const handleNext = async () => {
+    const error = validateStep(activeStep);
+    if (error) {
+      setStepError(error);
+      return;
+    }
+
+    setStepError(null);
+    setCompletedSteps((current) => {
+      const next = [...current];
+      next[activeStep] = true;
+      return next;
+    });
+
+    if (activeStep < stepItems.length - 1) {
+      setActiveStep((current) => Math.min(current + 1, stepItems.length - 1));
+      return;
+    }
+
+    await sealHarness();
+  };
+
+  const handleBack = () => {
+    setStepError(null);
+    setActiveStep((current) => Math.max(current - 1, 0));
+  };
 
   async function sealHarness() {
     setIsSealing(true);
@@ -4620,15 +5265,104 @@ function CreateAgentPage({ user }: { user: AuthUser | null }) {
     }
   }
 
+  const wizardReadiness = [
+    {
+      label: "Agent info",
+      ready:
+        Boolean(draft.agentName.trim()) &&
+        Boolean(draft.headline.trim()) &&
+        Boolean(draft.description.trim()),
+    },
+    {
+      label: "Pricing",
+      ready:
+        Boolean(draft.modelId) &&
+        !Number.isNaN(creatorFeePerCallUsd) &&
+        creatorFeePerCallUsd >= 0,
+    },
+    {
+      label: "Protection",
+      ready: Boolean(agentFiles[0]),
+    },
+    {
+      label: "Review",
+      ready:
+        Boolean(draft.howToUse.trim()) &&
+        Boolean(draft.typicalOutputTitle.trim()) &&
+        Boolean(draft.typicalOutputSummary.trim()) &&
+        Boolean(draft.typicalOutputSample.trim()),
+    },
+  ];
+  const publishReady = wizardReadiness.every((item) => item.ready);
+  const getStepState = (index: number) => {
+    if (activeStep === index) return "active" as const;
+    if (index < activeStep && completedSteps[index]) return "completed" as const;
+    return "locked" as const;
+  };
+  const renderStepSummary = (index: number) => {
+    switch (index) {
+      case 0:
+        return (
+          <div className="grid gap-1.5 text-sm text-[#4e5968]">
+            <div className="font-medium text-[#191f28]">{draft.agentName || "Untitled Agent"}</div>
+            <div className="overflow-hidden [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2]">
+              {draft.headline || "Add a short summary for buyers."}
+            </div>
+          </div>
+        );
+      case 1:
+        return (
+          <div className="grid gap-1.5 text-sm text-[#4e5968]">
+            <div className="font-medium text-[#191f28]">{selectedModel.label}</div>
+            <div>{formatAgentPrice(totalPricePerCallUsd)} per run · creator fee {formatAgentPrice(creatorFeePerCallUsd)}</div>
+          </div>
+        );
+      case 2:
+        return (
+          <div className="grid gap-1.5 text-sm text-[#4e5968]">
+            <div className="font-medium text-[#191f28]">
+              {agentFiles[0]?.name || "No Harness uploaded yet"}
+            </div>
+            <div>Private files stay protected inside the runner.</div>
+          </div>
+        );
+      case 3:
+        return (
+          <div className="grid gap-1.5 text-sm text-[#4e5968]">
+            <div className="font-medium text-[#191f28]">
+              {draft.typicalOutputTitle || "Sample output"}
+            </div>
+            <div className="overflow-hidden [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2]">
+              {draft.typicalOutputSummary || "Add a concise result summary for buyers."}
+            </div>
+          </div>
+        );
+      case 4:
+        return (
+          <div className="grid gap-1.5 text-sm text-[#4e5968]">
+            <div className="font-medium text-[#191f28]">
+              {publishReady ? "Ready to publish" : "Review required"}
+            </div>
+            <div>
+              {publishReady
+                ? "All required fields are complete."
+                : "Complete the required steps before publishing."}
+            </div>
+          </div>
+        );
+      default:
+        return null;
+    }
+  };
+
   return (
     <main className="min-h-screen bg-[#f6f9fc]">
       <section className="border-b border-border bg-white px-4 py-8 md:px-8">
         <div className="mx-auto max-w-7xl">
-          <Button asChild size="sm" type="button" variant="ghost">
-            <Link to="/agents">
-              <Search /> Back to agents
-            </Link>
-          </Button>
+          <Link className="inline-flex items-center gap-2 text-sm font-medium text-[#6b7684] transition hover:text-[#191f28]" to="/">
+            <ArrowLeft className="size-4" />
+            Home
+          </Link>
           <div className="mt-6 max-w-3xl">
             <div className="flex items-center gap-2 text-sm font-medium text-[#1c1e54]">
               <PackageOpen className="size-4 text-primary" />
@@ -4647,71 +5381,494 @@ function CreateAgentPage({ user }: { user: AuthUser | null }) {
 
       <section className="px-4 py-8 md:px-8">
         <div className="mx-auto max-w-5xl">
-          <div className="mb-6 grid grid-cols-2 gap-2 md:grid-cols-4">
-            {["Public Profile", "Private Harness", "Pricing", "Contract + Sample"].map((label, index) => (
-              <div className={`rounded-xl border px-3 py-3 text-xs font-semibold ${index === 1 ? "border-[#533afd] bg-[#ede9ff] text-[#2e2b8c]" : "border-border bg-white text-[#52637a]"}`} key={label}>
-                <span className="mr-2 text-primary">{index + 1}</span>{label}
-              </div>
-            ))}
+          <div className="stepStickyShell -mx-4 mb-6 px-4 md:mx-0 md:px-3">
+            <div className="stepNav flex gap-2.5 overflow-x-auto md:grid md:grid-cols-5 md:gap-3 md:overflow-visible">
+              {stepItems.map((step, index) => {
+                const isActive = activeStep === index;
+                const isCompleted = completedSteps[index] && !isActive;
+                const isLocked = index > maxAccessibleStep;
+                return (
+                  <button
+                    aria-current={isActive ? "step" : undefined}
+                    aria-disabled={isLocked ? true : undefined}
+                    className={`min-w-[9.2rem] flex-1 rounded-2xl border px-4 py-3.5 text-center text-xs font-semibold transition-colors duration-200 md:min-w-0 ${isActive ? "border-[#533afd]/35 bg-gradient-to-br from-[#efeaff] to-[#f8f5ff] text-[#2e2b8c] shadow-[0_8px_20px_rgba(83,58,253,0.08)]" : isCompleted ? "border-[#cfe0ff] bg-[#eef5ff] text-[#1f4da8]" : isLocked ? "cursor-not-allowed border-[#d9d5e2] bg-white/72 text-[#8b95a1]" : "border-[#d9d5e2] bg-white/94 text-[#5f6f85] hover:border-[#c8c2d8] hover:bg-[#fbfaff]"}`}
+                    disabled={isLocked}
+                    key={step.id}
+                    onClick={() => goToStep(index)}
+                    ref={(element) => { stepNavRefs.current[index] = element; }}
+                    type="button"
+                  >
+                    <span className="flex flex-col items-center gap-1.5">
+                      <span className={`inline-flex size-6 items-center justify-center rounded-full border text-[10px] font-semibold ${isActive ? "border-[#cfc6ff] bg-white/70 text-[#2e2b8c]" : isCompleted ? "border-[#cfe0ff] bg-white/80 text-[#1f4da8]" : isLocked ? "border-[#d9d5e2] bg-white text-[#9aa3b2]" : "border-[#d9d5e2] bg-[#f8f7fb] text-[#6b7280]"}`}>
+                        {isCompleted ? <CheckCircle2 className="size-3.5" /> : String(index + 1).padStart(2, "0")}
+                      </span>
+                      <span className="whitespace-nowrap text-[11px] leading-4 md:text-[12px]">{step.label}</span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
-          <div className="space-y-5">
-            <Card>
-              <CardHeader><CreateStepTitle number="1" title="Public Profile" /><CardDescription>What buyers see before they try the Agent.</CardDescription></CardHeader>
-              <CardContent className="grid gap-4 md:grid-cols-2">
-                <Field label="Agent name"><Input value={draft.agentName} onChange={updateDraft("agentName")} /></Field>
-                <Field label="One-line description"><Input value={draft.headline} onChange={updateDraft("headline")} /></Field>
-                <Field className="md:col-span-2" label="Description"><textarea className="min-h-24 w-full rounded-md border border-input bg-white px-3 py-2 text-sm text-foreground shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring" onChange={updateDraft("description")} value={draft.description} /></Field>
-              </CardContent>
-            </Card>
+          <div className="grid gap-6 pt-4 lg:grid-cols-[minmax(0,1fr)_20rem] lg:items-start lg:pt-6">
+            <div className="space-y-5">
+              {stepError ? (
+                <div className="rounded-2xl border border-[#d7d0f9] bg-[#f7f4ff] px-4 py-3 text-sm text-[#4b4a79]">
+                  {stepError}
+                </div>
+              ) : null}
+              {createError ? (
+                <div className="rounded-2xl border border-[#ead2df] bg-[#fff8fb] px-4 py-3 text-sm text-[#9f1239]">
+                  {createError}
+                </div>
+              ) : null}
 
-            <Card className="border-[#533afd]/45 bg-[#fbfaff] shadow-[rgba(83,58,253,0.10)_0_12px_36px]">
-              <CardHeader>
-                <div className="flex flex-wrap items-center justify-between gap-3"><CreateStepTitle number="2" title="Private Harness Upload" /><span className="inline-flex items-center gap-1.5 rounded-full bg-[#e7f8ee] px-3 py-1 text-xs font-semibold text-[#166534]"><LockKeyhole className="size-3" /> Encrypted on upload</span></div>
-                <CardDescription>The private playbook is never shown on the marketplace or sent to buyers.</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <label className="flex min-h-36 cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-[#8f7dff] bg-white p-6 text-center transition hover:bg-[#f8f5ff]">
-                  <UploadCloud className="size-7 text-primary" />
-                  <span className="mt-3 text-sm font-semibold text-[#1c1e54]">Upload private Harness archive</span>
-                  <span className="mt-1 text-xs text-muted-foreground">ZIP, TAR.GZ, or GZ · prompts, skills, examples, rubrics</span>
-                  <input accept=".zip,.gz,.tgz,.tar.gz,application/zip,application/gzip" className="sr-only" onChange={(event) => setAgentFiles(Array.from(event.target.files ?? []))} type="file" />
-                  {agentFiles[0] ? <span className="mt-3 rounded-full bg-[#edfff4] px-3 py-1 text-xs font-semibold text-[#166534]">{agentFiles[0].name}</span> : null}
-                </label>
-              </CardContent>
-            </Card>
+              <WizardStepCard
+                active={activeStep === 0}
+                body={
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <Field label="Agent name">
+                      <Input
+                        value={draft.agentName}
+                        onChange={updateDraft("agentName")}
+                      />
+                    </Field>
+                    <Field label="One-line description">
+                      <Input
+                        value={draft.headline}
+                        onChange={updateDraft("headline")}
+                      />
+                    </Field>
+                    <Field className="md:col-span-2" label="Description">
+                      <textarea
+                        className="min-h-24 w-full rounded-md border border-input bg-white px-3 py-2 text-sm text-foreground shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        onChange={updateDraft("description")}
+                        value={draft.description}
+                      />
+                    </Field>
+                  </div>
+                }
+                description="Name the Agent and explain what it does."
+                footer={
+                  <div className="flex flex-col gap-3 border-t border-[#ece8fb] pt-4 md:flex-row md:items-center md:justify-between">
+                    <Button disabled size="lg" type="button" variant="secondary">
+                      Back
+                    </Button>
+                    <Button
+                      className="min-w-[10rem]"
+                      onClick={handleNext}
+                      size="lg"
+                      type="button"
+                    >
+                      Next <ChevronRight />
+                    </Button>
+                  </div>
+                }
+                index={0}
+                onEdit={() => goToStep(0)}
+                state={getStepState(0)}
+                summary={renderStepSummary(0)}
+                wrapperRef={(node) => {
+                  stepRefs.current[0] = node;
+                }}
+                title="Agent Info"
+              />
 
-            <Card>
-              <CardHeader><CreateStepTitle number="3" title="Pricing" /><CardDescription>Set the model cost and your creator fee.</CardDescription></CardHeader>
-              <CardContent className="grid gap-4 md:grid-cols-[1fr_1fr_1.2fr] md:items-end">
-                <Field label="Model"><select className="h-10 w-full rounded-md border border-input bg-white px-3 py-2 text-sm shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring" onChange={updateDraft("modelId")} value={draft.modelId}>{creatorModelOptions.map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}</select></Field>
-                <Field label="Your fee / 1M tokens"><Input min="0" step="0.001" type="number" value={draft.creatorFeePerCallUsd} onChange={updateDraft("creatorFeePerCallUsd")} /></Field>
-                <div className="rounded-lg border border-[#533afd]/20 bg-secondary px-4 py-2"><div className="text-[10px] font-medium uppercase text-muted-foreground">Buyer price</div><div className="number-cell mt-0.5 text-xl font-semibold text-[#1c1e54]">{formatAgentPrice(totalPricePerCallUsd)}</div></div>
-              </CardContent>
-            </Card>
+              <WizardStepCard
+                active={activeStep === 1}
+                body={
+                  <div className="grid gap-4 md:grid-cols-[1fr_1fr_1.2fr] md:items-end">
+                    <Field label="Model">
+                      <select
+                        className="h-10 w-full rounded-md border border-input bg-white px-3 py-2 text-sm shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        onChange={updateDraft("modelId")}
+                        value={draft.modelId}
+                      >
+                        {creatorModelOptions.map((model) => (
+                          <option key={model.id} value={model.id}>
+                            {model.label}
+                          </option>
+                        ))}
+                      </select>
+                    </Field>
+                    <Field label="Your fee / 1M tokens">
+                      <Input
+                        min="0"
+                        step="0.001"
+                        type="number"
+                        value={draft.creatorFeePerCallUsd}
+                        onChange={updateDraft("creatorFeePerCallUsd")}
+                      />
+                    </Field>
+                    <div className="rounded-2xl border border-[#cfe0ff] bg-[#f7fbff] px-4 py-3">
+                      <div className="text-[10px] font-medium uppercase text-muted-foreground">
+                        Buyer price
+                      </div>
+                      <div className="number-cell mt-1 text-xl font-semibold text-[#1c1e54]">
+                        {formatAgentPrice(totalPricePerCallUsd)}
+                      </div>
+                    </div>
+                  </div>
+                }
+                description="Set the model cost and your creator fee."
+                footer={
+                  <div className="flex flex-col gap-3 border-t border-[#ece8fb] pt-4 md:flex-row md:items-center md:justify-between">
+                    <Button onClick={handleBack} size="lg" type="button" variant="secondary">
+                      <ArrowLeft />
+                      Back
+                    </Button>
+                    <Button
+                      className="min-w-[10rem]"
+                      onClick={handleNext}
+                      size="lg"
+                      type="button"
+                    >
+                      Next <ChevronRight />
+                    </Button>
+                  </div>
+                }
+                index={1}
+                onEdit={() => goToStep(1)}
+                state={getStepState(1)}
+                summary={renderStepSummary(1)}
+                wrapperRef={(node) => {
+                  stepRefs.current[1] = node;
+                }}
+                title="Pricing"
+              />
 
-            <Card>
-              <CardHeader><CreateStepTitle number="4" title="Execution Contract / Sample Output" /><CardDescription>Define the request and show the result—not the private method.</CardDescription></CardHeader>
-              <CardContent className="grid gap-4 md:grid-cols-2">
-                <Field className="md:col-span-2" label="How buyers should use it"><textarea className="min-h-24 w-full rounded-md border border-input bg-white px-3 py-2 text-sm shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring" onChange={updateDraft("howToUse")} value={draft.howToUse} /></Field>
-                <Field label="Sample result title"><Input value={draft.typicalOutputTitle} onChange={updateDraft("typicalOutputTitle")} /></Field>
-                <Field label="Sample result summary"><Input value={draft.typicalOutputSummary} onChange={updateDraft("typicalOutputSummary")} /></Field>
-                <Field className="md:col-span-2" label="Sample result"><textarea className="min-h-24 w-full rounded-md border border-input bg-white px-3 py-2 text-sm shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring" onChange={updateDraft("typicalOutputSample")} value={draft.typicalOutputSample} /></Field>
-                <Field className="md:col-span-2" label="Result image or video"><input accept=".jpg,.jpeg,video/*" className="block w-full rounded-md border border-dashed border-input bg-white px-3 py-3 text-sm text-muted-foreground file:mr-4 file:rounded-full file:border-0 file:bg-secondary file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-primary" onChange={handleTypicalOutputMediaChange} type="file" /></Field>
-                {currentTypicalOutputMediaUrl ? <div className="overflow-hidden rounded-xl border border-border bg-secondary md:col-span-2">{currentTypicalOutputMediaType === "video" ? <video className="aspect-video w-full bg-black object-contain" controls src={currentTypicalOutputMediaUrl} /> : <img alt="Result preview" className="aspect-video w-full object-cover" src={currentTypicalOutputMediaUrl} />}</div> : null}
-              </CardContent>
-            </Card>
+              <WizardStepCard
+                active={activeStep === 2}
+                body={
+                  <label className="flex min-h-36 cursor-pointer flex-col items-center justify-center rounded-[24px] border-2 border-dashed border-[#8f7dff] bg-white p-6 text-center transition hover:bg-[#f8f5ff]">
+                    <UploadCloud className="size-7 text-primary" />
+                    <span className="mt-3 text-sm font-semibold text-[#1c1e54]">
+                      Upload private Harness archive
+                    </span>
+                    <span className="mt-1 text-xs text-muted-foreground">
+                      ZIP, TAR.GZ, or GZ · prompts, skills, examples, rubrics
+                    </span>
+                    <input
+                      accept=".zip,.gz,.tgz,.tar.gz,application/zip,application/gzip"
+                      className="sr-only"
+                      onChange={(event) =>
+                        setAgentFiles(Array.from(event.target.files ?? []))
+                      }
+                      type="file"
+                    />
+                    {agentFiles[0] ? (
+                      <span className="mt-3 rounded-full bg-[#edfff4] px-3 py-1 text-xs font-semibold text-[#166534]">
+                        {agentFiles[0].name}
+                      </span>
+                    ) : null}
+                  </label>
+                }
+                description="Upload the protected Harness that stays private."
+                footer={
+                  <div className="flex flex-col gap-3 border-t border-[#ece8fb] pt-4 md:flex-row md:items-center md:justify-between">
+                    <Button onClick={handleBack} size="lg" type="button" variant="secondary">
+                      <ArrowLeft />
+                      Back
+                    </Button>
+                    <Button
+                      className="min-w-[10rem]"
+                      onClick={handleNext}
+                      size="lg"
+                      type="button"
+                    >
+                      Next <ChevronRight />
+                    </Button>
+                  </div>
+                }
+                index={2}
+                onEdit={() => goToStep(2)}
+                state={getStepState(2)}
+                summary={renderStepSummary(2)}
+                wrapperRef={(node) => {
+                  stepRefs.current[2] = node;
+                }}
+                title="Protection"
+              />
 
-            <div className="rounded-2xl border border-[#d9d5ff] bg-[#f0edff] p-5 md:flex md:items-center md:justify-between md:gap-6">
-              <div><div className="text-sm font-semibold text-[#171452]">Ready to protect and publish?</div><p className="mt-1 text-xs leading-5 text-[#4e5d77]">HireMe validates AGENTS.md, encrypts the Harness, and registers the execution contract.</p></div>
-              <Button className="mt-4 w-full md:mt-0 md:w-auto" disabled={isSealing} onClick={sealHarness} size="lg" type="button"><ShieldCheck /> {isSealing ? "Protecting..." : "Protect & Publish"}</Button>
+              <WizardStepCard
+                active={activeStep === 3}
+                body={
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <Field className="md:col-span-2" label="How buyers should use it">
+                      <textarea
+                        className="min-h-24 w-full rounded-md border border-input bg-white px-3 py-2 text-sm shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        onChange={updateDraft("howToUse")}
+                        value={draft.howToUse}
+                      />
+                    </Field>
+                    <Field label="Sample result title">
+                      <Input
+                        value={draft.typicalOutputTitle}
+                        onChange={updateDraft("typicalOutputTitle")}
+                      />
+                    </Field>
+                    <Field label="Sample result summary">
+                      <Input
+                        value={draft.typicalOutputSummary}
+                        onChange={updateDraft("typicalOutputSummary")}
+                      />
+                    </Field>
+                    <Field className="md:col-span-2" label="Sample result">
+                      <textarea
+                        className="min-h-24 w-full rounded-md border border-input bg-white px-3 py-2 text-sm shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        onChange={updateDraft("typicalOutputSample")}
+                        value={draft.typicalOutputSample}
+                      />
+                    </Field>
+                    <Field className="md:col-span-2" label="Result image or video">
+                      <input
+                        accept=".jpg,.jpeg,video/*"
+                        className="block w-full rounded-md border border-dashed border-input bg-white px-3 py-3 text-sm text-muted-foreground file:mr-4 file:rounded-full file:border-0 file:bg-secondary file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-primary"
+                        onChange={handleTypicalOutputMediaChange}
+                        type="file"
+                      />
+                    </Field>
+                    {currentTypicalOutputMediaUrl ? (
+                      <div className="overflow-hidden rounded-[24px] border border-border bg-secondary md:col-span-2">
+                        {currentTypicalOutputMediaType === "video" ? (
+                          <video
+                            className="aspect-video w-full bg-black object-contain"
+                            controls
+                            src={currentTypicalOutputMediaUrl}
+                          />
+                        ) : (
+                          <img
+                            alt="Result preview"
+                            className="aspect-video w-full object-cover"
+                            src={currentTypicalOutputMediaUrl}
+                          />
+                        )}
+                      </div>
+                    ) : null}
+                  </div>
+                }
+                description="Write the contract and show the sample output."
+                footer={
+                  <div className="flex flex-col gap-3 border-t border-[#ece8fb] pt-4 md:flex-row md:items-center md:justify-between">
+                    <Button onClick={handleBack} size="lg" type="button" variant="secondary">
+                      <ArrowLeft />
+                      Back
+                    </Button>
+                    <Button
+                      className="min-w-[10rem]"
+                      onClick={handleNext}
+                      size="lg"
+                      type="button"
+                    >
+                      Next <ChevronRight />
+                    </Button>
+                  </div>
+                }
+                index={3}
+                onEdit={() => goToStep(3)}
+                state={getStepState(3)}
+                summary={renderStepSummary(3)}
+                wrapperRef={(node) => {
+                  stepRefs.current[3] = node;
+                }}
+                title="Review"
+              />
+
+              <WizardStepCard
+                active={activeStep === 4}
+                body={
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div className="rounded-[24px] border border-[#dbeafe] bg-[#f7fbff] p-4">
+                      <div className="text-xs font-semibold uppercase tracking-[0.08em] text-[#6b7684]">
+                        Summary
+                      </div>
+                      <div className="mt-3 grid gap-3 text-sm text-[#4e5968]">
+                        <div className="flex items-start justify-between gap-4">
+                          <span>Agent name</span>
+                          <span className="font-medium text-[#191f28]">
+                            {draft.agentName || "Untitled Agent"}
+                          </span>
+                        </div>
+                        <div className="flex items-start justify-between gap-4">
+                          <span>Price</span>
+                          <span className="font-medium text-[#191f28]">
+                            {formatAgentPrice(totalPricePerCallUsd)}
+                          </span>
+                        </div>
+                        <div className="flex items-start justify-between gap-4">
+                          <span>Access type</span>
+                          <span className="font-medium text-[#191f28]">
+                            Paid · Codex users
+                          </span>
+                        </div>
+                        <div className="flex items-start justify-between gap-4">
+                          <span>Protection</span>
+                          <span className="font-medium text-[#191f28]">
+                            {agentFiles[0]
+                              ? "Protected Harness uploaded"
+                              : "Harness missing"}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="rounded-[24px] border border-[#dbeafe] bg-white p-4">
+                      <div className="text-xs font-semibold uppercase tracking-[0.08em] text-[#6b7684]">
+                        Publish readiness
+                      </div>
+                      <div className="mt-3 grid gap-2">
+                        {wizardReadiness.map((item) => (
+                          <div className="flex items-center gap-2 text-sm text-[#4e5968]" key={item.label}>
+                            <span
+                              className={`flex size-6 items-center justify-center rounded-full border ${
+                                item.ready
+                                  ? "border-[#cfe0ff] bg-[#eef5ff] text-[#1f4da8]"
+                                  : "border-[#d9d5e2] bg-white text-[#9aa3b2]"
+                              }`}
+                            >
+                              {item.ready ? (
+                                <CheckCircle2 className="size-3.5" />
+                              ) : (
+                                "—"
+                              )}
+                            </span>
+                            <span>{item.label}</span>
+                          </div>
+                        ))}
+                      </div>
+                      <p className="mt-4 text-sm leading-6 text-[#6b7684]">
+                        {publishReady
+                          ? "Everything needed to publish is in place."
+                          : "Some required fields are still incomplete."}
+                      </p>
+                    </div>
+                  </div>
+                }
+                description="Review the public summary before publishing."
+                footer={
+                  <div className="flex flex-col gap-3 border-t border-[#ece8fb] pt-4 md:flex-row md:items-center md:justify-between">
+                    <Button onClick={handleBack} size="lg" type="button" variant="secondary">
+                      <ArrowLeft />
+                      Back
+                    </Button>
+                    <Button
+                      className="min-w-[10rem]"
+                      disabled={isSealing}
+                      onClick={handleNext}
+                      size="lg"
+                      type="button"
+                    >
+                      <ShieldCheck />
+                      {isSealing ? "Publishing..." : "Publish Agent"}
+                    </Button>
+                  </div>
+                }
+                index={4}
+                onEdit={() => goToStep(4)}
+                state={getStepState(4)}
+                summary={renderStepSummary(4)}
+                wrapperRef={(node) => {
+                  stepRefs.current[4] = node;
+                }}
+                title="Publish"
+              />
             </div>
-            {createError ? <div className="rounded-lg border border-[#ea2261]/20 bg-[#fff8fb] px-4 py-3 text-sm text-[#9f1239]">{createError}</div> : null}
+
+            <aside className="space-y-4 lg:sticky lg:top-[9rem]">
+              <Card className="rounded-[28px] border border-[#dbeafe] bg-white/90 shadow-[0_24px_80px_rgba(15,52,96,0.08)]">
+                <CardHeader>
+                  <CardTitle className="text-[1.1rem] tracking-[-0.03em] text-[#191f28]">
+                    Live Preview
+                  </CardTitle>
+                  <CardDescription>Updates as you fill the form.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="rounded-[22px] border border-[#dbeafe] bg-[#f7fbff] p-4">
+                    <div className="text-xs font-semibold uppercase tracking-[0.08em] text-[#6b7684]">
+                      Agent name
+                    </div>
+                    <div className="mt-2 text-lg font-semibold tracking-[-0.03em] text-[#191f28]">
+                      {draft.agentName || "Untitled Agent"}
+                    </div>
+                    <p className="mt-2 text-sm leading-6 text-[#4e5968]">
+                      {draft.headline || "Add a short public summary."}
+                    </p>
+                  </div>
+                  <div className="grid gap-3 rounded-[22px] border border-[#dbeafe] bg-white p-4 text-sm text-[#4e5968]">
+                    <div className="flex items-center justify-between gap-4">
+                      <span>Price</span>
+                      <span className="font-semibold text-[#191f28]">
+                        {formatAgentPrice(totalPricePerCallUsd)}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-4">
+                      <span>Access type</span>
+                      <span className="font-semibold text-[#191f28]">Paid</span>
+                    </div>
+                    <div className="flex items-center justify-between gap-4">
+                      <span>Protection</span>
+                      <span className="font-semibold text-[#191f28]">
+                        {agentFiles[0] ? "Protected" : "Pending"}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-4">
+                      <span>Publish readiness</span>
+                      <span className="font-semibold text-[#191f28]">
+                        {publishReady ? "Ready" : "Incomplete"}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="rounded-[22px] border border-[#dbeafe] bg-[#f7fbff] p-4">
+                    <div className="text-xs font-semibold uppercase tracking-[0.08em] text-[#6b7684]">
+                      Step progress
+                    </div>
+                    <div className="mt-3 grid gap-2">
+                      {wizardReadiness.map((item) => (
+                        <div className="flex items-center gap-2 text-sm" key={item.label}>
+                          <span
+                            className={`flex size-5 items-center justify-center rounded-full ${
+                              item.ready
+                                ? "bg-[#eef5ff] text-[#1f4da8]"
+                                : "bg-white text-[#9aa3b2]"
+                            }`}
+                          >
+                            {item.ready ? (
+                              <CheckCircle2 className="size-3.5" />
+                            ) : (
+                              "•"
+                            )}
+                          </span>
+                          <span className="text-[#4e5968]">{item.label}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+              <Card className="rounded-[28px] border border-[#dbeafe] bg-white/90 shadow-[0_24px_80px_rgba(15,52,96,0.08)]">
+                <CardHeader>
+                  <CardTitle className="text-[1.1rem] tracking-[-0.03em] text-[#191f28]">
+                    Protection status
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2 text-sm leading-6 text-[#4e5968]">
+                  <div>
+                    {agentFiles[0]
+                      ? "Private Harness uploaded."
+                      : "Waiting for Harness upload."}
+                  </div>
+                  <div>
+                    {publishReady
+                      ? "Ready for publishing."
+                      : "Complete the current step to continue."}
+                  </div>
+                </CardContent>
+              </Card>
+            </aside>
           </div>
         </div>
 
         {sealedRecord ? (
-          <div className="mx-auto max-w-7xl">
+          <div className="mx-auto mt-6 max-w-7xl">
             <SealedRecordPreview record={sealedRecord} />
           </div>
         ) : null}
@@ -4720,12 +5877,139 @@ function CreateAgentPage({ user }: { user: AuthUser | null }) {
   );
 }
 
-function CreateStepTitle({ number, title }: { number: string; title: string }) {
+function WizardStepCard({
+  active,
+  body,
+  description,
+  footer,
+  index,
+  onEdit,
+  wrapperRef,
+  state,
+  summary,
+  title,
+}: {
+  active: boolean;
+  body: ReactNode;
+  description: string;
+  footer?: ReactNode;
+  index: number;
+  onEdit?: () => void;
+  wrapperRef?: (node: HTMLElement | null) => void;
+  state: "active" | "completed" | "locked";
+  summary: ReactNode;
+  title: string;
+}) {
+  const isActive = state === "active";
+  const isCompleted = state === "completed";
+  const isLocked = state === "locked";
+
+  const shellClassName = [
+    "overflow-hidden rounded-[28px] border transition-all duration-500 ease-out",
+    isActive
+      ? "border-[#533afd]/35 bg-white shadow-[0_28px_90px_rgba(49,130,246,0.12)]"
+      : isCompleted
+        ? "border-[#cfe0ff] bg-[#f7fbff] shadow-[0_18px_50px_rgba(49,130,246,0.06)]"
+        : "border-[#d9d5e2] bg-white/70 opacity-60",
+  ].join(" ");
+
   return (
-    <CardTitle className="flex items-center gap-3">
-      <span className="flex size-7 items-center justify-center rounded-full bg-[#533afd] text-xs font-semibold text-white">{number}</span>
-      {title}
-    </CardTitle>
+    <div className="scroll-mt-28 md:scroll-mt-32" ref={wrapperRef}>
+      <Card className={shellClassName}>
+      <div className="flex items-start justify-between gap-4 px-6 pt-5">
+        {isCompleted && onEdit ? (
+          <button
+            className="flex flex-1 items-start gap-3 text-left transition hover:opacity-90"
+            onClick={onEdit}
+            type="button"
+          >
+            <WizardStepBadge index={index} state={state} />
+            <div className="min-w-0">
+              <div className="text-[1.12rem] font-semibold tracking-[-0.03em] text-[#191f28] md:text-[1.15rem]">
+                {title}
+              </div>
+              <p className="mt-1 text-[0.92rem] leading-5 text-[#6b7684]">
+                {description}
+              </p>
+            </div>
+          </button>
+        ) : (
+          <div className="flex flex-1 items-start gap-3">
+            <WizardStepBadge index={index} state={state} />
+            <div className="min-w-0">
+              <div className="text-[1.12rem] font-semibold tracking-[-0.03em] text-[#191f28] md:text-[1.15rem]">
+                {title}
+              </div>
+              <p className="mt-1 text-[0.92rem] leading-5 text-[#6b7684]">
+                {description}
+              </p>
+            </div>
+          </div>
+        )}
+
+        <div
+          className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold ${
+            isActive
+              ? "border-[#cfc6ff] bg-[#f3efff] text-[#2e2b8c]"
+              : isCompleted
+                ? "border-[#cde1ff] bg-[#eef5ff] text-[#1f4da8]"
+                : "border-[#d9d5e2] bg-white text-[#8b95a1]"
+          }`}
+        >
+          {isActive ? "Current" : isCompleted ? "Done" : "Locked"}
+        </div>
+      </div>
+
+      <div className="px-6 pb-5 pt-4">
+        {isActive ? (
+          <div
+            className={`grid gap-4 transition-all duration-500 ease-out ${
+              active
+                ? "translate-y-0 opacity-100"
+                : "pointer-events-none -translate-y-3 opacity-0"
+            }`}
+          >
+            {body}
+            {footer}
+          </div>
+        ) : (
+          <div className="grid gap-3">{summary}</div>
+        )}
+
+        {isLocked ? (
+          <p className="mt-4 text-sm leading-6 text-[#8b95a1]">
+            Complete the previous step to unlock this section.
+          </p>
+        ) : null}
+      </div>
+      </Card>
+    </div>
+  );
+}
+
+function WizardStepBadge({
+  index,
+  state,
+}: {
+  index: number;
+  state: "active" | "completed" | "locked";
+}) {
+  const isActive = state === "active";
+  const isCompleted = state === "completed";
+  const isLocked = state === "locked";
+
+  return (
+    <span
+      className={`mt-0.5 flex size-10 shrink-0 items-center justify-center rounded-2xl border text-sm font-semibold transition-all ${
+        isActive
+          ? "border-[#533afd]/30 bg-gradient-to-br from-[#efeaff] to-[#f8f5ff] text-[#2e2b8c] shadow-[0_10px_24px_rgba(83,58,253,0.10)]"
+          : isCompleted
+            ? "border-[#cde1ff] bg-[#eef5ff] text-[#1f4da8]"
+            : "border-[#d8d0e6] bg-white text-[#8b95a1]"
+      }`}
+    >
+      {isCompleted ? <CheckCircle2 className="size-4" /> : isLocked ? <LockKeyhole className="size-4" /> : String(index + 1).padStart(2, "0")}
+    </span>
   );
 }
 

@@ -4,22 +4,22 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 
 const buttonVariants = cva(
-  "inline-flex h-10 shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-full px-4 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
+  "inline-flex shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-full px-4 py-2 text-sm font-bold transition duration-200 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(49,130,246,0.35)] focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
   {
     variants: {
       variant: {
         default:
-          "bg-primary text-primary-foreground hover:bg-[#4434d4] active:bg-[#2e2b8c]",
+          "h-14 border border-transparent bg-gradient-to-r from-[#3182f6] via-[#2a78ef] to-[#2272eb] px-7 text-white shadow-[0_18px_40px_rgba(49,130,246,0.22)] hover:-translate-y-0.5 hover:shadow-[0_24px_52px_rgba(49,130,246,0.28)] active:translate-y-0 active:shadow-[0_12px_24px_rgba(49,130,246,0.18)]",
         secondary:
-          "border border-primary bg-background text-primary hover:bg-secondary",
-        ghost: "text-foreground hover:bg-secondary",
-        dark: "bg-[#1c1e54] text-white hover:bg-[#0d253d]",
+          "h-14 border border-[rgba(49,130,246,0.22)] bg-[rgba(255,255,255,0.82)] px-7 text-[#2a75ee] shadow-[0_16px_32px_rgba(15,52,96,0.08)] backdrop-blur-md hover:-translate-y-0.5 hover:bg-[#f6faff] hover:shadow-[0_20px_40px_rgba(15,52,96,0.1)] active:translate-y-0",
+        ghost: "h-12 border border-transparent bg-transparent px-5 text-[#6b7684] hover:bg-[#f6faff] hover:text-[#4e5968]",
+        dark: "h-14 border border-white/12 bg-[#101d47] px-7 text-white shadow-[0_18px_40px_rgba(8,27,61,0.26)] hover:-translate-y-0.5 hover:bg-[#13285a] active:translate-y-0",
       },
       size: {
-        default: "h-10 px-4",
-        sm: "h-9 px-3 text-xs",
-        lg: "h-11 px-5 text-base",
-        icon: "size-10 px-0",
+        default: "h-14 px-7",
+        sm: "h-12 px-4 text-sm",
+        lg: "h-14 px-7 text-base",
+        icon: "size-12 px-0",
       },
     },
     defaultVariants: {
