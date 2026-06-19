@@ -2021,10 +2021,6 @@ function LandingPage() {
       ref={revealScopeRef}
       className="overflow-hidden bg-gradient-to-b from-[#f9fafb] via-[#f6faff] to-[#e8f3ff]"
     >
-      <div
-        aria-hidden="true"
-        className="pointer-events-none h-16 bg-gradient-to-b from-[#f9fafb] via-[#f7fbff] to-transparent md:h-20"
-      />
       <section className="hero-visual relative overflow-hidden px-4 py-12 md:px-8 md:py-16 xl:py-20">
         <div className="mx-auto flex min-h-[calc(100svh-12rem)] page-shell items-center">
           <div className="landing-hero-copy max-w-3xl py-8 md:py-12">
@@ -2147,7 +2143,7 @@ function ProtectedExecutionSection() {
   ];
 
   return (
-    <section className="landing-wave landing-wave-navy border-y border-white/8 bg-gradient-to-b from-[#26164f] via-[#1d1f5d] to-[#101437] px-4 py-16 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] md:px-8 md:py-24">
+    <section className="border-y border-white/8 bg-[#1d1f5d] px-4 py-16 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] md:px-8 md:py-24">
       <div className="relative z-10 mx-auto page-shell">
         <div className="reveal max-w-2xl" data-reveal>
           <div className="inline-flex rounded-full border border-white/14 bg-white/12 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-white/72">
@@ -2188,10 +2184,7 @@ function ProtectedExecutionSection() {
           ))}
         </div>
 
-        <div className="mt-5 grid gap-3 md:grid-cols-2">
-          <div className="reveal landing-glass-dark rounded-full border border-white/14 bg-white/7 px-4 py-3 text-sm leading-6 text-white/80" data-reveal>
-            Creator files stay hidden.
-          </div>
+        <div className="mt-5 grid gap-3">
           <div className="reveal stagger-item landing-glass-dark rounded-full border border-white/14 bg-white/7 px-4 py-3 text-sm leading-6 text-white/80" data-reveal style={revealDelayStyle(140)}>
             Buyer input stays separate by default.
           </div>
