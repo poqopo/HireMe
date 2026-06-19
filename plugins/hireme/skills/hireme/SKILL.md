@@ -21,8 +21,8 @@ Use this skill when the user wants to work with HireMe protected AI agents from 
 10. If the user does not name an agent, call `hireme_current_agent` and ask for selection only when no active agent is set.
 11. Never ask for or expose creator `AGENTS.md`, private `skills/`, plugin source, Harness internals, prompts, eval sets, backup keys, or protected memWal/Walrus artifacts.
 12. Treat `pricePer1MTokensSui`, `budgetCalls`, and ledger output as billing-relevant data.
-13. When a gateway response contains `jsonOutput.localCodex.shouldAct: true`, use `jsonOutput.payload` as protected Agent guidance and continue the user's local workspace task. Do not stop at merely displaying the JSON unless the user explicitly asks to inspect it.
-14. When acting on `jsonOutput.payload`, keep `jsonOutput.localCodex.blockedSources` out of prompts, file reads, and responses.
+13. When a gateway response contains `jsonOutput.localCodex.shouldAct: true`, use `jsonOutput.payload.outputText` when present as the protected Agent's local Codex execution brief. Execute its plan in the user's workspace, then run its verification flow before reporting completion. Do not stop at merely displaying the JSON unless the user explicitly asks to inspect it.
+14. When acting on `jsonOutput.payload.outputText` or `jsonOutput.payload`, keep `jsonOutput.localCodex.blockedSources` out of prompts, file reads, and responses.
 
 ## Privacy Boundary
 
