@@ -2065,6 +2065,138 @@ function EnokiCallbackPage() {
   );
 }
 
+function HeroAgentPreview() {
+  return (
+    <div
+      aria-hidden="true"
+      className="hero-demo-visual pointer-events-none relative mx-auto min-h-[410px] w-full max-w-[570px] select-none sm:min-h-[450px] lg:min-h-[510px]"
+    >
+      <div className="hero-demo-glow absolute inset-x-[10%] top-[16%] h-[64%] rounded-full bg-[rgba(124,92,255,0.15)] blur-[100px]" />
+
+      <div className="absolute inset-x-[3%] top-1 flex items-center justify-between gap-2 sm:inset-x-[5%]">
+        <div className="hero-demo-chip flex items-center gap-2 rounded-full border border-[rgba(124,92,255,0.09)] bg-white/[0.34] py-1.5 pl-1.5 pr-3 text-[10px] font-semibold text-[#756b8d] backdrop-blur-xl">
+          <span className="flex size-7 items-center justify-center rounded-full bg-[rgba(124,92,255,0.08)] text-[#8475a8]">
+            <UserRound className="size-3.5" />
+          </span>
+          You
+        </div>
+        <div className="hero-demo-chip hero-demo-chip-agent flex translate-y-2 items-center gap-2 rounded-full border border-[rgba(124,92,255,0.1)] bg-white/[0.38] py-1.5 pl-1.5 pr-3 text-[10px] font-semibold text-[#6e618b] backdrop-blur-xl">
+          <span className="flex size-7 items-center justify-center rounded-full bg-[rgba(124,92,255,0.1)] text-[#7560b5]">
+            <Bot className="size-3.5" />
+          </span>
+          Design Agent
+        </div>
+        <div className="hero-demo-chip flex translate-y-4 items-center gap-2 rounded-full border border-[rgba(124,92,255,0.09)] bg-white/[0.3] px-3 py-2 text-[10px] font-semibold text-[#756b8d] backdrop-blur-xl">
+          Result ready
+        </div>
+      </div>
+
+      <div className="absolute inset-x-[3%] top-[16%] h-[330px] sm:inset-x-0 sm:h-[350px] lg:top-[18%]">
+        <div
+          className="hero-demo-card hero-demo-card--task h-[300px] sm:h-[320px]"
+          style={{ animationDelay: "0s" }}
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[#7d7199]">Before: rough idea</span>
+            <span className="text-[10px] font-medium text-[#a097b4]">01</span>
+          </div>
+          <div className="mt-5 text-xl font-bold tracking-[-0.025em] text-[#2d2740] sm:text-2xl">
+            Make this landing page clearer.
+          </div>
+          <div className="mt-6 rounded-[20px] border border-[rgba(124,92,255,0.1)] bg-white/[0.36] p-4">
+            <div className="h-2 w-[82%] rounded-full bg-[rgba(99,70,245,0.12)]" />
+            <div className="mt-3 h-2 w-[64%] rounded-full bg-[rgba(99,70,245,0.08)]" />
+            <div className="mt-5 inline-flex rounded-full border border-[rgba(124,92,255,0.1)] px-3 py-1.5 text-[10px] font-semibold text-[#807594]">
+              Landing page review
+            </div>
+          </div>
+        </div>
+
+        <div
+          className="hero-demo-card hero-demo-card--working h-[300px] sm:h-[320px]"
+          style={{ animationDelay: "-9s" }}
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[#7d7199]">Agent running</span>
+            <span className="text-[10px] font-medium text-[#a097b4]">02</span>
+          </div>
+          <div className="mt-5 text-xl font-bold tracking-[-0.025em] text-[#2d2740] sm:text-2xl">
+            Design Agent is running
+          </div>
+          <div className="mt-4 inline-flex items-center gap-1.5 rounded-full border border-[rgba(124,92,255,0.11)] bg-[rgba(124,92,255,0.055)] px-3 py-1.5 text-[10px] font-semibold text-[#74668f]">
+            <ShieldCheck className="size-3.5" />
+            Protected Harness
+          </div>
+          <div className="mt-7">
+            <div className="flex items-center justify-between text-[10px] font-medium text-[#948aa7]">
+              <span>Applying standards and hidden checks</span>
+              <span>Working</span>
+            </div>
+            <div className="hero-demo-progress mt-3 h-1.5 overflow-hidden rounded-full bg-[rgba(124,92,255,0.08)]" />
+            <div className="mt-5 grid grid-cols-3 gap-3">
+              <div className="h-14 rounded-2xl border border-[rgba(124,92,255,0.08)] bg-white/[0.26]" />
+              <div className="h-14 rounded-2xl border border-[rgba(124,92,255,0.08)] bg-white/[0.22]" />
+              <div className="h-14 rounded-2xl border border-[rgba(124,92,255,0.08)] bg-white/[0.18]" />
+            </div>
+          </div>
+        </div>
+
+        <div
+          className="hero-demo-card hero-demo-card--result-primary h-[300px] sm:h-[320px]"
+          style={{ animationDelay: "-6s" }}
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[#6f6190]">After: polished landing</span>
+            <span className="rounded-full border border-[rgba(124,92,255,0.1)] bg-[rgba(124,92,255,0.05)] px-2.5 py-1 text-[9px] font-semibold text-[#756890]">Delivered</span>
+          </div>
+          <div className="mt-4 text-xl font-bold tracking-[-0.025em] text-[#2d2740] sm:text-2xl">
+            Hero copy improved
+          </div>
+          <div className="mt-5 rounded-[20px] border border-[rgba(124,92,255,0.09)] bg-white/[0.32] p-4">
+            <div className="h-3 w-[72%] rounded-full bg-[rgba(79,53,216,0.16)]" />
+            <div className="mt-3 h-2 w-[88%] rounded-full bg-[rgba(99,70,245,0.09)]" />
+            <div className="mt-2 h-2 w-[76%] rounded-full bg-[rgba(99,70,245,0.07)]" />
+            <div className="mt-5 flex gap-2">
+              <div className="h-7 w-20 rounded-full bg-[rgba(99,70,245,0.13)]" />
+              <div className="h-7 w-24 rounded-full border border-[rgba(124,92,255,0.1)] bg-white/[0.18]" />
+            </div>
+          </div>
+          <div className="mt-4 text-xs font-semibold text-[#756890]">CTA hierarchy fixed</div>
+        </div>
+
+        <div
+          className="hero-demo-card hero-demo-card--result-secondary h-[300px] sm:h-[320px]"
+          style={{ animationDelay: "-3s" }}
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[#6f6190]">Prompt ready</span>
+            <span className="text-[10px] font-medium text-[#a097b4]">04</span>
+          </div>
+          <div className="mt-4 text-xl font-bold tracking-[-0.025em] text-[#2d2740] sm:text-2xl">
+            Codex prompt generated
+          </div>
+          <div className="mt-5 rounded-[20px] border border-[rgba(124,92,255,0.09)] bg-[#2f2942]/[0.82] p-4">
+            <div className="h-2 w-[44%] rounded-full bg-[rgba(196,184,255,0.42)]" />
+            <div className="mt-3 h-2 w-[82%] rounded-full bg-[rgba(196,184,255,0.24)]" />
+            <div className="mt-2 h-2 w-[68%] rounded-full bg-[rgba(196,184,255,0.18)]" />
+            <div className="mt-2 h-2 w-[74%] rounded-full bg-[rgba(196,184,255,0.14)]" />
+          </div>
+          <div className="mt-4 grid grid-cols-2 gap-3 text-[10px] font-semibold text-[#756890]">
+            <span className="flex items-center gap-1.5">
+              <CheckCircle2 className="size-3.5 text-[#806bd0]" />
+              Design reviewed
+            </span>
+            <span className="flex items-center gap-1.5">
+              <CheckCircle2 className="size-3.5 text-[#806bd0]" />
+              Result delivered
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function LandingPage() {
   const revealScopeRef = useRef<HTMLElement | null>(null);
 
@@ -2079,11 +2211,11 @@ function LandingPage() {
         aria-hidden="true"
         className="pointer-events-none h-0"
       />
-      <section className="hero-visual relative overflow-hidden px-4 pb-12 pt-0 md:px-8 md:pb-16 md:pt-0 xl:pb-20 xl:pt-0">
-        <div className="mx-auto flex min-h-[calc(100svh-12rem)] page-shell items-center">
-          <div className="landing-hero-copy max-w-3xl py-0">
+      <section className="hero-visual relative overflow-hidden px-4 pb-16 pt-8 md:px-8 md:pb-20 md:pt-10 lg:py-12">
+        <div className="mx-auto grid min-h-[calc(100svh-5rem)] page-shell w-full items-center gap-14 lg:grid-cols-[minmax(0,0.98fr)_minmax(400px,1.02fr)] lg:gap-20 xl:gap-24">
+          <div className="landing-hero-copy max-w-[680px] py-0">
             <div className="reveal stagger-item" data-reveal>
-              <h1 className="hero-title balanced-text content-measure text-[#191f28]">
+              <h1 className="hero-title balanced-text text-[#191f28]">
                 Hire Agents that already know the job.
               </h1>
             </div>
@@ -2092,10 +2224,8 @@ function LandingPage() {
               data-reveal
               style={revealDelayStyle(140)}
             >
-              <p className="body-copy pretty-text mt-6 content-measure">
-                Hire protected AI Agents, not copyable prompts. Creators keep
-                private harness hidden while buyers get reliable results
-                through secure execution.
+              <p className="body-copy pretty-text mt-6 max-w-[620px]">
+                Hire protected AI Agents, not copyable prompts. Creators keep the Harness. Buyers get the result.
               </p>
             </div>
             <div
@@ -2104,17 +2234,32 @@ function LandingPage() {
               style={revealDelayStyle(240)}
             >
               <div className="mt-8 flex flex-wrap gap-3">
-                <Button asChild size="lg">
+                <Button
+                  asChild
+                  className="border-transparent bg-gradient-to-r from-[#7c5cff] via-[#6346f5] to-[#4f35d8] text-white shadow-[0_18px_40px_rgba(99,70,245,0.24)] hover:shadow-[0_24px_52px_rgba(99,70,245,0.32)] active:shadow-[0_12px_24px_rgba(79,53,216,0.2)] focus-visible:ring-[rgba(124,92,255,0.38)]"
+                  size="lg"
+                >
                   <Link to="/agents">
                     <Bot /> Hire an Agent
                   </Link>
                 </Button>
-                <Button asChild size="lg" variant="secondary">
+                <Button
+                  asChild
+                  className="border-[rgba(124,92,255,0.26)] bg-white/[0.78] text-[#6346f5] shadow-[0_16px_32px_rgba(79,53,216,0.08)] hover:border-[rgba(124,92,255,0.36)] hover:bg-[#f7f5ff] hover:shadow-[0_20px_40px_rgba(79,53,216,0.13)] focus-visible:ring-[rgba(124,92,255,0.32)]"
+                  size="lg"
+                  variant="secondary"
+                >
                   <Link to="/agents/create">
                     <UploadCloud /> Publish an Agent
                   </Link>
                 </Button>
               </div>
+            </div>
+          </div>
+
+          <div className="reveal stagger-item" data-reveal style={revealDelayStyle(180)}>
+            <div className="lg:translate-x-8 xl:translate-x-14">
+              <HeroAgentPreview />
             </div>
           </div>
         </div>
@@ -2139,8 +2284,8 @@ function ProtectedExecutionSection() {
   ];
 
   return (
-    <section className="landing-wave bg-[#1d1f5d] px-4 py-16 text-white md:px-8 md:py-24">
-      <div className="relative z-10 mx-auto page-shell">
+    <section className="relative overflow-hidden bg-[#1d1f5d] px-4 py-20 text-white md:px-8 md:py-28 lg:flex lg:min-h-[100svh] lg:items-center">
+      <div className="relative z-10 mx-auto page-shell w-full">
         <div className="reveal max-w-2xl" data-reveal>
           <div className="inline-flex rounded-full border border-white/14 bg-white/12 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-white/72">
             Protected execution
@@ -2154,11 +2299,7 @@ function ProtectedExecutionSection() {
           </p>
         </div>
 
-        <div className="relative mt-10 grid grid-cols-2 items-stretch gap-4 md:grid-cols-4 md:gap-6 lg:gap-8">
-          <div
-            aria-hidden="true"
-            className="pointer-events-none absolute left-[12.5%] right-[12.5%] top-11 hidden h-px bg-gradient-to-r from-transparent via-white/16 to-transparent md:block"
-          />
+        <div className="relative mt-12 grid grid-cols-2 items-stretch gap-4 md:grid-cols-4 md:gap-6 lg:gap-8">
           {steps.map((step, index) => (
             <div
               className="reveal stagger-item relative z-10 flex min-h-36 min-w-0 flex-col items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.06] p-4 text-center md:min-h-40 md:gap-4 md:rounded-[24px] md:p-5"
@@ -2345,38 +2486,52 @@ async function writeTextToClipboard(text: string) {
 
 function MakeAgentSection() {
   return (
-    <section id="make-agent" className="landing-wave landing-wave-sky landing-soft-grid bg-gradient-to-b from-[#eef6ff] via-[#f7fbff] to-[#eaf4ff] px-4 py-16 shadow-[inset_0_1px_0_rgba(255,255,255,0.9)] md:px-8 md:py-24">
-      <div className="relative z-10 mx-auto grid page-shell gap-10 lg:grid-cols-[0.78fr_1.22fr] lg:items-start">
-        <div className="reveal" data-reveal>
-          <div className="mb-5 flex items-center gap-3 text-sm font-semibold text-[#3182f6]">
-            <span className="flex size-11 items-center justify-center rounded-2xl bg-white text-[#0877ec] shadow-sm">
-              <UploadCloud className="size-5" />
-            </span>
-            How to create one
+    <section id="make-agent" className="relative isolate -mt-px overflow-hidden bg-[#f4f9ff] px-4 py-20 md:px-8 md:py-28 lg:flex lg:min-h-[100svh] lg:items-center lg:py-32">
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 -z-10"
+        style={{
+          background:
+            "radial-gradient(circle at 14% 24%, rgba(49, 130, 246, 0.12), transparent 34%), radial-gradient(circle at 88% 78%, rgba(49, 130, 246, 0.09), transparent 38%), linear-gradient(180deg, #f9fcff 0%, #f4f9ff 46%, #eaf4ff 100%)",
+        }}
+      />
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute -inset-x-8 -top-[180px] z-0 h-[320px] bg-gradient-to-b from-white via-[#f9fcff]/95 to-transparent blur-2xl"
+      />
+      <div className="relative z-10 mx-auto grid page-shell w-full gap-10 lg:grid-cols-[0.82fr_1.18fr] lg:items-center lg:gap-16 xl:gap-20">
+        <div className="lg:self-center lg:-translate-y-10">
+          <div className="reveal" data-reveal>
+            <div className="mb-5 flex items-center gap-3 text-sm font-semibold text-[#3182f6]">
+              <span className="flex size-11 items-center justify-center rounded-2xl bg-white text-[#0877ec] shadow-sm">
+                <UploadCloud className="size-5" />
+              </span>
+              How to create one
+            </div>
+            <h2 className="section-title text-[#191f28]">
+              Make an Agent in four steps.
+            </h2>
+            <p className="body-copy mt-5 max-w-[680px]">
+              You do not need to start from a blank folder. Use Codex to scaffold
+              the template, fill in the Harness, then upload it to HireMe.
+            </p>
           </div>
-          <h2 className="section-title text-[#191f28]">
-            Make an Agent in four steps.
-          </h2>
-          <p className="body-copy mt-5 max-w-[680px]">
-            You do not need to start from a blank folder. Use Codex to scaffold
-            the template, fill in the Harness, then upload it to HireMe.
-          </p>
         </div>
 
         <div className="reveal stagger-item" data-reveal style={revealDelayStyle(140)}>
-          <ol className="grid gap-4">
+          <ol className="grid gap-5 md:gap-6">
             {makeAgentSteps.map((step, index) => (
               <li className="reveal stagger-item" data-reveal style={revealDelayStyle(index * 90)} key={step.title}>
-                <div className="grid gap-4 md:grid-cols-[88px_1fr] md:items-start">
+                <div className="grid gap-4 md:grid-cols-[76px_1fr] md:items-stretch">
                   <div className="flex items-center gap-4 md:flex-col md:items-center md:justify-start">
-                    <div className="flex size-14 items-center justify-center rounded-full border border-[#d8d4e2] bg-[#f7f5ff] text-sm font-semibold text-[#494556] shadow-[inset_0_0_0_1px_rgba(83,58,253,0.06)]">
+                    <div className="flex size-14 shrink-0 items-center justify-center rounded-full border border-[rgba(49,130,246,0.18)] bg-[rgba(232,243,255,0.82)] text-sm font-semibold text-[#1b64da] shadow-[0_8px_22px_rgba(30,100,218,0.08)]">
                       {String(index + 1).padStart(2, "0")}
                     </div>
                     {index < makeAgentSteps.length - 1 ? (
-                      <div className="hidden h-10 w-px bg-gradient-to-b from-[#d8d4e2] via-[#c7c1e4] to-transparent md:block" />
+                      <div className="hidden min-h-8 w-px flex-1 bg-gradient-to-b from-[rgba(49,130,246,0.18)] via-[rgba(49,130,246,0.12)] to-transparent opacity-70 md:block" />
                     ) : null}
                   </div>
-                  <div className="pt-1">
+                  <div className="rounded-[22px] border border-[rgba(49,130,246,0.12)] bg-white/[0.66] px-5 py-[18px] shadow-[0_12px_32px_rgba(30,100,218,0.045)] backdrop-blur-sm md:px-[22px]">
                     <h3 className="docs-card-title text-[#191f28]">
                       {step.title}
                     </h3>
@@ -2397,7 +2552,7 @@ function MakeAgentSection() {
               </li>
             ))}
           </ol>
-          <div className="mt-6 rounded-2xl border border-[#bfdbfe] bg-[#eaf5ff]/80 p-4 text-xs leading-5 text-[#4e5968]">
+          <div className="mt-7 border-t border-[rgba(49,130,246,0.1)] px-1 pt-4 text-[0.8rem] leading-[1.6] text-[#6b7684]">
             <span className="font-semibold text-[#191f28]">Built for existing Agent workflows.</span>{" "}
             Start from Codex, AGENTS.md, skills, or MCP tools—then package the know-how as a protected Harness.
           </div>
@@ -2495,32 +2650,45 @@ function ProofLayerSection() {
   ];
 
   return (
-    <section className="landing-wave landing-wave-white bg-gradient-to-b from-[#f7fbff] via-[#f8fbff] to-[#eef5ff] px-4 py-16 shadow-[inset_0_1px_0_rgba(255,255,255,0.9)] md:px-8 md:py-24">
-      <div className="relative z-10 mx-auto grid page-shell gap-8 lg:grid-cols-[0.82fr_1.18fr] lg:items-start">
-        <div className="reveal" data-reveal>
-          <div className="eyebrow-label">Verifiable work</div>
-          <h2 className="section-title mt-3 max-w-[680px] text-[#191f28]">Verification roadmap.</h2>
-          <p className="body-copy mt-5 max-w-[680px]">Walrus stores protected Agent artifacts and execution records. Sui tracks access, usage, and payout receipts.</p>
+    <section className="relative isolate -mt-px overflow-hidden bg-[#f7fbff] px-4 py-20 md:px-8 md:py-28 lg:flex lg:min-h-[100svh] lg:items-center lg:py-32">
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 -z-10"
+        style={{
+          background:
+            "radial-gradient(circle at 12% 24%, rgba(49, 130, 246, 0.08), transparent 36%), radial-gradient(circle at 88% 74%, rgba(49, 130, 246, 0.06), transparent 40%)",
+        }}
+      />
+      <div className="relative z-10 mx-auto grid page-shell w-full gap-10 lg:grid-cols-[0.82fr_1.18fr] lg:items-center lg:gap-16 xl:gap-20">
+        <div className="lg:self-center lg:-translate-y-6">
+          <div className="reveal" data-reveal>
+            <div className="eyebrow-label">Verifiable work</div>
+            <h2 className="section-title mt-3 max-w-[680px] text-[#191f28]">Verification roadmap.</h2>
+            <p className="body-copy mt-5 max-w-[680px]">Walrus stores protected Agent artifacts and execution records. Sui tracks access, usage, and payout receipts.</p>
+          </div>
         </div>
         <div className="reveal" data-reveal style={revealDelayStyle(140)}>
-          <div className="relative grid gap-5">
+          <div className="relative grid gap-5 md:gap-6">
+            <span
+              aria-hidden="true"
+              className="pointer-events-none absolute bottom-8 left-[7px] top-8 w-px bg-gradient-to-b from-transparent via-[rgba(49,130,246,0.18)] to-transparent"
+            />
             {roadmap.map((item, index) => (
-              <div className="reveal stagger-item relative pl-8" data-reveal style={revealDelayStyle(index * 120)} key={item.title}>
-                <span className="absolute left-0 top-2 flex size-3 items-center justify-center rounded-full bg-[#c7c1e4] shadow-[0_0_0_6px_rgba(199,193,228,0.14)]" />
-                {index < roadmap.length - 1 ? (
-                  <span className="absolute left-[5px] top-5 h-[calc(100%+1.25rem)] w-px bg-gradient-to-b from-[#d8d4e2] via-[#c7c1e4] to-transparent" />
-                ) : null}
-                <div className="docs-card-title text-[#191f28]">{item.title}</div>
-                <p className="mt-2 docs-card-copy max-w-[620px]">{item.copy}</p>
+              <div className="reveal stagger-item relative z-10 pl-9" data-reveal style={revealDelayStyle(index * 120)} key={item.title}>
+                <span className="absolute left-0 top-6 flex size-4 items-center justify-center rounded-full border-[4px] border-white bg-[#3182f6] shadow-[0_0_0_6px_rgba(49,130,246,0.12)]" />
+                <div className="rounded-[22px] border border-[rgba(49,130,246,0.12)] bg-white/[0.66] px-5 py-[18px] shadow-[0_12px_32px_rgba(30,100,218,0.04)] backdrop-blur-sm md:px-[22px]">
+                  <div className="docs-card-title text-[#191f28]">{item.title}</div>
+                  <p className="mt-2 docs-card-copy max-w-[620px]">{item.copy}</p>
+                </div>
               </div>
             ))}
           </div>
-          <details className="group mt-6 rounded-3xl border border-[#dbeafe] bg-white/85 p-5 shadow-[rgba(30,64,175,0.06)_0_10px_24px]">
-            <summary className="flex cursor-pointer list-none items-center justify-between gap-4 docs-card-title text-[#191f28] [&::-webkit-details-marker]:hidden">
+          <details className="group ml-9 mt-6 rounded-[22px] border border-[rgba(49,130,246,0.12)] bg-white/[0.74] px-4 py-3.5 backdrop-blur-sm">
+            <summary className="flex cursor-pointer list-none items-center justify-between gap-4 text-[15px] font-semibold leading-6 text-[#191f28] md:text-base [&::-webkit-details-marker]:hidden">
               Why this matters
-              <span className="text-lg text-primary transition group-open:rotate-45">+</span>
+              <span className="text-base text-[#3182f6] transition group-open:rotate-45">+</span>
             </summary>
-            <p className="mt-3 docs-card-copy">
+            <p className="mt-3 text-sm leading-6 text-[#4e5968]">
               Seal, TEE, ICP, and similar systems are part of the long-term direction for stronger privacy and access control.
             </p>
           </details>

@@ -83,22 +83,10 @@ select {
 
 .hero-visual {
   isolation: isolate;
-  background-image:
-    linear-gradient(90deg, rgba(255, 255, 255, 1) 0%, rgba(255, 255, 255, 0.98) 44%, rgba(255, 255, 255, 0.8) 68%, rgba(255, 255, 255, 0.28) 100%),
-    url("/assets/hireme-hero.png");
-  background-position: center;
-  background-size: cover;
-}
-
-.hero-visual::after {
-  position: absolute;
-  right: 0;
-  bottom: -1px;
-  left: 0;
-  height: 132px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0) 0%, rgba(244, 249, 255, 0.72) 68%, rgba(244, 249, 255, 1) 100%);
-  content: "";
-  pointer-events: none;
+  background:
+    radial-gradient(circle at 76% 30%, rgba(124, 92, 255, 0.16) 0%, transparent 34%),
+    radial-gradient(circle at 18% 12%, rgba(99, 70, 245, 0.08) 0%, transparent 28%),
+    linear-gradient(180deg, #fdfcff 0%, #f8f6ff 68%, #f3f0ff 100%);
 }
 
 .landing-hero-copy {
@@ -106,55 +94,154 @@ select {
   z-index: 2;
 }
 
-.landing-object-field {
+.hero-demo-visual {
+  opacity: 1;
+  filter: saturate(0.88) contrast(0.98);
+  perspective: 1200px;
+}
+
+.hero-demo-glow {
+  animation: hero-demo-glow 12s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+
+.hero-demo-chip {
+  box-shadow: 0 18px 50px rgba(79, 53, 216, 0.055);
+}
+
+.hero-demo-chip-agent {
+  animation: hero-demo-chip-float 6s ease-in-out infinite;
+  will-change: transform;
+}
+
+.hero-demo-card {
   position: absolute;
-  inset: 0;
-  pointer-events: none;
-}
-
-.landing-object {
-  position: absolute;
-  border: 1px solid rgba(255, 255, 255, 0.45);
-  background: linear-gradient(145deg, rgba(255, 255, 255, 0.5), rgba(186, 230, 253, 0.08));
-  box-shadow:
-    inset 0 1px 1px rgba(255, 255, 255, 0.55),
-    0 28px 72px rgba(1, 35, 101, 0.24);
-  backdrop-filter: blur(10px);
-  animation: landing-float 7s ease-in-out infinite;
-}
-
-.landing-object-one {
-  top: 16%;
-  right: 9%;
-  width: clamp(130px, 18vw, 250px);
-  aspect-ratio: 1;
-  border-radius: 34% 66% 58% 42% / 44% 36% 64% 56%;
-  transform: rotate(20deg);
-}
-
-.landing-object-two {
-  right: 28%;
-  bottom: 7%;
-  width: clamp(84px, 10vw, 148px);
-  aspect-ratio: 1;
+  inset-inline: 0;
+  top: 0;
+  overflow: hidden;
+  border: 1px solid rgba(124, 92, 255, 0.16);
   border-radius: 28px;
-  transform: rotate(42deg);
-  animation-delay: -2.2s;
+  padding: 22px;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow:
+    0 48px 120px rgba(79, 53, 216, 0.14),
+    inset 0 1px 0 rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(22px);
+  -webkit-backdrop-filter: blur(22px);
+  transform-origin: 56% 18%;
+  animation: hero-demo-stack 12s cubic-bezier(0.22, 1, 0.36, 1) infinite both;
+  will-change: transform, opacity, filter;
 }
 
-.landing-object-three {
-  top: 22%;
-  right: 35%;
-  width: clamp(42px, 5vw, 72px);
-  aspect-ratio: 1;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.28);
-  animation-delay: -4s;
+.hero-demo-card--task {
+  border-color: rgba(124, 92, 255, 0.14);
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.96), rgba(248, 245, 255, 0.92));
 }
 
-@keyframes landing-float {
-  0%, 100% { translate: 0 0; }
-  50% { translate: 0 -14px; }
+.hero-demo-card--working {
+  border-color: rgba(124, 92, 255, 0.17);
+  background: linear-gradient(145deg, rgba(249, 247, 255, 0.96), rgba(240, 235, 255, 0.92));
+}
+
+.hero-demo-card--result-primary {
+  border-color: rgba(124, 92, 255, 0.22);
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.98), rgba(246, 242, 255, 0.94));
+}
+
+.hero-demo-card--result-secondary {
+  border-color: rgba(124, 92, 255, 0.18);
+  background: linear-gradient(145deg, rgba(247, 244, 255, 0.96), rgba(237, 232, 255, 0.92));
+}
+
+.hero-demo-progress {
+  position: relative;
+}
+
+.hero-demo-progress::after {
+  position: absolute;
+  inset-block: 0;
+  left: 0;
+  width: 48%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, rgba(124, 92, 255, 0.18), rgba(99, 70, 245, 0.42));
+  content: "";
+  animation: hero-demo-progress 3s ease-in-out infinite;
+}
+
+@keyframes hero-demo-stack {
+  0%, 18% {
+    z-index: 4;
+    opacity: 1;
+    border-color: rgba(124, 92, 255, 0.22);
+    box-shadow:
+      0 52px 130px rgba(79, 53, 216, 0.18),
+      inset 0 1px 0 rgba(255, 255, 255, 0.96);
+    filter: blur(0);
+    transform: translate3d(0, 0, 0) scale(1) rotate(0deg);
+  }
+  22% {
+    z-index: 5;
+    opacity: 0;
+    border-color: rgba(124, 92, 255, 0.18);
+    box-shadow: 0 40px 100px rgba(79, 53, 216, 0.12);
+    filter: blur(0.4px);
+    transform: translate3d(-78px, -16px, 16px) scale(0.96) rotate(-2.8deg);
+  }
+  24%, 43% {
+    z-index: 1;
+    opacity: 0.46;
+    border-color: rgba(124, 92, 255, 0.1);
+    box-shadow: 0 24px 70px rgba(79, 53, 216, 0.07);
+    filter: blur(1.5px);
+    transform: translate3d(58px, 58px, -120px) scale(0.76) rotate(5deg);
+  }
+  50%, 68% {
+    z-index: 2;
+    opacity: 0.56;
+    border-color: rgba(124, 92, 255, 0.13);
+    box-shadow: 0 30px 82px rgba(79, 53, 216, 0.09);
+    filter: blur(0.9px);
+    transform: translate3d(44px, 42px, -82px) scale(0.84) rotate(-4deg);
+  }
+  75%, 93% {
+    z-index: 3;
+    opacity: 0.78;
+    border-color: rgba(124, 92, 255, 0.16);
+    box-shadow: 0 38px 96px rgba(79, 53, 216, 0.12);
+    filter: blur(0.35px);
+    transform: translate3d(22px, 20px, -38px) scale(0.92) rotate(3deg);
+  }
+  100% {
+    z-index: 4;
+    opacity: 1;
+    border-color: rgba(124, 92, 255, 0.22);
+    box-shadow:
+      0 52px 130px rgba(79, 53, 216, 0.18),
+      inset 0 1px 0 rgba(255, 255, 255, 0.96);
+    filter: blur(0);
+    transform: translate3d(0, 0, 0) scale(1) rotate(0deg);
+  }
+}
+
+@keyframes hero-demo-progress {
+  0%, 100% { transform: translateX(-8%); opacity: 0.72; }
+  50% { transform: translateX(112%); opacity: 1; }
+}
+
+@keyframes hero-demo-chip-float {
+  0%, 100% { transform: translate3d(0, 8px, 0); }
+  50% { transform: translate3d(0, 4px, 0); }
+}
+
+@keyframes hero-demo-glow {
+  0%, 100% { transform: translate3d(-4px, 2px, 0) scale(0.98); opacity: 0.68; }
+  50% { transform: translate3d(5px, -3px, 0) scale(1.02); opacity: 0.88; }
+}
+
+@media (min-width: 1024px) {
+  .hero-demo-visual {
+    filter: saturate(0.92) contrast(1);
+  }
 }
 
 .landing-wave {
@@ -587,21 +674,10 @@ select {
 
 @media (max-width: 767px) {
   .hero-visual {
-    background-image:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.99) 0%, rgba(255, 255, 255, 0.99) 62%, rgba(255, 255, 255, 0.9) 76%, rgba(255, 255, 255, 0.36) 100%),
-      url("/assets/hireme-hero.png");
-    background-position:
-      center,
-      center bottom;
-    background-repeat: no-repeat;
-    background-size:
-      100% 100%,
-      760px auto;
+    background:
+      radial-gradient(circle at 76% 68%, rgba(124, 92, 255, 0.14) 0%, transparent 36%),
+      linear-gradient(180deg, #fdfcff 0%, #f8f6ff 72%, #f3f0ff 100%);
   }
-
-  .landing-object-one { top: 8%; right: -16%; opacity: 0.55; }
-  .landing-object-two { right: 8%; bottom: 3%; opacity: 0.35; }
-  .landing-object-three { display: none; }
 
   .landing-wave::before {
     top: -30px;
@@ -614,7 +690,60 @@ select {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .landing-object { animation: none; }
+  .hero-demo-glow,
+  .hero-demo-chip-agent,
+  .hero-demo-card,
+  .hero-demo-progress::after {
+    animation: none;
+  }
+
+  .hero-demo-card {
+    opacity: 0;
+  }
+
+  .hero-demo-card--task {
+    z-index: 1;
+    opacity: 0.46;
+    border-color: rgba(124, 92, 255, 0.1);
+    box-shadow: 0 24px 70px rgba(79, 53, 216, 0.07);
+    filter: blur(1.5px);
+    transform: translate3d(58px, 58px, -120px) scale(0.76) rotate(5deg);
+  }
+
+  .hero-demo-card--working {
+    z-index: 2;
+    opacity: 0.56;
+    border-color: rgba(124, 92, 255, 0.13);
+    box-shadow: 0 30px 82px rgba(79, 53, 216, 0.09);
+    filter: blur(0.9px);
+    transform: translate3d(44px, 42px, -82px) scale(0.84) rotate(-4deg);
+  }
+
+  .hero-demo-card--result-secondary {
+    z-index: 3;
+    opacity: 0.78;
+    border-color: rgba(124, 92, 255, 0.16);
+    box-shadow: 0 38px 96px rgba(79, 53, 216, 0.12);
+    filter: blur(0.35px);
+    transform: translate3d(22px, 20px, -38px) scale(0.92) rotate(3deg);
+  }
+
+  .hero-demo-card--result-primary {
+    z-index: 4;
+    opacity: 1;
+    border-color: rgba(124, 92, 255, 0.22);
+    box-shadow:
+      0 52px 130px rgba(79, 53, 216, 0.18),
+      inset 0 1px 0 rgba(255, 255, 255, 0.96);
+    filter: none;
+    transform: none;
+  }
+
+  .hero-demo-progress::after {
+    width: 68%;
+    opacity: 0.82;
+    transform: none;
+  }
 
   .reveal {
     opacity: 1;
