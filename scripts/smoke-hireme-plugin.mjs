@@ -226,7 +226,7 @@ if (
     '"schema": "hireme.protected_agent_json_output.v1"',
   )
 ) {
-  throw new Error("hireme_call_agent did not return local Codex JSON output");
+  throw new Error("hireme_call_agent did not return protected Agent JSON output");
 }
 
 if (
@@ -234,7 +234,11 @@ if (
     '"responseMode": "local_codex_execution_brief"',
   )
 ) {
-  throw new Error("hireme_call_agent did not mark the execution brief mode");
+  throw new Error("hireme_call_agent did not preserve the inferred response mode");
+}
+
+if (!callResult?.result?.content?.[0]?.text?.includes('"shouldAct": false')) {
+  throw new Error("hireme_call_agent should expose Agent output without automatic local execution");
 }
 
 if (
