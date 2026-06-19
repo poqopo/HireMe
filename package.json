@@ -39,6 +39,7 @@
     "preview": "npm run web:preview"
   },
   "dependencies": {
+    "@mysten-incubation/memwal": "^0.0.7",
     "@mysten/dapp-kit": "^1.1.0",
     "@mysten/enoki": "^1.1.0",
     "@mysten/sui": "^2.19.0",

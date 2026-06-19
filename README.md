@@ -31,7 +31,7 @@ Agent 제작자는 보호된 Skills/Harness를 등록하고 MCP call 단가를 �
 | --- | --- |
 | `apps/web` | React/Vite 웹 앱. 랜딩, docs, marketplace, My page UI |
 | `apps/gateway` | MCP/HTTP gateway. Agent 실행, 권한 확인, 결제/정산, Walrus/memWal 처리 |
-| `plugins/hireme` | Codex에서 설치하는 HireMe MCP plugin |
+| `plugins/hireme` | Codex에서 설치하는 HireMe Creator stdio plugin |
 | `scripts` | smoke test, artifact publish, plugin export, Supabase seed script |
 | `supabase` | DB migrations and local Supabase assets |
 | `move` | Sui Move package experiments |
@@ -211,7 +211,7 @@ http://localhost:8787
 | `POST /v1/memwal/read` | protected memWal snapshot을 gateway에서만 복호화하고 safe summary 반환 |
 | user memWal result write | `POST /v1/agent-call` 내부에서 call 결과를 Hirer 전용 encrypted memWal result로 저장 |
 
-Codex plugin MCP 서버는 `HIREME_MCP_GATEWAY_URL`로 이 gateway를 먼저 호출합니다. gateway가 꺼져 있으면 로컬 demo fallback을 사용하고, 반드시 gateway를 거치게 만들고 싶으면 `HIREME_MCP_GATEWAY_REQUIRED=1`을 설정합니다.
+Codex의 user/hirer 호출은 OAuth HTTP MCP 서버 `hireme`가 처리합니다. 로컬 creator 작업은 stdio plugin `hireme-creator`가 처리합니다. `hireme-creator`는 `HIREME_MCP_GATEWAY_URL`로 gateway를 호출해 local folder archive를 암호화/업로드/등록합니다. gateway가 꺼져 있으면 일부 local demo fallback만 동작하고, publish/update는 gateway가 필요합니다.
 
 Creator가 Codex에서 “이 Agent 등록할래”라고 요청하는 경우에는 MCP가 `hireme_register_agent`를 호출합니다. 이 tool은 공개 카드 정보와 가격, 이미 암호화되어 Walrus에 올라간 artifact 참조만 받습니다. `AGENTS.md`, `skills/**` 원문, private prompt, Harness source는 MCP 등록 payload에 넣지 않습니다.
 
@@ -406,7 +406,7 @@ Agent call 결과는 `apps/gateway/src/memWal.mjs`의 `writeUserMemWalResult`를
 
 ## Codex Plugin + MCP 연결
 
-Codex 공식 문서 기준으로 Codex plugin은 skills, apps, MCP servers를 묶는 배포 단위입니다. Codex는 STDIO MCP 서버와 Streamable HTTP MCP 서버를 지원합니다. 이 데모는 Figma처럼 사용자가 플러그인을 설치하고 선택할 수 있도록 repo-local plugin marketplace를 제공합니다.
+Codex 공식 문서 기준으로 Codex plugin은 skills, apps, MCP servers를 묶는 배포 단위입니다. Codex는 STDIO MCP 서버와 Streamable HTTP MCP 서버를 지원합니다. HireMe는 두 표면을 분리합니다: user/hirer는 OAuth HTTP MCP `hireme`, creator는 로컬 stdio plugin `hireme-creator`를 씁니다.
 
 참고 문서:
 
@@ -425,21 +425,21 @@ plugins/hireme/
 .agents/plugins/marketplace.json
 ```
 
-개발 중에는 메인 repo를 local marketplace로 바로 설치할 수 있습니다.
+개발 중에는 creator stdio plugin을 메인 repo local marketplace에서 바로 설치할 수 있습니다.
 
 ```bash
 codex plugin marketplace add /Users/hanlab/Desktop/HireMe
-codex plugin add hireme --marketplace hireme-local
+codex plugin add hireme-creator --marketplace hireme-local
 ```
 
-그 다음 Codex를 새로 시작하고 `/mcp`로 `hireme` 서버가 잡혔는지 확인합니다.
+그 다음 Codex를 새로 시작하고 `/mcp`로 `hireme-creator` 서버가 잡혔는지 확인합니다.
 
 사용자 배포용으로는 메인 repo 전체를 marketplace로 쓰지 않습니다. 웹 앱, gateway, Supabase migration, Walrus scripts, examples를 제외하고 Codex plugin bundle만 별도 repo로 export합니다.
 
 ```bash
 npm run plugin:export -- ../hireme-codex-plugin \
   --repository-url https://github.com/poqopo/hireme-codex-plugin \
-  --gateway-url https://your-gateway.example
+  --gateway-url https://hireme-gateway.onrender.com
 ```
 
 생성되는 별도 repo 구조:
@@ -455,22 +455,26 @@ npm run plugin:export -- ../hireme-codex-plugin \
     assets/
 ```
 
-사용자는 plugin 전용 repo만 추가합니다.
+현재 공개 웹사이트 안내는 메인 HireMe repo를 Codex marketplace source로 사용합니다. 별도 plugin-only repo를 만들기 전까지는 이 경로가 실제 설치 경로입니다.
 
 ```bash
-codex plugin marketplace add poqopo/hireme-codex-plugin --ref main
-codex plugin add hireme --marketplace hireme
+codex plugin marketplace add poqopo/HireMe --ref main
+codex plugin add hireme-creator --marketplace hireme-local
 ```
 
-Plugin으로 배포되는 `hireme` MCP는 Codex 안에서 실행되는 얇은 connector입니다. 실제 protected Agent 실행, OAuth session 검증, entitlement 확인, memWal 저장은 public HireMe gateway가 처리합니다.
+Plugin으로 배포되는 `hireme-creator` MCP는 Codex 안에서 실행되는 로컬 creator connector입니다. 로컬 template 생성과 local folder archive는 plugin이 처리하고, protected archive encryption, Walrus upload, registration은 public HireMe gateway가 처리합니다. 실제 hirer Agent 실행, OAuth session 검증, entitlement 확인, memWal 저장은 HTTP MCP `hireme`와 gateway가 처리합니다.
 
-OAuth 연결을 테스트하려면 gateway를 HTTP MCP 서버로 등록합니다. 이 경로는 Codex가 `codex mcp login`으로 authorization code + PKCE flow를 실행하고, 이후 `/mcp` 호출에 bearer token을 붙이는 구조입니다. `/oauth/authorize`는 먼저 HireMe 웹 로그인 세션을 확인합니다. 로그인되어 있지 않으면 `/login?return_to=...`로 보내고, 웹에서 Google 로그인 후 다시 Codex consent 화면으로 돌아옵니다.
+OAuth 연결을 테스트하려면 Render gateway를 HTTP MCP 서버로 등록합니다. 이 경로는 Codex가 `codex mcp login`으로 authorization code + PKCE flow를 실행하고, 이후 `/mcp` 호출에 bearer token을 붙이는 구조입니다. `/oauth/authorize`는 먼저 HireMe 웹 로그인 세션을 확인합니다. 로그인되어 있지 않으면 `/login?return_to=...`로 보내고, 웹에서 Google 로그인 후 다시 Codex consent 화면으로 돌아옵니다. 이미 `localhost:8787`로 등록했다면 먼저 지우고 다시 추가합니다.
 
 ```bash
-npm run gateway:dev
-codex mcp add hireme --url http://localhost:8787/mcp --oauth-resource http://localhost:8787/mcp
+codex mcp remove hireme
+codex mcp add hireme \
+  --url https://hireme-gateway.onrender.com/mcp \
+  --oauth-resource https://hireme-gateway.onrender.com/mcp
 codex mcp login --scopes hireme:agents,hireme:call,hireme:manage hireme
 ```
+
+로컬 gateway를 직접 테스트할 때만 `npm run gateway:dev` 후 `http://localhost:8787/mcp`로 등록합니다.
 
 웹 로그인은 Supabase Auth Google provider를 사용합니다. Supabase Auth redirect URL에는 로컬 기준 `http://localhost:5173/auth/callback`을 허용해야 합니다. gateway 자체 demo approval은 기본적으로 꺼져 있으며, smoke test에서만 `HIREME_OAUTH_ALLOW_DEMO_LOGIN=1`로 켭니다.
 
@@ -506,25 +510,37 @@ supabase db push
 
 성공하면 Enoki Google zkLogin address가 Supabase `profiles.sui_address`, `oauth_mcp_*` session/token metadata, Try/Hire entitlement의 `owner_sui_address`에 연결됩니다. Supabase Google provider와 Enoki `VITE_GOOGLE_CLIENT_ID`는 같은 Google OAuth client를 사용해야 ID token 검증이 통과합니다. Codex에서는 `hireme_whoami`로 `suiAddress`를 확인할 수 있습니다. 권한 판단의 안정성을 위해 MVP authorization key는 계속 email 기반 `hirer_id`이고, Sui address는 결제/receipt 연결용 보조 식별자로 저장합니다. 기존 계정에 Sui address가 비어 있으면 `/my` 페이지에서 fallback 연결 버튼을 사용할 수 있습니다.
 
-현재 HireMe plugin MCP 서버가 제공하는 tool:
+현재 HireMe MCP 표면은 두 개입니다.
+
+OAuth HTTP MCP 서버 `hireme`의 대표 tool:
 
 | Tool | Purpose |
 | --- | --- |
 | `hireme_whoami` | Codex가 현재 어떤 HireMe hirer identity로 연결되어 있는지 확인. token/secret은 반환하지 않음 |
 | `hireme_request` | 자연어 요청을 agent/task/receipt로 라우팅해서 protected gateway 호출 |
-| `hireme_list_hired_agents` | 현재 사용자가 고용한 Agent 목록, 가격, memWal 보호 요약 조회 |
+| `hireme_list_my_agents` | 현재 사용자의 Try/Hire entitlement와 남은 사용량 조회 |
+| `hireme_list_hired_agents` | marketplace Agent 목록과 공개 가격/요약 조회 |
 | `hireme_get_agent` | 특정 Agent의 공개 프로필과 MCP 가격 조회 |
 | `hireme_select_agent` | Codex 세션에서 active Agent 선택 |
 | `hireme_current_agent` | 현재 active Agent 조회 |
 | `hireme_call_agent` | 명시된 Agent 또는 active Agent를 호출하고 ledger 이벤트 반환. protected example agent는 trusted gateway runner 사용 |
-| `hireme_prepare_sealed_harness_upload` | Creator의 `AGENTS.md` + `skills/` 폴더를 platform encryption + Walrus로 올리기 위한 등록 경계 안내 |
-| `hireme_register_sealed_harness` | 암호화되어 Walrus에 올라간 Harness metadata만 등록 |
-| `hireme_register_agent` | 공개 Agent 프로필, `$0.005/call` 같은 call 단가, encrypted Walrus artifact 참조를 gateway/Supabase에 등록 |
-| `hireme_validate_sealed_harness` | paid receipt가 있을 때 gateway runner를 통해 protected example artifact를 검증 |
+| `hireme_register_agent` | 이미 암호화되어 Walrus에 올라간 artifact metadata와 공개 Agent 프로필 등록 |
 | `hireme_read_memwal` | gateway를 통해 protected memWal snapshot을 읽고 safe summary만 반환 |
-| `hireme_connection_help` | 플러그인 설치와 Agent 전환 안내 반환 |
 
-주의: 현재 MCP call은 로컬 gateway mock입니다. 실제 제품에서는 `hireme_call_agent` 내부가 hire 권한 확인, budget 검증, Sui AgentVersion 조회, Walrus ciphertext read, platform KMS decrypt, protected Harness 실행, Supabase `mcp_call_ledger` 기록으로 대체됩니다.
+로컬 stdio plugin `hireme-creator`의 대표 tool:
+
+| Tool | Purpose |
+| --- | --- |
+| `hireme_create_agent_template` | 로컬 Agent template folder 생성 |
+| `hireme_create_agent_from_folder` | 로컬 folder를 archive해서 gateway encryption/Walrus upload/registration으로 publish |
+| `hireme_update_agent_from_folder` | 기존 Agent의 새 protected folder version publish |
+| `hireme_prepare_platform_encryption_upload` | platform encryption + Walrus upload boundary 생성 |
+| `hireme_register_platform_encrypted_harness` | 암호화되어 Walrus에 올라간 Harness metadata만 등록 |
+| `hireme_register_agent` | encrypted artifact metadata가 이미 있을 때 공개 Agent card 등록 |
+| `hireme_validate_platform_encrypted_harness` | protected artifact metadata 검증 |
+| `hireme_connection_help` | creator plugin과 HTTP MCP 연결 안내 반환 |
+
+주의: local folder 생성과 archive는 `hireme-creator`가 맡고, 실제 Agent 호출은 OAuth HTTP MCP `hireme`가 맡습니다. 실제 제품에서는 `hireme_call_agent` 내부가 hire 권한 확인, budget 검증, Sui AgentVersion 조회, Walrus ciphertext read, platform KMS decrypt, protected Harness 실행, Supabase `mcp_call_ledger` 기록으로 대체됩니다.
 
 Agent 전환 방식:
 

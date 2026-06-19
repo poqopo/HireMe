@@ -221,8 +221,31 @@ console.log(
 );
 
 async function archiveStaleDemoRows() {
-  const staleAgentSlugs = ["landing-qa-lite", "readme-polisher"];
-  const staleTeamSlugs = ["open-agent-starters"];
+  const staleAgentSlugs = [
+    "landing-qa-lite",
+    "readme-polisher",
+    "walrus-researcher",
+    "source-scout",
+    "codex-builder",
+    "schema-migrator",
+    "agent-evaluator",
+    "data-ledger",
+    "launch-operator",
+    "conversion-copywriter",
+    "ops-router",
+    "test",
+    "gateway-web-register-live",
+    "setsetetsetset",
+    "private-code-reviewer",
+    "platform-encryption-call-test",
+    "my-magic-agents",
+  ];
+  const staleTeamSlugs = [
+    "open-agent-starters",
+    "protocol-intelligence",
+    "build-ops",
+    "launch-safety",
+  ];
 
   await must(
     admin

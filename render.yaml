@@ -51,6 +51,12 @@ services:
         sync: false
       - key: HIREME_PLATFORM_KMS_KEY_ID
         value: platform:render
+      - key: MEMWAL_SERVER_URL
+        value: https://relayer-staging.memory.walrus.xyz
+      - key: MEMWAL_PRIVATE_KEY
+        sync: false
+      - key: MEMWAL_ACCOUNT_ID
+        sync: false
       - key: HIREME_SEAL_PACKAGE_ID
         sync: false
       - key: HIREME_SEAL_KEY_SERVER_IDS

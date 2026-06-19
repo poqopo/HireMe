@@ -284,6 +284,7 @@ export async function readUserMemWalResult({
   };
 }
 
+
 async function loadMemWalCiphertext(publicRecord) {
   if (
     publicRecord.storageProvider === "walrus" &&
@@ -340,11 +341,49 @@ function summarizeMemory(memory) {
 }
 
 function summarizeUserResult({ result, jsonOutput }) {
+  const attachments = collectUserResultAttachments({ result, jsonOutput });
   return {
     type: jsonOutput?.type || result?.type || "protected_agent_guidance",
     resultKeys: result && typeof result === "object" ? Object.keys(result).slice(0, 12) : [],
     jsonOutputSchema: jsonOutput?.schema || null,
+    attachmentCount: attachments.length,
+    attachments: attachments.map(publicAttachmentSummary).slice(0, 12),
     rawResultReturnedInRecord: false,
+  };
+}
+
+function collectUserResultAttachments({ result, jsonOutput }) {
+  const candidates = [
+    result?.attachments,
+    result?.outputFiles,
+    jsonOutput?.attachments,
+    jsonOutput?.payload?.attachments,
+    jsonOutput?.payload?.outputFiles,
+  ];
+  const attachments = [];
+  const seen = new Set();
+  for (const candidate of candidates) {
+    const list = Array.isArray(candidate) ? candidate : candidate ? [candidate] : [];
+    for (const attachment of list) {
+      if (!attachment || typeof attachment !== "object") continue;
+      const key = attachment.digest || attachment.uri || attachment.filename || attachment.name;
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      attachments.push(attachment);
+    }
+  }
+  return attachments;
+}
+
+function publicAttachmentSummary(attachment) {
+  return {
+    type: attachment.type || "file",
+    name: attachment.filename || attachment.name || null,
+    mimeType: attachment.mimeType || null,
+    sizeBytes: attachment.sizeBytes || null,
+    digest: attachment.digest || null,
+    uri: attachment.uri || null,
+    contentReturnedInPublicRecord: false,
   };
 }
 

@@ -39,6 +39,7 @@ import {
   ChevronRight,
   CircleDollarSign,
   Clock3,
+  Copy,
   LockKeyhole,
   LogIn,
   LogOut,
@@ -73,6 +74,19 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+
+const trialCallAllowance = 100;
+const hiremeGatewayOrigin = "https://hireme-gateway.onrender.com";
+const codexCreatorSetupCommand = [
+  "# Install the HireMe Creator plugin",
+  "codex plugin marketplace add poqopo/HireMe --ref main",
+  "codex plugin add hireme-creator --marketplace hireme-local",
+  "",
+  "# Connect the hired-Agent MCP server to the Render gateway",
+  "codex mcp remove hireme || true",
+  `codex mcp add hireme --url ${hiremeGatewayOrigin}/mcp --oauth-resource ${hiremeGatewayOrigin}/mcp`,
+  "codex mcp login --scopes hireme:agents,hireme:call,hireme:manage hireme",
+].join("\n");
 
 const makeAgentSteps = [
   {
@@ -118,7 +132,11 @@ const docsToc = [
     ],
   },
   { id: "hire", label: "How to Hire" },
-  { id: "publish", label: "How to Publish" },
+  {
+    id: "publish",
+    label: "How to Publish",
+    children: [{ id: "publish-codex-setup", label: "Codex setup" }],
+  },
   { id: "paid", label: "How to Get Paid" },
   { id: "roadmap", label: "Roadmap" },
 ] as const;
@@ -178,8 +196,9 @@ function useScrollReveal(scopeRef: RefObject<HTMLElement | null>) {
 }
 
 function revealDelayStyle(delayMs: number): CSSProperties {
+  const revealDelayProperty = "--reveal-delay" as const;
   return {
-    ["--reveal-delay" as "--reveal-delay"]: `${delayMs}ms`,
+    [revealDelayProperty]: `${delayMs}ms`,
   } as CSSProperties;
 }
 
@@ -201,29 +220,8 @@ const catalogViews = [
   { id: "agents", label: "Single Agent" },
   { id: "teams", label: "Agent Team" },
 ] as const;
-const creatorModelOptions = [
-  {
-    id: "gpt-5.5",
-    label: "GPT 5.5",
-    description: "Highest quality for complex agent execution",
-    basePricePerCallUsd: 15,
-  },
-  {
-    id: "gpt-5.4",
-    label: "GPT 5.4",
-    description: "Balanced quality and cost",
-    basePricePerCallUsd: 5,
-  },
-  {
-    id: "gpt-5.3",
-    label: "GPT 5.3",
-    description: "Lower-cost execution for simpler agents",
-    basePricePerCallUsd: 2,
-  },
-] as const;
 
 type CatalogView = (typeof catalogViews)[number]["id"];
-type CreatorModelId = (typeof creatorModelOptions)[number]["id"];
 
 type AuthUser = {
   id?: string;
@@ -276,11 +274,7 @@ type CreatedAgentRecord = {
   avgLatencyMs?: number;
   avgTokenCount?: number;
   activeUsers?: number;
-  modelId?: string;
-  modelLabel?: string;
   pricePerCallUsd: number;
-  basePricePerCallUsd?: number;
-  creatorFeePerCallUsd?: number;
   walrusBlobId: string;
   suiObjectId: string;
   ciphertextDigest: string;
@@ -538,7 +532,6 @@ function AppShell({
 
   useEffect(() => {
     if (location.pathname !== "/") {
-      setShowBackToTop(false);
       return;
     }
 
@@ -547,10 +540,11 @@ function AppShell({
       setShowBackToTop(window.scrollY >= threshold);
     };
 
-    updateVisibility();
+    const frame = window.requestAnimationFrame(updateVisibility);
     window.addEventListener("scroll", updateVisibility, { passive: true });
     window.addEventListener("resize", updateVisibility);
     return () => {
+      window.cancelAnimationFrame(frame);
       window.removeEventListener("scroll", updateVisibility);
       window.removeEventListener("resize", updateVisibility);
     };
@@ -616,11 +610,11 @@ function AppShell({
         <Route path="*" element={<Navigate replace to="/" />} />
       </Routes>
       {location.pathname === "/" ? (
-        <BackToTopButton
-          onClick={scrollToTop}
-          reducedMotion={reducedMotion}
-          visible={showBackToTop}
-        />
+          <BackToTopButton
+            onClick={scrollToTop}
+            reducedMotion={reducedMotion}
+            visible={location.pathname === "/" && showBackToTop}
+          />
       ) : null}
       <LoginDialog open={isLoginOpen} onClose={onLoginClose} />
       <ProfileNameDialog
@@ -923,8 +917,6 @@ function gatewayAuthHeaders() {
 async function createAgentWithGatewayUpload({
   draft,
   agentSlug,
-  selectedModel,
-  creatorFeePerCallUsd,
   totalPricePerCallUsd,
   publicCapability,
   typicalOutputUpload,
@@ -941,8 +933,6 @@ async function createAgentWithGatewayUpload({
     typicalOutputSample: string;
   };
   agentSlug: string;
-  selectedModel: (typeof creatorModelOptions)[number];
-  creatorFeePerCallUsd: number;
   totalPricePerCallUsd: number;
   publicCapability: string;
   typicalOutputUpload: {
@@ -967,7 +957,7 @@ async function createAgentWithGatewayUpload({
     public_mcp_contract: publicCapability,
     memwal_policy:
       "Hirer-visible results are stored in hirer-scoped memWal records. Creator private files stay behind the gateway.",
-    skills: [selectedModel.label, "Protected Harness", "Codex MCP"],
+    skills: ["Protected Harness", "Codex MCP"],
     protected_asset_classes: [
       "Agent Harness archive",
       "AGENTS.md",
@@ -975,12 +965,9 @@ async function createAgentWithGatewayUpload({
       "private prompts",
     ],
     price_per_1m_tokens_sui: totalPricePerCallUsd,
-    base_price_per_1m_tokens_sui: selectedModel.basePricePerCallUsd,
-    creator_fee_per_1m_tokens_sui: creatorFeePerCallUsd,
     price_per_1m_tokens_usd: totalPricePerCallUsd,
     price_per_call_usd: totalPricePerCallUsd,
-    base_price_per_1m_tokens_usd: selectedModel.basePricePerCallUsd,
-    creator_fee_per_1m_tokens_usd: creatorFeePerCallUsd,
+    free_calls: trialCallAllowance,
     storage_network: "walrus-testnet",
     result_title: draft.typicalOutputTitle,
     result_summary: draft.typicalOutputSummary,
@@ -989,8 +976,6 @@ async function createAgentWithGatewayUpload({
     result_media_type: typicalOutputUpload?.type,
     metadata: {
       source: "web_create_agent",
-      modelId: selectedModel.id,
-      modelLabel: selectedModel.label,
       howToUse: draft.howToUse,
       typicalOutputMediaPath: typicalOutputUpload?.path,
     },
@@ -1045,6 +1030,7 @@ async function updateAgentWithGatewayUpload({
     price_per_1m_tokens_sui: tokenPrice,
     price_per_1m_tokens_usd: tokenPrice,
     price_per_call_usd: tokenPrice,
+    free_calls: trialCallAllowance,
     storage_network: "walrus-testnet",
     release_notes: releaseNotes || "Updated from the HireMe web creator UI.",
     result_title: agent.resultPreview.title,
@@ -1163,6 +1149,7 @@ async function createAgentAccessRecord({
     wallet_address: user.wallet,
     email: user.email,
     source: accessType === "trial" ? "web_try" : "web_hire",
+    ...(accessType === "trial" ? { trial_calls: trialCallAllowance } : {}),
   };
   const endpoint = accessType === "trial" ? "/v1/agents/try" : "/v1/agents/hire";
 
@@ -1474,7 +1461,7 @@ function mapCreatedAgentRecordToAgent(record: CreatedAgentRecord): Agent {
       billing: {
         unit: "per_agent",
         basePriceUsd: record.pricePerCallUsd,
-        includedCalls: 0,
+        includedCalls: trialCallAllowance,
         overagePricePerCallUsd: record.pricePerCallUsd,
         note: `${formatAgentPrice(record.pricePerCallUsd)} through the executing Agent ledger.`,
       },
@@ -1490,8 +1477,8 @@ function mapCreatedAgentRecordToAgent(record: CreatedAgentRecord): Agent {
     memwalPolicy:
       "Gateway-managed results are stored as hirer-scoped memWal metadata.",
     skills: [
-      record.modelLabel || "MCP",
       "Protected Harness",
+      "Codex MCP",
       isPublished ? "Gateway Registered" : "Local Draft",
     ],
     protectedAssets: ["Agent Harness archive", "private prompts", "skills/**"],
@@ -1507,7 +1494,7 @@ function mapCreatedAgentRecordToAgent(record: CreatedAgentRecord): Agent {
           : "This local draft exposes only public metadata until production registration.",
     },
     pricePerCallUsd: record.pricePerCallUsd,
-    freeCalls: 0,
+    freeCalls: trialCallAllowance,
     rating: 0,
     calls: 0,
     latencyMs: 0,
@@ -1554,7 +1541,7 @@ function createLocalAccessRecord({
     status: "active",
     accessType,
     receiptObjectId: `hire_receipt_${accessType}_${agent.id}_${hirerId}`,
-    trialCallsRemaining: accessType === "trial" ? 3 : null,
+    trialCallsRemaining: accessType === "trial" ? trialCallAllowance : null,
     pricePerCallUsd: agent.pricePerCallUsd,
     ownerSuiAddress: null,
     createdAt: now.toISOString(),
@@ -2273,6 +2260,89 @@ function HarnessImageCard({
   );
 }
 
+function CopyableCodeBlock({
+  code,
+  description,
+  label,
+}: {
+  code: string;
+  description?: string;
+  label: string;
+}) {
+  const [copied, setCopied] = useState(false);
+  const resetTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (resetTimerRef.current !== null) {
+        window.clearTimeout(resetTimerRef.current);
+      }
+    };
+  }, []);
+
+  async function handleCopy() {
+    await writeTextToClipboard(code);
+    setCopied(true);
+    if (resetTimerRef.current !== null) {
+      window.clearTimeout(resetTimerRef.current);
+    }
+    resetTimerRef.current = window.setTimeout(() => {
+      setCopied(false);
+      resetTimerRef.current = null;
+    }, 1600);
+  }
+
+  return (
+    <div className="overflow-hidden rounded-2xl border border-[#b7d7ff] bg-[#07162d] shadow-[0_16px_42px_rgba(8,27,61,0.16)]">
+      <div className="flex flex-col gap-3 border-b border-white/10 bg-white/[0.04] px-4 py-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-sm font-semibold leading-5 text-white">
+            <Terminal className="size-4 text-[#8ec5ff]" />
+            <span>{label}</span>
+          </div>
+          {description ? (
+            <p className="mt-1 text-xs leading-5 text-white/62">
+              {description}
+            </p>
+          ) : null}
+        </div>
+        <button
+          aria-label={`Copy ${label}`}
+          className="inline-flex h-9 shrink-0 items-center justify-center gap-2 rounded-full border border-white/12 bg-white/10 px-3 text-xs font-semibold text-white transition hover:bg-white/16 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8ec5ff]/60 focus-visible:ring-offset-2 focus-visible:ring-offset-[#07162d]"
+          onClick={() => {
+            void handleCopy();
+          }}
+          type="button"
+        >
+          {copied ? <CheckCircle2 className="size-3.5" /> : <Copy className="size-3.5" />}
+          <span>{copied ? "Copied" : "Copy"}</span>
+        </button>
+      </div>
+      <pre className="m-0 max-h-[360px] overflow-x-auto p-4 text-left text-[0.78rem] leading-6 text-[#dbeafe] sm:text-[0.82rem]">
+        <code>{code}</code>
+      </pre>
+    </div>
+  );
+}
+
+async function writeTextToClipboard(text: string) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  const textArea = document.createElement("textarea");
+  textArea.value = text;
+  textArea.setAttribute("readonly", "");
+  textArea.style.position = "fixed";
+  textArea.style.left = "-9999px";
+  textArea.style.top = "0";
+  document.body.appendChild(textArea);
+  textArea.select();
+  document.execCommand("copy");
+  document.body.removeChild(textArea);
+}
+
 function MakeAgentSection() {
   return (
     <section id="make-agent" className="landing-wave landing-wave-sky landing-soft-grid bg-gradient-to-b from-[#eef6ff] via-[#f7fbff] to-[#eaf4ff] px-4 py-16 shadow-[inset_0_1px_0_rgba(255,255,255,0.9)] md:px-8 md:py-24">
@@ -2313,6 +2383,15 @@ function MakeAgentSection() {
                     <p className="mt-2 docs-card-copy max-w-[560px]">
                       {step.copy}
                     </p>
+                    {index === 0 ? (
+                      <div className="mt-4 max-w-[720px]">
+                        <CopyableCodeBlock
+                          code={codexCreatorSetupCommand}
+                          description="Installs the creator template plugin and connects Codex to the HireMe Render MCP server."
+                          label="One-time Codex setup"
+                        />
+                      </div>
+                    ) : null}
                   </div>
                 </div>
               </li>
@@ -2567,8 +2646,8 @@ function DocsPage() {
                 <div className="mt-4 grid gap-4">
                   {[
                     {
-                      title: "Model = engine",
-                      copy: "The model reasons, but the Agent is the product.",
+                      title: "Agent = paid capability",
+                      copy: "Buyers choose the packaged workflow, not an engine setting.",
                     },
                     {
                       title: "Harness = working method",
@@ -2653,7 +2732,7 @@ function DocsPage() {
                 <DocsMiniBlock
                   id="meet-agent"
                   title="What counts as an Agent?"
-                  copy="A model plus a private Harness, tool habits, and memory rules."
+                  copy="A private Harness, tool habits, memory rules, and a public contract."
                 />
                 <DocsMiniBlock
                   id="meet-not-prompts"
@@ -2887,13 +2966,53 @@ function DocsPage() {
               <DocsMiniBlock
                 id="publish-web"
                 title="Method 1: Web"
-                copy="Write the card, upload the Harness, choose the model, set the fee, and publish."
+                copy="Write the card, upload the Harness, set the fee, and publish."
               />
               <DocsMiniBlock
                 id="publish-mcp"
                 title="Method 2: MCP"
-                copy="Use Codex to build the folder, then publish through HireMe MCP."
+                copy="Use the local hireme-creator plugin to build the folder, then publish through the Render gateway."
               />
+            </div>
+            <div
+              className="scroll-mt-24 rounded-3xl border border-[#dbeafe] bg-[#f7fbff] p-5 md:p-6"
+              id="publish-codex-setup"
+            >
+              <div className="docs-card-title text-[#191f28]">
+                Start with a template from Codex
+              </div>
+              <p className="mt-2 docs-card-copy max-w-[680px]">
+                Run this once in your terminal. It installs the local creator
+                template plugin, connects the OAuth HTTP MCP server to the
+                Render gateway, then opens the HireMe login flow for Agent use.
+              </p>
+              <div className="mt-4">
+                <CopyableCodeBlock
+                  code={codexCreatorSetupCommand}
+                  description="Use this for the public website flow. Localhost is only for gateway development."
+                  label="Codex setup"
+                />
+              </div>
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <div className="rounded-2xl border border-[#dbeafe] bg-white p-4">
+                  <div className="docs-card-title text-[#191f28]">
+                    <code>hireme-creator</code>
+                  </div>
+                  <p className="mt-1.5 docs-card-copy">
+                    Local stdio plugin. Creates template folders and publishes
+                    local Harness folders.
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-[#dbeafe] bg-white p-4">
+                  <div className="docs-card-title text-[#191f28]">
+                    <code>hireme</code>
+                  </div>
+                  <p className="mt-1.5 docs-card-copy">
+                    OAuth HTTP MCP server on Render. Lists access, runs hired
+                    Agents, and checks usage.
+                  </p>
+                </div>
+              </div>
             </div>
             <div className="rounded-3xl border border-[#dbeafe] bg-white p-5">
               <div className="docs-card-title text-[#191f28]">
@@ -2986,7 +3105,7 @@ function DocsPage() {
               {[
                 {
                   title: "What counts as an Agent?",
-                  copy: "A HireMe Agent is a model-agnostic worker packaged with private instructions, skills, examples, tool habits, memory rules, and a public execution contract.",
+                  copy: "A HireMe Agent is a packaged worker with private instructions, skills, examples, tool habits, memory rules, and a public execution contract.",
                 },
                 {
                   title: "How does protected execution work?",
@@ -4019,9 +4138,7 @@ function MyAgentsPage({
       id: `created-${record.id}`,
       label: "Registered",
       title: record.agentName,
-      description: `${record.modelLabel || "Model"} · ${formatAgentPriceShort(
-        record.pricePerCallUsd,
-      )} · ${record.status}`,
+      description: `${formatAgentPriceShort(record.pricePerCallUsd)} · ${record.status}`,
       timestamp: record.createdAt,
       tone: "registered" as const,
     })),
@@ -4395,8 +4512,7 @@ function CreatedAgentCard({ record }: { record: CreatedAgentRecord }) {
           </div>
         ) : null}
 
-        <div className="mt-5 grid gap-3 sm:grid-cols-3">
-          <Metric icon={Bot} label="Model" value={record.modelLabel || "N/A"} />
+        <div className="mt-5 grid gap-3 sm:grid-cols-2">
           <Metric
             icon={CircleDollarSign}
             label="Token fee"
@@ -5090,7 +5206,7 @@ function CreateAgentPage({ user }: { user: AuthUser | null }) {
     {
       label: "Pricing",
       id: "pricing",
-      description: "Model choice and creator fee.",
+      description: "Buyer price.",
     },
     {
       label: "Protection",
@@ -5120,8 +5236,7 @@ function CreateAgentPage({ user }: { user: AuthUser | null }) {
       "Returns prioritized findings, suggested patches, missing tests, and rollout notes.",
     typicalOutputSample:
       "High: RLS policy allows cross-tenant reads. Fix by scoping owner_id in the policy and add a regression test for rejected tenant access.",
-    modelId: "gpt-5.4" as CreatorModelId,
-    creatorFeePerCallUsd: "1.000",
+    pricePerCallUsd: "1.000",
   });
   const [agentFiles, setAgentFiles] = useState<File[]>([]);
   const [typicalOutputMedia, setTypicalOutputMedia] = useState<File | null>(null);
@@ -5135,15 +5250,11 @@ function CreateAgentPage({ user }: { user: AuthUser | null }) {
   const [sealedRecord, setSealedRecord] = useState<SealedHarnessRecord>();
   const [isSealing, setIsSealing] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
-  const selectedModel =
-    creatorModelOptions.find((model) => model.id === draft.modelId) ??
-    creatorModelOptions[1];
-  const creatorFeePerCallUsd = Math.max(
+  const pricePerCallUsd = Math.max(
     0,
-    Number.parseFloat(draft.creatorFeePerCallUsd) || 0,
+    Number.parseFloat(draft.pricePerCallUsd) || 0,
   );
-  const totalPricePerCallUsd =
-    selectedModel.basePricePerCallUsd + creatorFeePerCallUsd;
+  const totalPricePerCallUsd = pricePerCallUsd;
   const agentSlug = slugifyAgentName(draft.agentName) || "new-agent";
   const publicCapability = `${agentSlug}(task, context, budget_calls)`;
   const memWalScope = `agent:${agentSlug}`;
@@ -5197,9 +5308,8 @@ function CreateAgentPage({ user }: { user: AuthUser | null }) {
         return null;
       }
       case 1: {
-        if (!draft.modelId) return "Choose a model before continuing.";
-        if (Number.isNaN(creatorFeePerCallUsd) || creatorFeePerCallUsd < 0) {
-          return "Set a valid creator fee before continuing.";
+        if (Number.isNaN(pricePerCallUsd) || pricePerCallUsd < 0) {
+          return "Set a valid price before continuing.";
         }
         return null;
       }
@@ -5271,8 +5381,6 @@ function CreateAgentPage({ user }: { user: AuthUser | null }) {
       const gatewayRegistration = await createAgentWithGatewayUpload({
         draft,
         agentSlug,
-        selectedModel,
-        creatorFeePerCallUsd,
         totalPricePerCallUsd,
         publicCapability,
         typicalOutputUpload,
@@ -5294,8 +5402,6 @@ function CreateAgentPage({ user }: { user: AuthUser | null }) {
           .slice(0, 12)}`,
         agentName: draft.agentName,
         description: draft.description || draft.headline,
-        modelId: selectedModel.id,
-        modelLabel: selectedModel.label,
         network: registeredArtifact.network || "walrus-testnet",
         sealProvider:
           registeredArtifact.encryptionProvider || "platform_encryption",
@@ -5322,8 +5428,6 @@ function CreateAgentPage({ user }: { user: AuthUser | null }) {
           harnessFile.name,
         ],
         epochs: 3,
-        basePricePerCallUsd: selectedModel.basePricePerCallUsd,
-        creatorFeePerCallUsd,
         pricePerCallUsd: totalPricePerCallUsd,
         policyRule: `Caller must hold an active AgentHireReceipt. Results commit safe summaries and artifact digests to ${memWalScope}.`,
         createdAt: gatewayRegistration.registeredAt || new Date().toISOString(),
@@ -5344,11 +5448,7 @@ function CreateAgentPage({ user }: { user: AuthUser | null }) {
         typicalOutputMediaUrl: typicalOutputUpload?.url,
         typicalOutputMediaPath: typicalOutputUpload?.path,
         typicalOutputMediaType: typicalOutputUpload?.type,
-        modelId: selectedModel.id,
-        modelLabel: selectedModel.label,
         pricePerCallUsd: totalPricePerCallUsd,
-        basePricePerCallUsd: selectedModel.basePricePerCallUsd,
-        creatorFeePerCallUsd,
         walrusBlobId: registeredArtifact.walrusBlobId,
         suiObjectId: registeredArtifact.suiObjectId,
         ciphertextDigest: registeredArtifact.ciphertextDigest,
@@ -5414,9 +5514,8 @@ function CreateAgentPage({ user }: { user: AuthUser | null }) {
     {
       label: "Pricing",
       ready:
-        Boolean(draft.modelId) &&
-        !Number.isNaN(creatorFeePerCallUsd) &&
-        creatorFeePerCallUsd >= 0,
+        !Number.isNaN(pricePerCallUsd) &&
+        pricePerCallUsd >= 0,
     },
     {
       label: "Protection",
@@ -5451,8 +5550,8 @@ function CreateAgentPage({ user }: { user: AuthUser | null }) {
       case 1:
         return (
           <div className="grid gap-1.5 text-sm text-[#4e5968]">
-            <div className="font-medium text-[#191f28]">{selectedModel.label}</div>
-            <div>{formatAgentPrice(totalPricePerCallUsd)} per run · creator fee {formatAgentPrice(creatorFeePerCallUsd)}</div>
+            <div className="font-medium text-[#191f28]">{formatAgentPrice(totalPricePerCallUsd)}</div>
+            <div>Buyer price per 1M tokens</div>
           </div>
         );
       case 2:
@@ -5615,27 +5714,14 @@ function CreateAgentPage({ user }: { user: AuthUser | null }) {
               <WizardStepCard
                 active={activeStep === 1}
                 body={
-                  <div className="grid gap-4 md:grid-cols-[1fr_1fr_1.2fr] md:items-end">
-                    <Field label="Model">
-                      <select
-                        className="h-10 w-full rounded-md border border-input bg-white px-3 py-2 text-sm shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                        onChange={updateDraft("modelId")}
-                        value={draft.modelId}
-                      >
-                        {creatorModelOptions.map((model) => (
-                          <option key={model.id} value={model.id}>
-                            {model.label}
-                          </option>
-                        ))}
-                      </select>
-                    </Field>
-                    <Field label="Your fee / 1M tokens">
+                  <div className="grid gap-4 md:grid-cols-[1fr_1.2fr] md:items-end">
+                    <Field label="Price / 1M tokens">
                       <Input
                         min="0"
                         step="0.001"
                         type="number"
-                        value={draft.creatorFeePerCallUsd}
-                        onChange={updateDraft("creatorFeePerCallUsd")}
+                        value={draft.pricePerCallUsd}
+                        onChange={updateDraft("pricePerCallUsd")}
                       />
                     </Field>
                     <div className="rounded-2xl border border-[#cfe0ff] bg-[#f7fbff] px-4 py-3">
@@ -5648,7 +5734,7 @@ function CreateAgentPage({ user }: { user: AuthUser | null }) {
                     </div>
                   </div>
                 }
-                description="Set the model cost and your creator fee."
+                description="Set the buyer price for this Agent."
                 footer={
                   <div className="flex flex-col gap-3 border-t border-[#ece8fb] pt-4 md:flex-row md:items-center md:justify-between">
                     <Button onClick={handleBack} size="lg" type="button" variant="secondary">
@@ -6186,7 +6272,6 @@ function SealedRecordPreview({ record }: { record: SealedHarnessRecord }) {
       </div>
 
       <div className="grid gap-3 md:grid-cols-4">
-        <RecordCell label="Model" value={record.modelLabel || "N/A"} />
         <RecordCell label="Token fee" value={formatAgentPrice(record.pricePerCallUsd)} />
         <RecordCell label="Provider" value={record.sealProvider} />
         <RecordCell label="KMS key" value={record.platformKmsKeyId} />

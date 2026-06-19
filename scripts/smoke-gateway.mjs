@@ -23,8 +23,8 @@ try {
   await waitForGateway(gatewayUrl);
 
   const health = await getJson(`${gatewayUrl}/health`);
-  if (health.llmProvider !== "ollama" || health.llmConfigured !== false) {
-    throw new Error("Gateway health did not expose the disabled Ollama smoke configuration");
+  if (!health.ok || health.service !== "hireme-gateway") {
+    throw new Error("Gateway health did not expose the expected service status");
   }
 
   const removedDemoAgent = await postJsonAllowError(`${gatewayUrl}/v1/agents/get`, gatewayKey, {
@@ -168,7 +168,8 @@ try {
     !httpMcpTools.some((tool) => tool.name === "hireme_whoami") ||
     !httpMcpTools.some((tool) => tool.name === "hireme_list_my_agents") ||
     !httpMcpTools.some((tool) => tool.name === "hireme_call_agent") ||
-    !httpMcpTools.some((tool) => tool.name === "hireme_update_agent_from_folder")
+    !httpMcpTools.some((tool) => tool.name === "hireme_register_agent") ||
+    httpMcpTools.some((tool) => tool.name === "hireme_update_agent_from_folder")
   ) {
     throw new Error("HTTP MCP OAuth flow did not initialize HireMe tools");
   }

@@ -80,27 +80,28 @@ async function updateMcpConfig() {
   if (!gatewayUrl) return;
   const mcpPath = path.join(targetPluginDir, ".mcp.json");
   const mcpConfig = await readJson(mcpPath);
-  const server = mcpConfig.mcpServers?.hireme;
+  const server = mcpConfig.mcpServers?.["hireme-creator"];
   if (!server) {
-    throw new Error("Expected mcpServers.hireme in exported .mcp.json");
+    throw new Error("Expected mcpServers.hireme-creator in exported .mcp.json");
   }
   server.env = {
     ...(server.env || {}),
     HIREME_MCP_GATEWAY_URL: gatewayUrl.replace(/\/$/, ""),
     HIREME_MCP_GATEWAY_REQUIRED: "1",
+    HIREME_MCP_GATEWAY_TIMEOUT_MS: "30000",
   };
   await writeJson(mcpPath, mcpConfig);
 }
 
 async function writeMarketplace() {
   const marketplace = {
-    name: "hireme",
+    name: "hireme-creator",
     interface: {
-      displayName: "HireMe Plugin Marketplace",
+      displayName: "HireMe Creator Plugin Marketplace",
     },
     plugins: [
       {
-        name: "hireme",
+        name: "hireme-creator",
         source: {
           source: "local",
           path: "./plugins/hireme",
@@ -119,10 +120,10 @@ async function writeMarketplace() {
 async function writeReadme() {
   const gatewayLine = gatewayUrl
     ? `This export pins \`HIREME_MCP_GATEWAY_URL=${gatewayUrl.replace(/\/$/, "")}\` in \`plugins/hireme/.mcp.json\`.`
-    : "This export keeps the plugin's local default gateway. For public distribution, re-export with `--gateway-url https://your-gateway.example`.";
-  const readme = `# HireMe Codex Plugin
+    : "This export keeps the plugin's default Render gateway. For another deployment, re-export with `--gateway-url https://your-gateway.example`.";
+  const readme = `# HireMe Creator Codex Plugin
 
-This repository is the distribution bundle for the HireMe Codex plugin. It intentionally contains only the Codex-installable plugin and marketplace metadata.
+This repository is the distribution bundle for the HireMe Creator Codex plugin. It intentionally contains only the Codex-installable creator plugin and marketplace metadata.
 
 It does not contain the HireMe web app, gateway server, Supabase migrations, Walrus scripts, or example Agent Harness folders. Those stay in the main HireMe service repository.
 
@@ -132,7 +133,7 @@ ${gatewayLine}
 
 \`\`\`bash
 codex plugin marketplace add poqopo/hireme-codex-plugin --ref main
-codex plugin add hireme --marketplace hireme
+codex plugin add hireme-creator --marketplace hireme-creator
 \`\`\`
 
 Then restart Codex and check:
@@ -147,7 +148,7 @@ Then restart Codex and check:
 From the main HireMe service repo:
 
 \`\`\`bash
-npm run plugin:export -- ../hireme-codex-plugin --gateway-url https://your-gateway.example
+npm run plugin:export -- ../hireme-codex-plugin --gateway-url https://hireme-gateway.onrender.com
 \`\`\`
 
 Then commit and push from this plugin repo.

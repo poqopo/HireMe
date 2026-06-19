@@ -5,7 +5,7 @@
   },
   "plugins": [
     {
-      "name": "hireme",
+      "name": "hireme-creator",
       "source": {
         "source": "local",
         "path": "./plugins/hireme"

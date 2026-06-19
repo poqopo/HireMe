@@ -1,13 +1,9 @@
 export type HarnessUploadDraft = {
   agentName: string;
   description?: string;
-  modelId?: string;
-  modelLabel?: string;
   publicCapability: string;
   creatorAddress: string;
   policyRule: string;
-  basePricePerCallUsd?: number;
-  creatorFeePerCallUsd?: number;
   pricePerCallUsd: number;
   pricePer1MTokensSui?: number;
   epochs: number;
@@ -18,8 +14,6 @@ export type SealedHarnessRecord = {
   id: string;
   agentName: string;
   description?: string;
-  modelId?: string;
-  modelLabel?: string;
   network: "walrus-testnet" | "walrus-mainnet";
   sealProvider: string;
   platformKmsKeyId: string;
@@ -36,8 +30,6 @@ export type SealedHarnessRecord = {
   fileCount: number;
   entryPreview: string[];
   epochs: number;
-  basePricePerCallUsd?: number;
-  creatorFeePerCallUsd?: number;
   pricePerCallUsd: number;
   pricePer1MTokensSui?: number;
   policyRule: string;
@@ -65,13 +57,9 @@ export async function createLocalSealedHarnessRecord(
   const fallbackPayload = JSON.stringify({
     agentName: draft.agentName,
     description: draft.description,
-    modelId: draft.modelId,
-    modelLabel: draft.modelLabel,
     publicCapability: draft.publicCapability,
     creatorAddress: draft.creatorAddress,
     policyRule: draft.policyRule,
-    basePricePerCallUsd: draft.basePricePerCallUsd,
-    creatorFeePerCallUsd: draft.creatorFeePerCallUsd,
     createdAt: new Date().toISOString(),
   });
   const files = draft.files ?? [];
@@ -93,8 +81,6 @@ export async function createLocalSealedHarnessRecord(
     id: `sealed_${Date.now().toString(36)}`,
     agentName: draft.agentName,
     description: draft.description,
-    modelId: draft.modelId,
-    modelLabel: draft.modelLabel,
     network: "walrus-testnet",
     sealProvider: "platform_encryption",
     platformKmsKeyId: "platform:local-dev-key",
@@ -115,8 +101,6 @@ export async function createLocalSealedHarnessRecord(
         ? fileDigests.slice(0, 5).map((item) => item.path)
         : ["local-harness-preview.json"],
     epochs: draft.epochs,
-    basePricePerCallUsd: draft.basePricePerCallUsd,
-    creatorFeePerCallUsd: draft.creatorFeePerCallUsd,
     pricePerCallUsd: draft.pricePerCallUsd,
     pricePer1MTokensSui: draft.pricePer1MTokensSui ?? draft.pricePerCallUsd,
     policyRule: draft.policyRule,

@@ -11,11 +11,12 @@ import {
   mkdtemp,
   readFile,
   readdir,
+  realpath,
   rm,
   stat,
   writeFile,
 } from "node:fs/promises";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, extname, join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
 import { createClient } from "@supabase/supabase-js";
 import {
@@ -25,7 +26,16 @@ import {
 import {
   validateSealedArtifact,
 } from "./localSealedArtifact.mjs";
-import { readMemWalSnapshot, writeUserMemWalResult } from "./memWal.mjs";
+import {
+  readMemWalSnapshot,
+  writeUserMemWalResult,
+} from "./memWal.mjs";
+import {
+  appendMcpConversationTurn,
+  createMcpConversationSession,
+  listMcpConversationSessions,
+  readMcpConversationSession,
+} from "./memWalSdk.mjs";
 import { readWalrusAgentArtifact } from "./walrusAgentArtifact.mjs";
 import {
   approveSealAccess,
@@ -141,6 +151,15 @@ const defaultHarnessRuntimeFileLimit = Math.max(
   0,
   Math.trunc(Number(process.env.HIREME_HARNESS_RUNTIME_FILE_LIMIT || "8") || 8),
 );
+const defaultAgentResultFileMaxBytes = Math.max(
+  1,
+  Math.trunc(Number(process.env.HIREME_AGENT_RESULT_FILE_MAX_BYTES || "10485760") || 10_485_760),
+);
+const defaultAgentResultFileRoots = parseAgentResultFileRoots(
+  process.env.HIREME_AGENT_RESULT_FILE_ROOTS ||
+    process.env.HIREME_AGENT_RESULT_DIRS ||
+    ".hireme/gateway/results,output",
+);
 const ollamaDisabled =
   String(process.env.HIREME_OLLAMA_DISABLED || "").toLowerCase() === "true" ||
   process.env.HIREME_OLLAMA_DISABLED === "1";
@@ -149,6 +168,8 @@ const openAIDisabled =
   process.env.HIREME_OPENAI_DISABLED === "1";
 const execFileAsync = promisify(execFile);
 let gatewayLogQueue = Promise.resolve();
+const trialCallAllowance = 100;
+let fixtureExecutorOutputIndex = 0;
 
 const agents = [
   {
@@ -166,7 +187,7 @@ const agents = [
     skills: ["Protocol research", "Citation audit", "Market mapping"],
     hiddenAssetClasses: ["AGENTS.md", "skills/**", "ranking prompt", "source scoring harness"],
     pricePerCallUsd: 18,
-    freeCalls: 25,
+    freeCalls: trialCallAllowance,
     rating: 4.9,
     calls: 18420,
     latencyMs: 920,
@@ -186,7 +207,7 @@ const agents = [
     skills: ["React Vite", "Supabase", "MCP scaffolding"],
     hiddenAssetClasses: ["AGENTS.md", "skills/**", "patch templates", "review heuristics"],
     pricePerCallUsd: 32,
-    freeCalls: 10,
+    freeCalls: trialCallAllowance,
     rating: 4.8,
     calls: 12290,
     latencyMs: 1100,
@@ -206,7 +227,7 @@ const agents = [
     skills: ["Prompt leakage", "Tool abuse", "Policy checks"],
     hiddenAssetClasses: ["AGENTS.md", "skills/**", "red-team set", "grader rubric"],
     pricePerCallUsd: 41,
-    freeCalls: 5,
+    freeCalls: trialCallAllowance,
     rating: 4.7,
     calls: 8740,
     latencyMs: 1280,
@@ -226,7 +247,7 @@ const agents = [
     skills: ["Usage ledger", "Pricing tiers", "Payout analytics"],
     hiddenAssetClasses: ["AGENTS.md", "skills/**", "fraud rules", "tier optimizer"],
     pricePerCallUsd: 15,
-    freeCalls: 50,
+    freeCalls: trialCallAllowance,
     rating: 4.6,
     calls: 20450,
     latencyMs: 760,
@@ -246,7 +267,7 @@ const agents = [
     skills: ["Launch copy", "Channel plan", "Audience mapping"],
     hiddenAssetClasses: ["AGENTS.md", "skills/**", "positioning vault", "channel memory"],
     pricePerCallUsd: 22,
-    freeCalls: 20,
+    freeCalls: trialCallAllowance,
     rating: 4.5,
     calls: 9390,
     latencyMs: 880,
@@ -266,7 +287,7 @@ const agents = [
     skills: ["Tool routing", "Approvals", "Spend control"],
     hiddenAssetClasses: ["AGENTS.md", "skills/**", "routing graph", "approval matrix"],
     pricePerCallUsd: 12,
-    freeCalls: 100,
+    freeCalls: trialCallAllowance,
     rating: 4.7,
     calls: 31700,
     latencyMs: 690,
@@ -287,7 +308,7 @@ const agents = [
     skills: ["Walrus read", "Supabase registry", "Folder manifest inspection"],
     hiddenAssetClasses: ["AGENTS.md"],
     pricePerCallUsd: 1,
-    freeCalls: 100,
+    freeCalls: trialCallAllowance,
     rating: 5.0,
     calls: 1,
     latencyMs: 1600,
@@ -296,6 +317,7 @@ const agents = [
 
 const protectedArtifacts = new Map();
 const sessions = new Map([[defaultInstallationId, "walrus-researcher"]]);
+const mcpConversationSessions = new Map();
 const ledger = [];
 const agentEntitlements = new Map();
 const suiPaymentIntents = new Map();
@@ -398,15 +420,6 @@ const server = createServer(async (req, res) => {
         walrusUploadRelayConfigured: Boolean(process.env.WALRUS_UPLOAD_RELAY_URL),
         walrusPayerConfigured: isWalrusPayerConfigured(),
         suiNetwork: process.env.SUI_NETWORK || "testnet",
-        llmProvider: defaultLlmProvider,
-        llmModel:
-          defaultLlmProvider === "ollama" ? defaultOllamaModel : defaultOpenAIModel,
-        llmConfigured:
-          defaultLlmProvider === "ollama"
-            ? isOllamaConfigured()
-            : defaultLlmProvider === "openai"
-              ? isOpenAIConfigured()
-              : false,
       });
       return;
     }
@@ -601,8 +614,38 @@ const server = createServer(async (req, res) => {
       return;
     }
 
+    if (req.method === "POST" && url.pathname === "/v1/mcp-sessions/start") {
+      sendJson(res, 200, await startMcpConversation(body));
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/v1/mcp-sessions/resume") {
+      sendJson(res, 200, await resumeMcpConversation(body));
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/v1/mcp-sessions/current") {
+      sendJson(res, 200, await currentMcpConversation(body));
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/v1/mcp-sessions/list") {
+      sendJson(res, 200, await listMcpConversations(body));
+      return;
+    }
+
     if (req.method === "POST" && url.pathname === "/v1/agent-call") {
       sendJson(res, 200, await runProtectedAgent(body));
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/v1/agent-loop") {
+      sendJson(res, 200, await runProtectedAgentLoop(body));
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/v1/agent-team") {
+      sendJson(res, 200, await runProtectedAgentTeam(body));
       return;
     }
 
@@ -734,29 +777,14 @@ const httpMcpTools = [
       properties: {
         request: { type: "string", minLength: 1 },
         agent_id: { type: "string" },
+        conversation_id: {
+          type: "string",
+          description:
+            "Optional memWal MCP conversation id. Uses the selected/default conversation when omitted.",
+        },
         budget_calls: { type: "integer", minimum: 1 },
       },
       required: ["request"],
-    },
-  },
-  {
-    name: "hireme_create_agent_template",
-    title: "Create a local Agent template",
-    description:
-      "Create a starter HireMe Agent working folder with AGENTS.md, public metadata, skills, harness policy, and examples.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        agent_id: { type: "string" },
-        name: { type: "string" },
-        destination_path: { type: "string" },
-        category: { type: "string" },
-        creator: { type: "string" },
-        headline: { type: "string" },
-        public_summary: { type: "string" },
-        price_per_1m_tokens_sui: { type: "number", minimum: 0 },
-        force: { type: "boolean" },
-      },
     },
   },
   {
@@ -858,6 +886,56 @@ const httpMcpTools = [
     },
   },
   {
+    name: "hireme_start_conversation",
+    title: "Start memWal MCP conversation",
+    description:
+      "Create or select a hirer-owned MCP conversation stored through memWal.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        conversation_id: { type: "string" },
+        title: { type: "string" },
+        agent_id: { type: "string" },
+      },
+    },
+  },
+  {
+    name: "hireme_resume_conversation",
+    title: "Resume memWal MCP conversation",
+    description:
+      "Load an existing hirer-owned MCP conversation from memWal and make it active.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        conversation_id: { type: "string" },
+        limit: { type: "integer", minimum: 0, maximum: 100 },
+      },
+    },
+  },
+  {
+    name: "hireme_current_conversation",
+    title: "Get current MCP conversation",
+    description:
+      "Return the selected/default MCP conversation and recent decrypted owner-visible turns.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        conversation_id: { type: "string" },
+        limit: { type: "integer", minimum: 0, maximum: 100 },
+      },
+    },
+  },
+  {
+    name: "hireme_list_conversations",
+    title: "List MCP conversations",
+    description:
+      "List hirer-owned MCP conversation records stored through memWal.",
+    inputSchema: {
+      type: "object",
+      properties: {},
+    },
+  },
+  {
     name: "hireme_call_agent",
     title: "Call a hired HireMe agent",
     description:
@@ -867,6 +945,11 @@ const httpMcpTools = [
       properties: {
         agent_id: { type: "string" },
         task: { type: "string" },
+        conversation_id: {
+          type: "string",
+          description:
+            "Optional memWal MCP conversation id. Recent turns are loaded as context and this call is appended.",
+        },
         response_mode: {
           type: "string",
           enum: ["direct_answer", "local_codex_execution_brief"],
@@ -874,6 +957,125 @@ const httpMcpTools = [
             "Optional explicit output mode. Omit to let the gateway infer whether the agent should answer directly or hand off to local workspace.",
         },
         budget_calls: { type: "integer", minimum: 1 },
+        hire_receipt_object_id: { type: "string" },
+      },
+      required: ["task"],
+    },
+  },
+  {
+    name: "hireme_call_agent_loop",
+    title: "Call a HireMe agent in a bounded loop",
+    description:
+      "Call a protected Agent repeatedly when the previous Agent output asks Codex to continue. Final result preserves the Agent's own output contract.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        agent_id: { type: "string" },
+        task: { type: "string" },
+        conversation_id: {
+          type: "string",
+          description:
+            "Optional memWal MCP conversation id. Recent turns are loaded as context and loop calls are appended.",
+        },
+        response_mode: {
+          type: "string",
+          enum: ["direct_answer", "local_codex_execution_brief"],
+          description:
+            "Optional explicit output mode. Omit to let the gateway infer whether the agent should answer directly or hand off to local workspace.",
+        },
+        budget_calls: {
+          type: "integer",
+          minimum: 1,
+          maximum: 100,
+          description:
+            "Total maximum Agent calls the loop may spend. Each loop iteration consumes one call.",
+        },
+        max_iterations: {
+          type: "integer",
+          minimum: 1,
+          maximum: 20,
+          description: "Hard loop iteration cap. Defaults to min(budget_calls, 3).",
+        },
+        loop_policy: {
+          type: "string",
+          enum: ["agent_signal", "fixed_tasks", "single"],
+          description:
+            "agent_signal continues only when Agent output includes codexLoop/nextTask. fixed_tasks follows loop_tasks. single disables continuation.",
+        },
+        loop_tasks: {
+          type: "array",
+          items: { type: "string" },
+          description:
+            "Optional follow-up tasks for loop_policy=fixed_tasks, applied after the first call.",
+        },
+        hire_receipt_object_id: { type: "string" },
+      },
+      required: ["task"],
+    },
+  },
+  {
+    name: "hireme_call_agent_team",
+    title: "Call multiple HireMe agents as a shared-conversation team",
+    description:
+      "Call several protected Agents against the same memWal conversation id so each Agent can see prior user and Agent turns and collaborate before a final synthesis.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        agent_ids: {
+          type: "array",
+          items: { type: "string" },
+          minItems: 1,
+          description:
+            "Ordered Agent ids. Each Agent speaks in this order for each round.",
+        },
+        team_agents: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              agent_id: { type: "string" },
+              role: { type: "string" },
+              name: { type: "string" },
+            },
+          },
+          description:
+            "Optional richer team list. Use either team_agents or agent_ids.",
+        },
+        task: { type: "string", minLength: 1 },
+        conversation_id: {
+          type: "string",
+          description:
+            "Shared memWal MCP conversation id. Omit to create a team conversation id.",
+        },
+        response_mode: {
+          type: "string",
+          enum: ["direct_answer", "local_codex_execution_brief"],
+          description:
+            "Output mode for each Agent call. Defaults to direct_answer for team collaboration.",
+        },
+        rounds: {
+          type: "integer",
+          minimum: 1,
+          maximum: 10,
+          description: "How many times the ordered Agent list should speak.",
+        },
+        final_agent_id: {
+          type: "string",
+          description:
+            "Agent id that writes the final synthesis. Defaults to the last team Agent.",
+        },
+        include_final: {
+          type: "boolean",
+          description:
+            "Whether to run a final synthesis call after team rounds. Defaults to true.",
+        },
+        budget_calls: {
+          type: "integer",
+          minimum: 1,
+          maximum: 100,
+          description:
+            "Total Agent calls the team may spend. Each team turn and final synthesis consumes one call.",
+        },
         hire_receipt_object_id: { type: "string" },
       },
       required: ["task"],
@@ -929,111 +1131,6 @@ const httpMcpTools = [
         "walrus_blob_id",
         "sui_object_id",
         "ciphertext_digest",
-      ],
-    },
-  },
-  {
-    name: "hireme_create_agent_from_folder",
-    title: "Create Agent from local folder",
-    description:
-      "Create a protected Agent by archiving a local Agent working folder as tar.gz, encrypting it in the gateway, uploading ciphertext to Walrus, and registering the public Agent card. Web uploads may provide zip or tar.gz archives.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        folder_path: { type: "string" },
-        agent_id: { type: "string" },
-        name: { type: "string" },
-        creator: { type: "string" },
-        category: { type: "string" },
-        status: { type: "string" },
-        headline: { type: "string" },
-        public_summary: { type: "string" },
-        public_mcp_contract: { type: "string" },
-        memwal_policy: { type: "string" },
-        skills: { type: "array", items: { type: "string" } },
-        protected_asset_classes: { type: "array", items: { type: "string" } },
-        price_per_1m_tokens_sui: { type: "number", minimum: 0 },
-        base_price_per_1m_tokens_sui: { type: "number", minimum: 0 },
-        creator_fee_per_1m_tokens_sui: { type: "number", minimum: 0 },
-        price_per_1m_tokens_usd: {
-          type: "number",
-          minimum: 0,
-          description: "Legacy alias. Use price_per_1m_tokens_sui.",
-        },
-        base_price_per_1m_tokens_usd: {
-          type: "number",
-          minimum: 0,
-          description: "Legacy alias. Use base_price_per_1m_tokens_sui.",
-        },
-        creator_fee_per_1m_tokens_usd: {
-          type: "number",
-          minimum: 0,
-          description: "Legacy alias. Use creator_fee_per_1m_tokens_sui.",
-        },
-        result_title: { type: "string" },
-        result_summary: { type: "string" },
-        result_sample: { type: "string" },
-        result_media_url: { type: "string" },
-        result_media_type: { type: "string", enum: ["image", "video"] },
-        exclude: { type: "array", items: { type: "string" } },
-      },
-      required: [
-        "folder_path",
-        "agent_id",
-        "name",
-        "creator",
-        "category",
-        "headline",
-        "public_summary",
-        "public_mcp_contract",
-        "skills",
-        "price_per_1m_tokens_sui",
-      ],
-    },
-  },
-  {
-    name: "hireme_update_agent_from_folder",
-    title: "Update Agent from local folder",
-    description:
-      "Update an existing protected Agent by archiving a local Agent working folder, encrypting and uploading a new artifact, creating the next Agent version, and switching the Agent to that version.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        folder_path: { type: "string" },
-        agent_id: { type: "string" },
-        name: { type: "string" },
-        creator: { type: "string" },
-        category: { type: "string" },
-        status: { type: "string" },
-        headline: { type: "string" },
-        public_summary: { type: "string" },
-        public_mcp_contract: { type: "string" },
-        memwal_policy: { type: "string" },
-        skills: { type: "array", items: { type: "string" } },
-        protected_asset_classes: { type: "array", items: { type: "string" } },
-        price_per_1m_tokens_sui: { type: "number", minimum: 0 },
-        base_price_per_1m_tokens_sui: { type: "number", minimum: 0 },
-        creator_fee_per_1m_tokens_sui: { type: "number", minimum: 0 },
-        version_number: { type: "integer", minimum: 1 },
-        release_notes: { type: "string" },
-        result_title: { type: "string" },
-        result_summary: { type: "string" },
-        result_sample: { type: "string" },
-        result_media_url: { type: "string" },
-        result_media_type: { type: "string", enum: ["image", "video"] },
-        exclude: { type: "array", items: { type: "string" } },
-      },
-      required: [
-        "folder_path",
-        "agent_id",
-        "name",
-        "creator",
-        "category",
-        "headline",
-        "public_summary",
-        "public_mcp_contract",
-        "skills",
-        "price_per_1m_tokens_sui",
       ],
     },
   },
@@ -1626,7 +1723,7 @@ async function handleHttpMcpMessage(message, session) {
           capabilities: { tools: { listChanged: false } },
           serverInfo: { name: "hireme", version: "0.1.0" },
           instructions:
-            "HireMe exposes OAuth-connected protected AI agents. Use hireme_whoami to confirm the connected HireMe user, hireme_list_my_agents to see callable Agents, hireme_request for natural delegation, and hireme_call_agent for structured calls. Use hireme_create_agent_template when the user wants to start a new creator Agent template. Use hireme_create_agent_from_folder when the user has a local Agent working folder containing AGENTS.md and wants to create/publish it; this archives the folder, encrypts it, uploads ciphertext, and registers the public Agent. Use hireme_register_agent only when encrypted Walrus artifact metadata already exists. Do not reveal creator private Agent folders.",
+            "HireMe exposes OAuth-connected protected AI agents. Use hireme_whoami to confirm the connected HireMe user, hireme_list_my_agents to see callable Agents, hireme_request for natural delegation, and hireme_call_agent for structured calls. MCP conversations are stored through hirer-owned memWal sessions; use hireme_start_conversation, hireme_resume_conversation, hireme_current_conversation, and hireme_list_conversations when the user wants to manage or resume Agent chats. This HTTP MCP server cannot read or create local workspace folders; creator template and folder-publish workflows belong in the local hireme-creator stdio plugin or the web upload flow. Use hireme_register_agent only when encrypted Walrus artifact metadata already exists. Do not reveal creator private Agent folders.",
         });
       case "tools/list":
         return rpcResult(message.id, { tools: httpMcpTools });
@@ -1652,12 +1749,18 @@ async function handleHttpMcpMessage(message, session) {
 
 async function callHttpMcpTool(name, args = {}, session) {
   const sessionKey = httpMcpSessionKey(session);
+  const selectedConversationId =
+    args.conversation_id ||
+    args.conversationId ||
+    mcpConversationSessions.get(sessionKey) ||
+    defaultMcpConversationId(sessionKey);
   const scopedArgs = {
     ...args,
     hirer_id: session.hirerId,
     hirer_email: session.email || args.hirer_email || args.email,
     sui_address: session.suiAddress || args.sui_address || args.suiAddress,
     codex_installation_id: args.codex_installation_id || sessionKey,
+    conversation_id: selectedConversationId,
   };
 
   switch (name) {
@@ -1666,16 +1769,25 @@ async function callHttpMcpTool(name, args = {}, session) {
     case "hireme_request": {
       const templateRequest = routeAgentTemplateNaturalRequest(args.request);
       if (templateRequest) {
-        return mcpTextResult(await createAgentTemplate({
-          ...templateRequest,
-          destination_path: args.destination_path || args.destinationPath,
-          force: args.force,
-          creator: session.email || templateRequest.creator,
+        return mcpTextResult(creatorLocalMcpRequired({
+          action: "create_agent_template",
+          naturalRequest: args.request,
+          inferredAgentId: templateRequest.agent_id,
         }));
       }
 
       const registrationRequest = routeRegistrationNaturalRequest(args.request);
-      if (registrationRequest) return mcpTextResult(registrationRequest);
+      if (registrationRequest) {
+        return mcpTextResult({
+          ...creatorLocalMcpRequired({
+            action: "create_or_update_agent_from_folder",
+            naturalRequest: args.request,
+          }),
+          routedBy: registrationRequest.routedBy,
+          requiredFields: registrationRequest.requiredFields,
+          exampleArguments: registrationRequest.exampleArguments,
+        });
+      }
 
       const walrusRequest = routeWalrusNaturalRequest(args.request, args.agent_id);
       if (walrusRequest) {
@@ -1709,7 +1821,9 @@ async function callHttpMcpTool(name, args = {}, session) {
     case "hireme_list_hired_agents":
       return mcpTextResult(listAgents(scopedArgs));
     case "hireme_create_agent_template":
-      return mcpTextResult(await createAgentTemplate(scopedArgs));
+      return mcpTextResult(creatorLocalMcpRequired({
+        action: "create_agent_template",
+      }));
     case "hireme_list_my_agents":
       return mcpTextResult(await listMyAgents(scopedArgs));
     case "hireme_create_sui_payment_intent":
@@ -1737,17 +1851,44 @@ async function callHttpMcpTool(name, args = {}, session) {
         activeAgent: publicAgent(await findOrHydrateAgent(activeAgentId)),
       });
     }
+    case "hireme_start_conversation":
+      return mcpTextResult(await startMcpConversation({
+        ...scopedArgs,
+        conversation_id:
+          args.conversation_id ||
+          args.conversationId ||
+          `conv_${Date.now().toString(36)}_${randomBytes(4).toString("hex")}`,
+      }));
+    case "hireme_resume_conversation":
+      return mcpTextResult(await resumeMcpConversation(scopedArgs));
+    case "hireme_current_conversation":
+      return mcpTextResult(await currentMcpConversation(scopedArgs));
+    case "hireme_list_conversations":
+      return mcpTextResult(await listMcpConversations(scopedArgs));
     case "hireme_call_agent":
       return mcpTextResult(await runProtectedAgent({
         ...scopedArgs,
         agent_id: args.agent_id || sessions.get(sessionKey) || "walrus-researcher",
       }));
+    case "hireme_call_agent_loop":
+      return mcpTextResult(await runProtectedAgentLoop({
+        ...scopedArgs,
+        agent_id: args.agent_id || sessions.get(sessionKey) || "walrus-researcher",
+      }));
+    case "hireme_call_agent_team":
+      return mcpTextResult(await runProtectedAgentTeam(scopedArgs));
     case "hireme_register_agent":
       return mcpTextResult(await registerAgentFromMcp(scopedArgs));
     case "hireme_create_agent_from_folder":
-      return mcpTextResult(await createAgentFromLocalFolder(scopedArgs));
+      return mcpTextResult(creatorLocalMcpRequired({
+        action: "create_agent_from_folder",
+        folderPath: args.folder_path || args.folderPath,
+      }));
     case "hireme_update_agent_from_folder":
-      return mcpTextResult(await updateAgentFromLocalFolder(scopedArgs));
+      return mcpTextResult(creatorLocalMcpRequired({
+        action: "update_agent_from_folder",
+        folderPath: args.folder_path || args.folderPath,
+      }));
     case "hireme_call_walrus_agent":
       return mcpTextResult(await readWalrusAgentArtifact({
         blob_id: args.blob_id || args.blobId,
@@ -1787,6 +1928,147 @@ async function callHttpMcpTool(name, args = {}, session) {
         code: "unknown_tool",
       });
   }
+}
+
+async function startMcpConversation(args = {}) {
+  const installationId = args.codex_installation_id || defaultInstallationId;
+  const hirerId = readHirerId(args);
+  const conversationId = normalizeMcpConversationId(
+    args.conversation_id ||
+      args.conversationId ||
+      `conv_${Date.now().toString(36)}_${randomBytes(4).toString("hex")}`,
+  );
+  const agentId =
+    args.agent_id ||
+    args.agentId ||
+    sessions.get(installationId) ||
+    "walrus-researcher";
+  const stored = await createMcpConversationSession({
+    hirerId,
+    sessionId: conversationId,
+    codexInstallationId: installationId,
+    agentId,
+    title: args.title || args.name || "MCP conversation",
+  });
+  mcpConversationSessions.set(installationId, conversationId);
+  return {
+    gatewayCall: true,
+    status: "active",
+    hirerId,
+    codexInstallationId: installationId,
+    conversationId,
+    conversation_id: conversationId,
+    activeAgentId: agentId,
+    active_agent_id: agentId,
+    memWal: {
+      stored: stored.status === "stored",
+      configured: stored.status !== "not_configured",
+      kind: stored.publicRecord.kind,
+      visibility: stored.publicRecord.visibility,
+      provider: stored.publicRecord.provider,
+      namespace: stored.publicRecord.namespace,
+      memoryJobId: stored.publicRecord.memoryJobId || null,
+      blobId: stored.publicRecord.blobId || null,
+      plaintextStoredInDb: false,
+      creatorCanReadPlaintext: false,
+      publicCanReadPlaintext: false,
+      safeSummary: stored.publicRecord.safeSummary,
+      reason: stored.reason || null,
+    },
+  };
+}
+
+async function resumeMcpConversation(args = {}) {
+  const installationId = args.codex_installation_id || defaultInstallationId;
+  const hirerId = readHirerId(args);
+  const conversationId = normalizeMcpConversationId(
+    args.conversation_id ||
+      args.conversationId ||
+      mcpConversationSessions.get(installationId) ||
+      defaultMcpConversationId(installationId),
+  );
+  const loaded = await readMcpConversationSession({
+    hirerId,
+    sessionId: conversationId,
+    limit: args.limit ?? 12,
+  });
+  mcpConversationSessions.set(installationId, conversationId);
+  if (loaded.activeAgentId) {
+    sessions.set(installationId, loaded.activeAgentId);
+  }
+  return {
+    gatewayCall: true,
+    status: "active",
+    conversationId,
+    conversation_id: conversationId,
+    codexInstallationId: installationId,
+    ...loaded,
+  };
+}
+
+async function currentMcpConversation(args = {}) {
+  const installationId = args.codex_installation_id || defaultInstallationId;
+  const hirerId = readHirerId(args);
+  const conversationId = normalizeMcpConversationId(
+    args.conversation_id ||
+      args.conversationId ||
+      mcpConversationSessions.get(installationId) ||
+      defaultMcpConversationId(installationId),
+  );
+  try {
+    const loaded = await readMcpConversationSession({
+      hirerId,
+      sessionId: conversationId,
+      limit: args.limit ?? 12,
+    });
+    return {
+      gatewayCall: true,
+      status: "loaded",
+      conversationId,
+      conversation_id: conversationId,
+      codexInstallationId: installationId,
+      ...loaded,
+    };
+  } catch (err) {
+    if (err?.code !== "ENOENT") throw err;
+    return {
+      gatewayCall: true,
+      status: "empty",
+      kind: "mcp_conversation",
+      hirerId,
+      conversationId,
+      conversation_id: conversationId,
+      codexInstallationId: installationId,
+      activeAgentId: sessions.get(installationId) || "walrus-researcher",
+      active_agent_id: sessions.get(installationId) || "walrus-researcher",
+      totalTurns: 0,
+      turns: [],
+      messages: [],
+      note:
+        "No memWal MCP conversation exists yet. The next Agent call will create it automatically.",
+    };
+  }
+}
+
+async function listMcpConversations(args = {}) {
+  const hirerId = readHirerId(args);
+  return {
+    gatewayCall: true,
+    ...(await listMcpConversationSessions({ hirerId })),
+  };
+}
+
+function defaultMcpConversationId(seed) {
+  return `default-${sha256Hex(seed || defaultInstallationId).slice(0, 10)}`;
+}
+
+function normalizeMcpConversationId(value) {
+  return String(value || "default")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_.-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80) || "default";
 }
 
 async function parseOAuthAuthorizeParams(searchParams) {
@@ -2174,9 +2456,18 @@ function routeRegistrationNaturalRequest(request) {
       routedBy: "hireme_request",
       naturalRequest: text,
       retryTool: "hireme_create_agent_from_folder",
-      requiredFields: httpMcpTools.find(
-        (tool) => tool.name === "hireme_create_agent_from_folder",
-      )?.inputSchema.required,
+      requiredFields: [
+        "folder_path",
+        "agent_id",
+        "name",
+        "creator",
+        "category",
+        "headline",
+        "public_summary",
+        "public_mcp_contract",
+        "skills",
+        "price_per_1m_tokens_sui",
+      ],
       flow: [
         "Pass folder_path for the local Agent working folder containing AGENTS.md.",
         "The gateway accepts zip or tar.gz Harness archives, encrypts the archive, uploads ciphertext to Walrus, and registers the public Agent card.",
@@ -2287,12 +2578,85 @@ function httpMcpSessionKey(session) {
 }
 
 function mcpTextResult(value) {
+  const attachments = collectMcpResultAttachments(value);
+  const displayValue = attachments.length ? redactAttachmentDataForTokenEstimate(value) : value;
   return {
     content: [
       {
         type: "text",
-        text: typeof value === "string" ? value : JSON.stringify(value, null, 2),
+        text:
+          typeof displayValue === "string"
+            ? displayValue
+            : JSON.stringify(displayValue, null, 2),
       },
+      ...attachments.map(mcpAttachmentResource),
+    ],
+  };
+}
+
+function collectMcpResultAttachments(value) {
+  const candidates = [
+    value?.resultAttachments,
+    value?.attachments,
+    value?.result?.attachments,
+    value?.result?.outputFiles,
+    value?.jsonOutput?.attachments,
+    value?.jsonOutput?.payload?.attachments,
+    value?.jsonOutput?.payload?.outputFiles,
+  ];
+  const attachments = [];
+  const seen = new Set();
+  for (const candidate of candidates) {
+    const list = Array.isArray(candidate) ? candidate : candidate ? [candidate] : [];
+    for (const attachment of list) {
+      if (!attachment || typeof attachment !== "object") continue;
+      const blob = readStringField(attachment, ["data", "base64", "contentBase64", "blob"]);
+      if (!blob) continue;
+      const key =
+        attachment.digest ||
+        attachment.uri ||
+        attachment.filename ||
+        attachment.name ||
+        blob.slice(0, 64);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      attachments.push(attachment);
+    }
+  }
+  return attachments;
+}
+
+function mcpAttachmentResource(attachment) {
+  const filename = safeUploadName(attachment.filename || attachment.name || "agent-result");
+  return {
+    type: "resource",
+    resource: {
+      uri: attachment.uri || `hireme-result://attached/${encodeURIComponent(filename)}`,
+      mimeType: attachment.mimeType || "application/octet-stream",
+      blob: readStringField(attachment, ["data", "base64", "contentBase64", "blob"]),
+    },
+  };
+}
+
+function creatorLocalMcpRequired({ action, naturalRequest, inferredAgentId, folderPath } = {}) {
+  return {
+    status: "creator_stdio_plugin_required",
+    action,
+    naturalRequest: naturalRequest || null,
+    inferredAgentId: inferredAgentId || null,
+    folderPath: folderPath || null,
+    reason:
+      "The OAuth HTTP MCP server runs on the HireMe gateway and cannot access the user's local Codex workspace paths.",
+    use: "Install or enable the local hireme-creator stdio plugin for template creation and folder publish/update workflows, or use the HireMe web upload flow.",
+    installLocalCreatorPlugin: {
+      marketplace: "codex plugin marketplace add /Users/hanlab/Desktop/HireMe",
+      install: "codex plugin add hireme-creator --marketplace hireme-local",
+      verify: "Restart Codex and run /mcp. The local server should appear as hireme-creator.",
+    },
+    localCreatorTools: [
+      "hireme_create_agent_template",
+      "hireme_create_agent_from_folder",
+      "hireme_update_agent_from_folder",
     ],
   };
 }
@@ -3193,7 +3557,15 @@ async function grantAgentAccess(args = {}) {
     agentEntitlements.get(entitlementKey(hirerId, agent.id));
   const trialCalls =
     accessType === "trial"
-      ? Math.max(1, Math.trunc(readOptionalNumber(args.trial_calls, 3)))
+      ? Math.max(
+          1,
+          Math.trunc(
+            readOptionalNumber(
+              args.trial_calls ?? args.trialCalls,
+              trialCallAllowance,
+            ),
+          ),
+        )
       : null;
   const record = {
     id:
@@ -3464,6 +3836,39 @@ async function runProtectedAgent(args = {}) {
     hireReceiptObjectId,
   });
   const hirerId = access.hirerId || requestedHirerId;
+  const conversationEnabled =
+    args.mcp_conversation !== false &&
+    args.memwal_conversation !== false &&
+    Boolean(args.conversation_id || args.conversationId || args.codex_installation_id);
+  const conversationId = conversationEnabled
+    ? normalizeMcpConversationId(
+        args.conversation_id ||
+          args.conversationId ||
+          mcpConversationSessions.get(installationId) ||
+          defaultMcpConversationId(installationId),
+      )
+    : null;
+  let conversationContext = null;
+  if (conversationId) {
+    try {
+      conversationContext = await readMcpConversationSession({
+        hirerId,
+        sessionId: conversationId,
+        limit: args.conversation_context_limit ?? args.conversationContextLimit ?? 8,
+      });
+      mcpConversationSessions.set(installationId, conversationId);
+    } catch (err) {
+      if (err?.code !== "ENOENT") {
+        writeGatewayLog("mcp_conversation_load_failed", {
+          agentId: agent.id,
+          hirerId,
+          conversationId,
+          code: err.code || "memwal_conversation_error",
+          message: err.message,
+        });
+      }
+    }
+  }
   const callId = `call_${Date.now().toString(36)}_${sha256Hex(`${agent.id}:${args.task || ""}`).slice(0, 8)}`;
   const requestDigest = `sha256:${sha256Hex(JSON.stringify({
     agentId: agent.id,
@@ -3493,27 +3898,34 @@ async function runProtectedAgent(args = {}) {
       ? buildSafeResult(agent, args.task || "", responseMode)
       : protectedTaskResult?.result ||
         buildSafeResult(agent, args.task || "", responseMode);
-  const modelExecution = await callGatewayModelAgent({
+  const executorExecution = await callGatewayExecutor({
     agent,
     task: args.task || "",
     safeResult: protectedSafeResult,
     requestDigest,
     callId,
     harnessRuntimeContext: protectedTaskResult?.runtimeContext || null,
+    conversationContext: conversationContext?.messages || [],
     responseMode,
   });
   const safeResult =
-    modelExecution.status === "completed"
-      ? modelExecution.result
+    executorExecution.status === "completed"
+      ? executorExecution.result
       : protectedSafeResult;
+  const resultAttachmentResolution = await resolveAgentResultAttachments({
+    result: safeResult,
+    callId,
+    harnessRuntimeContext: protectedTaskResult?.runtimeContext || null,
+  });
+  applyAgentResultAttachmentResolution(safeResult, resultAttachmentResolution);
   const inputTokens =
-    modelExecution.status === "completed"
-      ? modelExecution.usage.inputTokens
+    executorExecution.status === "completed"
+      ? executorExecution.usage.inputTokens
       : estimateTokenCount(args.task || "");
   const outputTokens =
-    modelExecution.status === "completed"
-      ? modelExecution.usage.outputTokens
-      : estimateTokenCount(JSON.stringify(safeResult));
+    executorExecution.status === "completed"
+      ? executorExecution.usage.outputTokens
+      : estimateTokenCount(JSON.stringify(redactAttachmentDataForTokenEstimate(safeResult)));
   const pricePer1MTokensSui = readAgentTokenPriceSui(agent);
   const usageCharge = calculateTokenUsageChargeSui({
     pricePer1MTokensSui,
@@ -3522,16 +3934,16 @@ async function runProtectedAgent(args = {}) {
   });
   const amountUsd = 0;
   const executionMode =
-    modelExecution.status === "completed"
-      ? modelExecution.provider === "ollama"
+    executorExecution.status === "completed"
+      ? executorExecution.provider === "ollama"
         ? "ollama_chat"
         : "openai_responses"
       : protectedTaskResult
         ? "trusted-gateway-protected-artifact"
         : "local-mock";
   const latencyMs =
-    modelExecution.status === "completed"
-      ? modelExecution.latencyMs
+    executorExecution.status === "completed"
+      ? executorExecution.latencyMs
       : agent.latencyMs;
   const platformEncryption =
     protectedTaskResult?.platformEncryption ||
@@ -3550,7 +3962,7 @@ async function runProtectedAgent(args = {}) {
     };
   const responseDigest = `sha256:${sha256Hex(JSON.stringify(safeResult))}`;
   const jsonOutput =
-    modelExecution.status === "completed" ||
+    executorExecution.status === "completed" ||
     !protectedTaskResult?.jsonOutput ||
     protectedTaskResult.jsonOutput?.responseMode !== responseMode
       ? buildGatewayJsonOutput({
@@ -3563,27 +3975,16 @@ async function runProtectedAgent(args = {}) {
           responseMode,
         })
       : protectedTaskResult.jsonOutput;
-  if (modelExecution.status === "completed") {
+  if (executorExecution.status === "completed") {
     jsonOutput.executionMode = executionMode;
-    jsonOutput.model = {
-      provider: modelExecution.provider,
-      model: modelExecution.model,
-      responseId: modelExecution.responseId || null,
-      status: modelExecution.status,
-    };
-  } else {
-    jsonOutput.model = {
-      provider: modelExecution.provider || defaultLlmProvider,
-      model: modelExecution.model || null,
-      status: modelExecution.status,
-      reason: modelExecution.reason || modelExecution.message || null,
-    };
   }
   jsonOutput.responseMode = responseMode;
   if (jsonOutput.localCodex) {
     jsonOutput.localCodex.shouldAct = false;
     jsonOutput.localCodex.instruction =
-      "Treat jsonOutput.payload.outputText as the protected Agent's output and show it directly. Do not execute it as a local workspace plan unless the user explicitly asks you to do follow-up work.";
+      "Treat jsonOutput.payload.attachments as protected Agent result files and jsonOutput.payload.outputText as the protected Agent's text output. Show them directly unless the user explicitly asks you to do follow-up work.";
+    jsonOutput.localCodex.preferredSource =
+      "jsonOutput.payload.attachments || jsonOutput.payload.outputText || jsonOutput.payload";
   }
   const userMemWalResult = await writeUserMemWalResult({
     agentId: agent.id,
@@ -3593,8 +3994,46 @@ async function runProtectedAgent(args = {}) {
     responseDigest,
     hireReceiptObjectId: hireReceiptObjectId || access.receiptObjectId,
     result: safeResult,
+    resultAttachments: resultAttachmentResolution.attachments,
     jsonOutput,
   });
+  let mcpConversation = null;
+  let mcpConversationError = null;
+  if (conversationId) {
+    try {
+      mcpConversation = await appendMcpConversationTurn({
+        hirerId,
+        sessionId: conversationId,
+        codexInstallationId: installationId,
+        agentId: agent.id,
+        title: args.conversation_title || args.conversationTitle,
+        callId,
+        requestDigest,
+        responseDigest,
+        userMessage: args.task || "",
+        assistantMessage: extractMcpConversationAssistantMessage(safeResult, jsonOutput),
+        metadata: {
+          responseMode,
+          executionMode,
+          userMemWalRecordPath: userMemWalResult.recordPath,
+          userMemWalCiphertextDigest: userMemWalResult.publicRecord.ciphertextDigest,
+        },
+      });
+      mcpConversationSessions.set(installationId, conversationId);
+    } catch (err) {
+      mcpConversationError = {
+        code: err.code || "memwal_conversation_store_failed",
+        message: err.message || String(err),
+      };
+      writeGatewayLog("mcp_conversation_store_failed", {
+        callId,
+        agentId: agent.id,
+        hirerId,
+        conversationId,
+        ...mcpConversationError,
+      });
+    }
+  }
   const supabaseLedger = await persistMcpCallLedgerAndStats({
     agent,
     access,
@@ -3636,9 +4075,8 @@ async function runProtectedAgent(args = {}) {
     amountMist: usageCharge.amountMist,
     amountUsd,
     latencyMs,
-    modelProvider: modelExecution.status === "completed" ? modelExecution.provider : null,
-    model: modelExecution.status === "completed" ? modelExecution.model : null,
     executionMode,
+    mcpConversationId: conversationId,
     rawPromptStored: false,
     rawResponseStored: false,
     resultStoredInUserMemWal: true,
@@ -3659,8 +4097,8 @@ async function runProtectedAgent(args = {}) {
     amountSui: usageCharge.amountSui,
     amountMist: usageCharge.amountMist,
     executionMode,
-    model: modelExecution.status === "completed" ? modelExecution.model : null,
     memWalRecordPath: userMemWalResult.recordPath,
+    mcpConversationId: conversationId,
     supabaseLedgerStatus: supabaseLedger.status,
   });
 
@@ -3690,6 +4128,26 @@ async function runProtectedAgent(args = {}) {
       publicCanReadPlaintext: false,
       safeSummary: userMemWalResult.publicRecord.safeSummary,
     },
+    mcpConversation: conversationId
+      ? {
+          stored: mcpConversation?.status === "stored",
+          configured: mcpConversation?.status !== "not_configured",
+          kind: mcpConversation?.publicRecord?.kind || "mcp_conversation",
+          provider: mcpConversation?.publicRecord?.provider || "memwal-sdk",
+          conversationId,
+          namespace: mcpConversation?.publicRecord?.namespace || null,
+          memoryJobId: mcpConversation?.publicRecord?.memoryJobId || null,
+          indexJobId: mcpConversation?.publicRecord?.indexJobId || null,
+          blobId: mcpConversation?.publicRecord?.blobId || null,
+          previousTurnsLoaded: conversationContext?.returnedTurns || 0,
+          totalTurns: mcpConversation?.publicRecord?.turnCount || null,
+          error: mcpConversationError,
+          reason: mcpConversation?.reason || null,
+          plaintextStoredInDb: false,
+          creatorCanReadPlaintext: false,
+          publicCanReadPlaintext: false,
+        }
+      : null,
     authorization: {
       hireVerified: true,
       accessId: access.id,
@@ -3744,9 +4202,7 @@ async function runProtectedAgent(args = {}) {
       executionMode: protectedTaskResult
         ? "trusted-gateway-protected-folder-runner"
         : "local-mock-runner",
-      modelExecutionMode: executionMode,
-      modelProvider: modelExecution.status === "completed" ? modelExecution.provider : null,
-      model: modelExecution.status === "completed" ? modelExecution.model : null,
+      executionResultMode: executionMode,
       gatewayTrustedExecutor: true,
       privateAgentFolderLoaded: Boolean(protectedTaskResult),
       privateHarnessApplied: true,
@@ -3765,6 +4221,566 @@ async function runProtectedAgent(args = {}) {
     supabaseLedger,
     responseMode,
   };
+}
+
+async function runProtectedAgentLoop(args = {}) {
+  const installationId = args.codex_installation_id || defaultInstallationId;
+  const agentId = args.agent_id || sessions.get(installationId) || "walrus-researcher";
+  const maxIterations = readLoopIterationLimit(args);
+  const loopPolicy = normalizeLoopPolicy(args.loop_policy || args.loopPolicy);
+  const loopTasks = normalizeStringList(args.loop_tasks || args.loopTasks);
+  const iterations = [];
+  let task = String(args.task || "").trim();
+  let finalCall = null;
+  let stopReason = "max_iterations_reached";
+
+  if (!task) {
+    throw Object.assign(new Error("task is required"), {
+      statusCode: 400,
+      code: "bad_request",
+    });
+  }
+
+  for (let index = 0; index < maxIterations; index += 1) {
+    const call = await runProtectedAgent({
+      ...args,
+      agent_id: agentId,
+      task,
+      budget_calls: 1,
+      loop_parent_id: args.loop_parent_id || args.loopParentId || null,
+      loop_iteration: index + 1,
+    });
+    finalCall = call;
+    const decision = decideAgentLoopContinuation({
+      call,
+      loopPolicy,
+      loopTasks,
+      iterationIndex: index,
+      maxIterations,
+    });
+    iterations.push({
+      iteration: index + 1,
+      callId: call.callId,
+      task,
+      responseDigest: call.ledgerEvent?.responseDigest || null,
+      responseMode: call.responseMode,
+      continuation: {
+        continue: decision.continue,
+        reason: decision.reason,
+        nextTask: decision.nextTask || null,
+      },
+      agentOutputDigest:
+        call.result?.outputTextDigest ||
+        (call.result ? `sha256:${sha256Hex(JSON.stringify(redactAttachmentDataForTokenEstimate(call.result)))}` : null),
+    });
+
+    if (!decision.continue) {
+      stopReason = decision.reason;
+      break;
+    }
+    task = decision.nextTask;
+  }
+
+  if (!finalCall) {
+    throw Object.assign(new Error("Agent loop did not execute any calls"), {
+      statusCode: 500,
+      code: "agent_loop_empty",
+    });
+  }
+
+  return {
+    gatewayCall: true,
+    type: "hireme_agent_loop_result",
+    activeAgentId: finalCall.activeAgentId,
+    codexInstallationId: finalCall.codexInstallationId,
+    agent: finalCall.agent,
+    loop: {
+      policy: loopPolicy,
+      maxIterations,
+      iterationsRun: iterations.length,
+      stopped: true,
+      stopReason,
+      outputContractSource: "final_agent_result",
+      finalCallId: finalCall.callId,
+      finalResponseMode: finalCall.responseMode,
+    },
+    iterations,
+    result: finalCall.result,
+    jsonOutput: finalCall.jsonOutput,
+    userMemWal: finalCall.userMemWal,
+    mcpConversation: finalCall.mcpConversation || null,
+    authorization: finalCall.authorization,
+    runner: finalCall.runner,
+    ledgerEvent: finalCall.ledgerEvent,
+    responseMode: finalCall.responseMode,
+  };
+}
+
+async function runProtectedAgentTeam(args = {}) {
+  const installationId = args.codex_installation_id || defaultInstallationId;
+  const originalTask = String(args.task || "").trim();
+  if (!originalTask) {
+    throw Object.assign(new Error("task is required"), {
+      statusCode: 400,
+      code: "bad_request",
+    });
+  }
+
+  const teamAgents = normalizeTeamAgentSpecs(args);
+  if (!teamAgents.length) {
+    throw Object.assign(
+      new Error("agent_ids or team_agents must include at least one Agent id"),
+      {
+        statusCode: 400,
+        code: "bad_request",
+      },
+    );
+  }
+
+  const conversationId = normalizeMcpConversationId(
+    args.conversation_id ||
+      args.conversationId ||
+      `team_${Date.now().toString(36)}_${randomBytes(4).toString("hex")}`,
+  );
+  const rounds = readTeamRoundLimit(args);
+  const includeFinal =
+    args.include_final !== false &&
+    args.includeFinal !== false &&
+    args.final_synthesis !== false &&
+    args.finalSynthesis !== false;
+  const finalAgentId =
+    String(
+      args.final_agent_id ||
+        args.finalAgentId ||
+        args.coordinator_agent_id ||
+        args.coordinatorAgentId ||
+        teamAgents[teamAgents.length - 1]?.agentId ||
+        "",
+    ).trim() || teamAgents[teamAgents.length - 1].agentId;
+  const requiredCalls = teamAgents.length * rounds + (includeFinal ? 1 : 0);
+  const budgetCalls = readTeamBudgetCalls(args, requiredCalls);
+  const responseMode = args.response_mode || args.responseMode || "direct_answer";
+  const teamCallId = `team_${Date.now().toString(36)}_${sha256Hex(`${conversationId}:${originalTask}`).slice(0, 8)}`;
+  const title =
+    args.conversation_title ||
+    args.conversationTitle ||
+    args.team_title ||
+    args.teamTitle ||
+    `Team: ${originalTask}`;
+  const conversationStart = await startMcpConversation({
+    ...args,
+    conversation_id: conversationId,
+    agent_id: teamAgents[0].agentId,
+    title,
+  }).catch((err) => ({
+    status: "error",
+    code: err.code || "mcp_conversation_start_failed",
+    message: err.message || String(err),
+  }));
+
+  const turns = [];
+  let callsUsed = 0;
+  let finalCall = null;
+  let stopReason = "team_completed";
+
+  for (let roundIndex = 0; roundIndex < rounds; roundIndex += 1) {
+    for (const teamAgent of teamAgents) {
+      if (callsUsed >= budgetCalls) {
+        stopReason = "budget_calls_exhausted";
+        break;
+      }
+      const task = buildTeamAgentTask({
+        phase: "team_round",
+        originalTask,
+        conversationId,
+        teamAgents,
+        currentAgent: teamAgent,
+        round: roundIndex + 1,
+        rounds,
+        priorTurns: turns,
+      });
+      const call = await runProtectedAgent({
+        ...args,
+        agent_id: teamAgent.agentId,
+        task,
+        conversation_id: conversationId,
+        conversation_title: title,
+        response_mode: responseMode,
+        budget_calls: 1,
+        team_call_id: teamCallId,
+        team_phase: "team_round",
+        team_round: roundIndex + 1,
+        team_role: teamAgent.role,
+      });
+      callsUsed += 1;
+      finalCall = call;
+      turns.push(summarizeTeamAgentTurn({
+        call,
+        teamAgent,
+        round: roundIndex + 1,
+        phase: "team_round",
+      }));
+    }
+    if (stopReason === "budget_calls_exhausted") break;
+  }
+
+  if (includeFinal && callsUsed < budgetCalls) {
+    const finalAgent =
+      teamAgents.find((agent) => agent.agentId === finalAgentId) || {
+        agentId: finalAgentId,
+        role: "coordinator",
+        name: finalAgentId,
+      };
+    const task = buildTeamAgentTask({
+      phase: "final_synthesis",
+      originalTask,
+      conversationId,
+      teamAgents,
+      currentAgent: finalAgent,
+      round: rounds + 1,
+      rounds,
+      priorTurns: turns,
+    });
+    finalCall = await runProtectedAgent({
+      ...args,
+      agent_id: finalAgent.agentId,
+      task,
+      conversation_id: conversationId,
+      conversation_title: title,
+      response_mode: responseMode,
+      budget_calls: 1,
+      team_call_id: teamCallId,
+      team_phase: "final_synthesis",
+      team_role: finalAgent.role || "coordinator",
+    });
+    callsUsed += 1;
+    turns.push(summarizeTeamAgentTurn({
+      call: finalCall,
+      teamAgent: finalAgent,
+      round: rounds + 1,
+      phase: "final_synthesis",
+    }));
+  } else if (includeFinal && callsUsed >= budgetCalls) {
+    stopReason = "budget_calls_exhausted_before_final";
+  }
+
+  if (!finalCall) {
+    throw Object.assign(new Error("Agent team did not execute any calls"), {
+      statusCode: 500,
+      code: "agent_team_empty",
+    });
+  }
+
+  return {
+    gatewayCall: true,
+    type: "hireme_agent_team_result",
+    team: {
+      teamCallId,
+      conversationId,
+      conversation_id: conversationId,
+      title,
+      agentIds: teamAgents.map((agent) => agent.agentId),
+      agents: teamAgents,
+      roundsRequested: rounds,
+      includeFinal,
+      finalAgentId: finalCall.activeAgentId,
+      requestedFinalAgentId: finalAgentId,
+      callsUsed,
+      budgetCalls,
+      requiredCalls,
+      stopped: true,
+      stopReason,
+      collaborationModel:
+        "sequential_shared_memwal_conversation",
+      privacy:
+        "Agents share hirer-owned conversation turns only. Creator-private Harness files remain isolated per Agent.",
+      conversationStart,
+    },
+    turns,
+    result: finalCall.result,
+    jsonOutput: finalCall.jsonOutput,
+    userMemWal: finalCall.userMemWal,
+    mcpConversation: finalCall.mcpConversation || null,
+    authorization: finalCall.authorization,
+    runner: finalCall.runner,
+    ledgerEvent: finalCall.ledgerEvent,
+    responseMode: finalCall.responseMode,
+  };
+}
+
+function normalizeTeamAgentSpecs(args = {}) {
+  const raw =
+    args.team_agents ||
+    args.teamAgents ||
+    args.agent_ids ||
+    args.agentIds ||
+    args.agents ||
+    (args.agent_id || args.agentId ? [args.agent_id || args.agentId] : []);
+  const list = Array.isArray(raw)
+    ? raw
+    : typeof raw === "string"
+      ? raw.split(",")
+      : [];
+  const seen = new Set();
+  const specs = [];
+  for (const item of list) {
+    const spec =
+      item && typeof item === "object"
+        ? {
+            agentId: String(item.agent_id || item.agentId || item.id || "").trim(),
+            role: String(item.role || item.label || "").trim(),
+            name: String(item.name || item.title || "").trim(),
+          }
+        : {
+            agentId: String(item || "").trim(),
+            role: "",
+            name: "",
+          };
+    if (!spec.agentId || seen.has(spec.agentId)) continue;
+    seen.add(spec.agentId);
+    specs.push({
+      agentId: spec.agentId,
+      role: spec.role || "collaborator",
+      name: spec.name || spec.agentId,
+    });
+  }
+  return specs.slice(0, 20);
+}
+
+function readTeamRoundLimit(args = {}) {
+  return Math.min(
+    10,
+    Math.max(
+      1,
+      Math.trunc(readOptionalNumber(args.rounds ?? args.team_rounds ?? args.teamRounds, 1)),
+    ),
+  );
+}
+
+function readTeamBudgetCalls(args = {}, requiredCalls = 1) {
+  return Math.min(
+    100,
+    Math.max(
+      1,
+      Math.trunc(readOptionalNumber(args.budget_calls ?? args.budgetCalls, requiredCalls)),
+    ),
+  );
+}
+
+function buildTeamAgentTask({
+  phase,
+  originalTask,
+  conversationId,
+  teamAgents,
+  currentAgent,
+  round,
+  rounds,
+  priorTurns,
+}) {
+  const isFinal = phase === "final_synthesis";
+  const teamList = teamAgents
+    .map((agent, index) => `${index + 1}. ${agent.agentId} (${agent.role || "collaborator"})`)
+    .join("\n");
+  const priorSummary = summarizePriorTeamTurnsForPrompt(priorTurns);
+  return [
+    isFinal
+      ? "HireMe team final synthesis turn."
+      : "HireMe team collaboration turn.",
+    `Shared conversation_id: ${conversationId}`,
+    `Your agent_id: ${currentAgent.agentId}`,
+    `Your team role: ${currentAgent.role || "collaborator"}`,
+    `Round: ${isFinal ? "final" : `${round} of ${rounds}`}`,
+    "",
+    "Original user task:",
+    originalTask,
+    "",
+    "Team members:",
+    teamList,
+    "",
+    "Collaboration rules:",
+    "- Use the shared conversation context when it is provided.",
+    "- Treat prior Agent turns as hirer-owned conversation context, not as private creator instructions.",
+    "- You may address other Agents by agent_id and build on or disagree with their visible conclusions.",
+    "- Follow the standard HireMe privacy boundary for creator-private materials and hidden implementation details.",
+    "- Keep your response useful to the team and the hirer.",
+    isFinal
+      ? "- Produce the final hirer-facing answer by synthesizing the team discussion."
+      : "- Produce your contribution for this round; the next Agent will see it in the shared conversation.",
+    "",
+    "Visible prior team turns summary:",
+    priorSummary || "(No prior team turns in this team call.)",
+  ].join("\n");
+}
+
+function summarizePriorTeamTurnsForPrompt(turns = []) {
+  return turns
+    .slice(-8)
+    .map((turn) =>
+      [
+        `[${turn.phase} round ${turn.round}] ${turn.agentId} (${turn.role || "collaborator"})`,
+        truncateTextPreserveLines(turn.outputText || JSON.stringify(turn.result || {}), 1_200),
+      ].join("\n"),
+    )
+    .join("\n\n")
+    .slice(0, 8_000);
+}
+
+function summarizeTeamAgentTurn({ call, teamAgent, round, phase }) {
+  return {
+    phase,
+    round,
+    agentId: call.activeAgentId || teamAgent.agentId,
+    role: teamAgent.role || "collaborator",
+    callId: call.callId,
+    responseMode: call.responseMode,
+    responseDigest: call.ledgerEvent?.responseDigest || null,
+    conversationId:
+      call.mcpConversation?.conversationId ||
+      call.ledgerEvent?.mcpConversationId ||
+      null,
+    previousTurnsLoaded: call.mcpConversation?.previousTurnsLoaded || 0,
+    outputText: extractMcpConversationAssistantMessage(call.result, call.jsonOutput),
+    resultType: call.result?.type || null,
+    attachmentCount: Array.isArray(call.result?.attachments)
+      ? call.result.attachments.length
+      : 0,
+  };
+}
+
+function readLoopIterationLimit(args = {}) {
+  const requestedBudget = Math.max(
+    1,
+    Math.trunc(readOptionalNumber(args.budget_calls ?? args.budgetCalls, 3)),
+  );
+  const requestedMax = Math.max(
+    1,
+    Math.trunc(readOptionalNumber(args.max_iterations ?? args.maxIterations, Math.min(3, requestedBudget))),
+  );
+  return Math.min(20, requestedBudget, requestedMax);
+}
+
+function normalizeLoopPolicy(value) {
+  const policy = String(value || "").trim().toLowerCase();
+  if (policy === "fixed_tasks" || policy === "fixed" || policy === "task_list") {
+    return "fixed_tasks";
+  }
+  if (policy === "single" || policy === "once" || policy === "none") {
+    return "single";
+  }
+  return "agent_signal";
+}
+
+function decideAgentLoopContinuation({
+  call,
+  loopPolicy,
+  loopTasks,
+  iterationIndex,
+  maxIterations,
+}) {
+  if (iterationIndex + 1 >= maxIterations) {
+    return { continue: false, reason: "max_iterations_reached" };
+  }
+  if (loopPolicy === "single") {
+    return { continue: false, reason: "single_call_policy" };
+  }
+  if (loopPolicy === "fixed_tasks") {
+    const nextTask = String(loopTasks[iterationIndex] || "").trim();
+    return nextTask
+      ? { continue: true, reason: "fixed_loop_task", nextTask }
+      : { continue: false, reason: "fixed_loop_tasks_exhausted" };
+  }
+
+  const signal = readAgentLoopSignal(call);
+  if (!signal.shouldContinue) {
+    return { continue: false, reason: signal.reason || "agent_loop_complete" };
+  }
+  if (!signal.nextTask) {
+    return { continue: false, reason: "agent_loop_missing_next_task" };
+  }
+  return {
+    continue: true,
+    reason: signal.reason || "agent_requested_continuation",
+    nextTask: signal.nextTask,
+  };
+}
+
+function readAgentLoopSignal(call) {
+  for (const candidate of readAgentLoopSignalCandidates(call)) {
+    const signal = normalizeAgentLoopSignal(candidate);
+    if (signal) return signal;
+  }
+  return { shouldContinue: false, reason: "no_agent_loop_signal" };
+}
+
+function readAgentLoopSignalCandidates(call) {
+  const candidates = [];
+  const pushCandidate = (value) => {
+    if (!value || typeof value !== "object") return;
+    candidates.push(value);
+    for (const key of [
+      "codexLoop",
+      "codex_loop",
+      "loop",
+      "next",
+      "continuation",
+      "followUp",
+      "follow_up",
+    ]) {
+      if (value[key] && typeof value[key] === "object") candidates.push(value[key]);
+    }
+  };
+
+  pushCandidate(call?.result);
+  pushCandidate(call?.jsonOutput?.payload);
+  pushCandidate(parseJsonValue(call?.result?.outputText));
+  pushCandidate(parseJsonValue(call?.jsonOutput?.payload?.outputText));
+  return candidates;
+}
+
+function normalizeAgentLoopSignal(value) {
+  if (!value || typeof value !== "object") return null;
+  const status = String(value.status || value.state || "").trim().toLowerCase();
+  const explicitContinue =
+    value.continue ??
+    value.shouldContinue ??
+    value.continueLoop ??
+    value.needsFollowup ??
+    value.needs_followup ??
+    null;
+  const nextTask = readStringField(value, [
+    "nextTask",
+    "next_task",
+    "followUpTask",
+    "follow_up_task",
+    "task",
+    "prompt",
+    "message",
+    "instruction",
+  ]);
+  const shouldContinue =
+    parseLoopBoolean(explicitContinue) ||
+    ["continue", "needs_followup", "needs_more_work", "incomplete"].includes(status) ||
+    Boolean(nextTask && value.done === false);
+  if (!shouldContinue && !nextTask) return null;
+  if (value.done === true || status === "done" || status === "complete" || status === "completed") {
+    return {
+      shouldContinue: false,
+      reason: readStringField(value, ["reason", "stopReason", "stop_reason"]) || "agent_reported_complete",
+    };
+  }
+  return {
+    shouldContinue: Boolean(shouldContinue),
+    nextTask,
+    reason:
+      readStringField(value, ["reason", "continueReason", "continue_reason"]) ||
+      (shouldContinue ? "agent_requested_continuation" : "agent_loop_complete"),
+  };
+}
+
+function parseLoopBoolean(value) {
+  if (value === true) return true;
+  if (value === false || value === null || value === undefined) return false;
+  return /^(1|true|yes|continue|again|next)$/i.test(String(value).trim());
 }
 
 async function runPlatformEncryptedArtifactTask({
@@ -4178,7 +5194,7 @@ async function buildHarnessRuntimeContext({
 
   return {
     schema: "hireme.private_harness_runtime_context.v1",
-    visibility: "gateway_model_only",
+    visibility: "gateway_executor_only",
     agent: {
       id: agent.id,
       name: agent.name,
@@ -4565,6 +5581,21 @@ function buildSafeResult(agent, task, responseMode = "local_codex_execution_brie
   };
 }
 
+function extractMcpConversationAssistantMessage(result, jsonOutput) {
+  const candidates = [
+    result?.outputText,
+    jsonOutput?.payload?.outputText,
+    result?.summary,
+    jsonOutput?.payload?.summary,
+    Array.isArray(result?.recommendations) ? result.recommendations.join("\n") : "",
+  ];
+  const text = candidates
+    .map((value) => String(value || "").trim())
+    .find(Boolean);
+  if (text) return text;
+  return JSON.stringify(redactAttachmentDataForTokenEstimate(result || jsonOutput || {}));
+}
+
 function classifyProtectedInternalsRequest(task) {
   const text = String(task || "").trim();
   if (!text) return { blocked: false };
@@ -4709,8 +5740,8 @@ function buildGatewayJsonOutput({
     localCodex: {
       shouldAct,
       instruction:
-        "Treat jsonOutput.payload.outputText as the protected Agent's output and show it directly. Do not execute it as a local workspace plan unless the user explicitly asks you to do follow-up work.",
-      preferredSource: "jsonOutput.payload.outputText || jsonOutput.payload",
+        "Treat jsonOutput.payload.attachments as protected Agent result files and jsonOutput.payload.outputText as the protected Agent's text output. Show them directly unless the user explicitly asks you to do follow-up work.",
+      preferredSource: "jsonOutput.payload.attachments || jsonOutput.payload.outputText || jsonOutput.payload",
       expectedBriefShape: [
         "agent_output",
         "show_verbatim_unless_user_requests_follow_up",
@@ -4724,6 +5755,431 @@ function buildGatewayJsonOutput({
       privateFolderReturnedToCodex: false,
     },
   };
+}
+
+async function resolveAgentResultAttachments({ result, callId, harnessRuntimeContext }) {
+  const references = readAgentResultFileReferences(result).slice(0, 10);
+  const attachments = [];
+  const errors = [];
+
+  for (let index = 0; index < references.length; index += 1) {
+    const reference = references[index];
+    try {
+      const attachment = await resolveAgentResultAttachment(reference, {
+        callId,
+        index,
+        harnessRuntimeContext,
+      });
+      if (attachment) attachments.push(attachment);
+    } catch (err) {
+      errors.push({
+        type: "agent_result_attachment_error",
+        reason: err?.code || "unreadable_agent_result_file",
+        message: err instanceof Error ? err.message : String(err),
+        reference: summarizeAgentResultFileReference(reference),
+      });
+    }
+  }
+
+  return { attachments: dedupeAgentResultAttachments(attachments), errors };
+}
+
+function applyAgentResultAttachmentResolution(result, resolution) {
+  if (!result || typeof result !== "object") return;
+  if (resolution.attachments.length) {
+    result.attachments = resolution.attachments;
+    result.outputFiles = resolution.attachments.map(publicAgentResultAttachment);
+  }
+  if (resolution.errors.length) {
+    result.attachmentErrors = resolution.errors;
+  }
+}
+
+function readAgentResultFileReferences(result) {
+  if (!result || typeof result !== "object") return [];
+  const references = [];
+  const pushReference = (candidate) => {
+    if (Array.isArray(candidate)) {
+      for (const item of candidate) pushReference(item);
+      return;
+    }
+    if (isAgentResultFileReference(candidate)) references.push(candidate);
+  };
+
+  for (const key of [
+    "attachment",
+    "attachments",
+    "file",
+    "files",
+    "outputFile",
+    "outputFiles",
+    "output_file",
+    "output_files",
+    "resultFile",
+    "resultFiles",
+    "result_file",
+    "result_files",
+  ]) {
+    pushReference(result[key]);
+  }
+
+  const parsedOutputText = parseJsonValue(result.outputText);
+  if (parsedOutputText && parsedOutputText !== result) {
+    pushReference(parsedOutputText);
+    if (typeof parsedOutputText === "object") {
+      for (const key of [
+        "attachment",
+        "attachments",
+        "file",
+        "files",
+        "outputFile",
+        "outputFiles",
+        "output_file",
+        "output_files",
+        "resultFile",
+        "resultFiles",
+        "result_file",
+        "result_files",
+      ]) {
+        pushReference(parsedOutputText[key]);
+      }
+    }
+  }
+
+  return references;
+}
+
+function isAgentResultFileReference(value) {
+  if (!value) return false;
+  if (typeof value === "string") return looksLikeLocalFileReference(value);
+  if (typeof value !== "object") return false;
+  return Boolean(
+    readAttachmentPath(value) ||
+      readInlineAttachmentBytes(value) ||
+      readStringField(value, ["data", "base64", "contentBase64", "blob"]),
+  );
+}
+
+async function resolveAgentResultAttachment(reference, { callId, index, harnessRuntimeContext }) {
+  const inlineBytes = readInlineAttachmentBytes(reference);
+  if (inlineBytes) {
+    assertAgentResultAttachmentDoesNotLeakHarness(
+      inlineBytes.bytes,
+      harnessRuntimeContext,
+    );
+    return buildAgentResultAttachment({
+      bytes: inlineBytes.bytes,
+      filename:
+        readAttachmentFilename(reference) || `agent-result-${index + 1}`,
+      mimeType: readAttachmentMimeType(reference),
+      callId,
+      index,
+      source: "inline_agent_result",
+    });
+  }
+
+  const rawPath = readAttachmentPath(reference);
+  if (!rawPath) return null;
+  const absolutePath = resolve(rawPath);
+  const allowedPath = await resolveAllowedAgentResultPath(absolutePath);
+  const fileStat = await stat(allowedPath);
+  if (!fileStat.isFile()) {
+    throw Object.assign(new Error("Agent result attachment path is not a file."), {
+      code: "agent_result_attachment_not_file",
+    });
+  }
+  if (fileStat.size > defaultAgentResultFileMaxBytes) {
+    throw Object.assign(
+      new Error(
+        `Agent result attachment exceeds ${defaultAgentResultFileMaxBytes} bytes.`,
+      ),
+      { code: "agent_result_attachment_too_large" },
+    );
+  }
+  const bytes = await readFile(allowedPath);
+  assertAgentResultAttachmentDoesNotLeakHarness(bytes, harnessRuntimeContext);
+  return buildAgentResultAttachment({
+    bytes,
+    filename: readAttachmentFilename(reference) || basename(allowedPath),
+    mimeType: readAttachmentMimeType(reference) || guessMimeType(allowedPath),
+    callId,
+    index,
+    source: "local_agent_result_file",
+  });
+}
+
+function assertAgentResultAttachmentDoesNotLeakHarness(bytes, harnessRuntimeContext) {
+  if (!harnessRuntimeContext) return;
+  const text = Buffer.from(bytes).toString("utf8");
+  if (!hasPrivateHarnessEcho(text, harnessRuntimeContext)) return;
+  throw Object.assign(
+    new Error("Agent result attachment echoed private Harness content and was blocked."),
+    { code: "agent_result_attachment_private_harness_echo" },
+  );
+}
+
+async function resolveAllowedAgentResultPath(absolutePath) {
+  const realFilePath = await realpath(absolutePath).catch(() => null);
+  if (!realFilePath) {
+    throw Object.assign(new Error("Agent result attachment file was not found."), {
+      code: "agent_result_attachment_not_found",
+    });
+  }
+  if (isBlockedAgentResultPath(realFilePath)) {
+    throw Object.assign(
+      new Error("Agent result attachment points at protected creator files."),
+      { code: "protected_agent_result_file_blocked" },
+    );
+  }
+
+  for (const root of defaultAgentResultFileRoots) {
+    const rootPath = await realpath(root).catch(() => resolve(root));
+    if (isPathInside(rootPath, realFilePath)) return realFilePath;
+  }
+
+  throw Object.assign(
+    new Error(
+      `Agent result attachments must be under one of: ${defaultAgentResultFileRoots.join(", ")}`,
+    ),
+    { code: "agent_result_attachment_root_denied" },
+  );
+}
+
+function buildAgentResultAttachment({
+  bytes,
+  filename,
+  mimeType,
+  callId,
+  index,
+  source,
+}) {
+  if (bytes.length > defaultAgentResultFileMaxBytes) {
+    throw Object.assign(
+      new Error(
+        `Agent result attachment exceeds ${defaultAgentResultFileMaxBytes} bytes.`,
+      ),
+      { code: "agent_result_attachment_too_large" },
+    );
+  }
+  const safeName = safeUploadName(filename || `agent-result-${index + 1}`);
+  const digest = `sha256:${sha256Hex(bytes)}`;
+  return {
+    type: "file",
+    name: safeName,
+    filename: safeName,
+    mimeType: mimeType || guessMimeType(safeName),
+    sizeBytes: bytes.length,
+    digest,
+    encoding: "base64",
+    data: Buffer.from(bytes).toString("base64"),
+    uri: `hireme-result://${callId}/${index + 1}/${encodeURIComponent(safeName)}`,
+    source,
+    creatorSecretsReturned: false,
+  };
+}
+
+function readAttachmentPath(reference) {
+  if (typeof reference === "string") return reference.trim();
+  if (!reference || typeof reference !== "object") return "";
+  const directPath = readStringField(reference, [
+    "path",
+    "filePath",
+    "file_path",
+    "localPath",
+    "local_path",
+    "resultPath",
+    "result_path",
+  ]);
+  if (directPath) return directPath;
+  const uri = readStringField(reference, ["uri", "url"]);
+  if (!uri) return "";
+  if (uri.startsWith("file://")) {
+    try {
+      return decodeURIComponent(new URL(uri).pathname);
+    } catch {
+      return "";
+    }
+  }
+  return "";
+}
+
+function readInlineAttachmentBytes(reference) {
+  if (!reference || typeof reference !== "object") return null;
+  const encoding = String(reference.encoding || "").toLowerCase();
+  const base64 =
+    readStringField(reference, ["base64", "contentBase64", "blob"]) ||
+    (encoding === "base64" ? readStringField(reference, ["data"]) : "");
+  if (base64) {
+    return { bytes: Buffer.from(base64, "base64") };
+  }
+  const text = readRawStringField(reference, ["text", "content", "data"]);
+  if (text !== "" && encoding !== "base64") {
+    return { bytes: Buffer.from(text, "utf8") };
+  }
+  return null;
+}
+
+function readAttachmentFilename(reference) {
+  if (!reference || typeof reference !== "object") return "";
+  return readStringField(reference, ["filename", "fileName", "name", "title"]);
+}
+
+function readAttachmentMimeType(reference) {
+  if (!reference || typeof reference !== "object") return "";
+  return readStringField(reference, ["mimeType", "mime_type", "contentType", "content_type"]);
+}
+
+function readStringField(value, keys) {
+  if (!value || typeof value !== "object") return "";
+  for (const key of keys) {
+    if (typeof value[key] === "string" && value[key].trim()) {
+      return value[key].trim();
+    }
+  }
+  return "";
+}
+
+function readRawStringField(value, keys) {
+  if (!value || typeof value !== "object") return "";
+  for (const key of keys) {
+    if (typeof value[key] === "string") {
+      return value[key];
+    }
+  }
+  return "";
+}
+
+function parseJsonValue(value) {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed || !/^[\[{"]/.test(trimmed)) return null;
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    return null;
+  }
+}
+
+function looksLikeLocalFileReference(value) {
+  const text = String(value || "").trim();
+  if (!text || /^https?:\/\//i.test(text)) return false;
+  return (
+    text.startsWith("/") ||
+    text.startsWith("./") ||
+    text.startsWith("../") ||
+    text.startsWith("file://") ||
+    /\.(csv|docx?|gif|html?|jpe?g|json|md|mp3|mp4|pdf|png|pptx?|txt|webp|xlsx?|zip)$/i.test(text)
+  );
+}
+
+function dedupeAgentResultAttachments(attachments) {
+  const seen = new Set();
+  const output = [];
+  for (const attachment of attachments) {
+    const key = attachment.digest || attachment.uri || attachment.filename;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    output.push(attachment);
+  }
+  return output;
+}
+
+function publicAgentResultAttachment(attachment) {
+  const {
+    data,
+    base64,
+    blob,
+    contentBase64,
+    ...metadata
+  } = attachment;
+  return metadata;
+}
+
+function summarizeAgentResultFileReference(reference) {
+  if (typeof reference === "string") {
+    return {
+      name: basename(reference),
+      pathDigest: `sha256:${sha256Hex(reference)}`,
+    };
+  }
+  if (!reference || typeof reference !== "object") return { type: typeof reference };
+  const rawPath = readAttachmentPath(reference);
+  return {
+    name: readAttachmentFilename(reference) || (rawPath ? basename(rawPath) : null),
+    mimeType: readAttachmentMimeType(reference) || null,
+    pathDigest: rawPath ? `sha256:${sha256Hex(rawPath)}` : null,
+  };
+}
+
+function redactAttachmentDataForTokenEstimate(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => redactAttachmentDataForTokenEstimate(item));
+  }
+  if (!value || typeof value !== "object") return value;
+  const output = {};
+  for (const [key, child] of Object.entries(value)) {
+    if (["data", "base64", "blob", "contentBase64"].includes(key)) {
+      output[key] = typeof child === "string" ? `<redacted:${child.length}>` : "<redacted>";
+      continue;
+    }
+    output[key] = redactAttachmentDataForTokenEstimate(child);
+  }
+  return output;
+}
+
+function parseAgentResultFileRoots(value) {
+  const roots = String(value || "")
+    .split(/[,\n]/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .map((item) => resolve(item));
+  return Array.from(new Set(roots.length ? roots : [
+    resolve(".hireme/gateway/results"),
+    resolve("output"),
+  ]));
+}
+
+function isBlockedAgentResultPath(filePath) {
+  const normalized = String(filePath || "").replace(/\\/g, "/").toLowerCase();
+  return (
+    normalized.includes("/.hireme/gateway/protected-runtime/") ||
+    normalized.includes("/.hireme/walrus/") ||
+    /(^|\/)agents\.md$/.test(normalized) ||
+    /(^|\/)(skills|harness)(\/|$)/.test(normalized)
+  );
+}
+
+function isPathInside(rootPath, candidatePath) {
+  const rel = relative(rootPath, candidatePath);
+  return rel === "" || (rel && !rel.startsWith("..") && !rel.startsWith("/"));
+}
+
+function guessMimeType(filePath) {
+  const extension = extname(String(filePath || "")).toLowerCase();
+  const mimeTypes = {
+    ".csv": "text/csv",
+    ".doc": "application/msword",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".gif": "image/gif",
+    ".htm": "text/html",
+    ".html": "text/html",
+    ".jpeg": "image/jpeg",
+    ".jpg": "image/jpeg",
+    ".json": "application/json",
+    ".md": "text/markdown",
+    ".mp3": "audio/mpeg",
+    ".mp4": "video/mp4",
+    ".pdf": "application/pdf",
+    ".png": "image/png",
+    ".ppt": "application/vnd.ms-powerpoint",
+    ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    ".txt": "text/plain",
+    ".webp": "image/webp",
+    ".xls": "application/vnd.ms-excel",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".zip": "application/zip",
+  };
+  return mimeTypes[extension] || "application/octet-stream";
 }
 
 function prepareSealedHarnessUpload(args = {}) {
@@ -5128,7 +6584,12 @@ async function registerAgentFromMcp(args = {}) {
     hiddenAssetClasses,
     pricePerCallUsd: pricePer1MTokensSui,
     pricePer1MTokensSui,
-    freeCalls: 0,
+    freeCalls: Math.max(
+      0,
+      Math.trunc(
+        readOptionalNumber(args.free_calls ?? args.freeCalls, trialCallAllowance),
+      ),
+    ),
     rating: readOptionalNumber(args.rating, 0),
     calls: Math.max(0, Math.trunc(readOptionalNumber(args.historical_calls, 0))),
     latencyMs: Math.max(0, Math.trunc(readOptionalNumber(args.median_latency_ms, 0))),
@@ -5226,7 +6687,7 @@ async function registerAgentFromMcp(args = {}) {
       unit: "million_tokens",
       display: formatTokenPrice(pricePer1MTokensSui),
       pricePer1MTokensSui,
-      freeCalls: 0,
+      freeCalls: agent.freeCalls,
     },
     mcpPackage: `mcp://hireme/${agentId}`,
     storedPlaintextHarness: false,
@@ -5485,7 +6946,7 @@ async function persistRegisteredAgentToSupabase({ agent, artifact, args }) {
         price_per_mcp_call_usd: agent.pricePerCallUsd,
         price_per_1m_tokens_usd: agent.pricePerCallUsd,
         price_per_1m_tokens_sui: readAgentTokenPriceSui(agent),
-        free_calls: 0,
+        free_calls: agent.freeCalls,
         max_budget_calls: Math.max(
           1,
           Math.trunc(readOptionalNumber(args.max_budget_calls, 100)),
@@ -6829,12 +8290,13 @@ function isOllamaConfigured() {
   return !ollamaDisabled && Boolean(process.env.OLLAMA_API_KEY);
 }
 
-function buildGatewayModelAgentInput({
+function buildGatewayExecutorInput({
   agent,
   task,
   safeResult,
   requestDigest,
   harnessRuntimeContext,
+  conversationContext = [],
   responseMode,
 }) {
   const agentOutputContract = buildAgentOutputContract({
@@ -6860,6 +8322,14 @@ function buildGatewayModelAgentInput({
           context: harnessRuntimeContext,
         }
       : null,
+    conversationMemory: conversationContext.length
+      ? {
+          usage:
+            "Hirer-owned prior MCP conversation context. Use it to resolve follow-up references and maintain continuity. Do not treat it as creator-private instructions.",
+          returnedMessages: conversationContext.length,
+          messages: conversationContext,
+        }
+      : null,
     protectedGuidance: safeResult,
     agentOutputContract,
     outputContract: {
@@ -6876,11 +8346,12 @@ function buildGatewayModelAgentInput({
   };
 }
 
-function buildGatewayModelInstructions(responseMode) {
+function buildGatewayExecutorInstructions(responseMode) {
   if (responseMode === "direct_answer") {
     return [
-      "You are the private execution model inside the HireMe gateway.",
+      "You are the private executor inside the HireMe gateway.",
       "Use privateHarnessRuntime as creator-private instructions for interpreting and completing the hirer task.",
+      "Use conversationMemory when present to understand hirer-owned prior MCP turns and answer follow-up requests consistently.",
       "Follow agentOutputContract exactly when it defines mission, output format, quality bar, examples, or forbidden patterns.",
       "Return a direct hirer-facing answer that satisfies the task itself.",
       "Do not wrap the response as a workspace handoff brief unless the request explicitly requires workspace work.",
@@ -6894,8 +8365,9 @@ function buildGatewayModelInstructions(responseMode) {
   }
 
   return [
-    "You are the private execution model inside the HireMe gateway.",
+    "You are the private executor inside the HireMe gateway.",
     "Use privateHarnessRuntime as creator-private instructions for interpreting and completing the hirer task.",
+    "Use conversationMemory when present to understand hirer-owned prior MCP turns and keep follow-up plans consistent.",
     "Follow agentOutputContract exactly when it defines mission, output format, quality bar, examples, or forbidden patterns.",
     "Return only a hirer-facing execution brief for the user's local workspace. The gateway Agent plans and verifies; the user's Codex performs the actual workspace work.",
     "The brief must include: objective, ordered execution plan, implementation guidance, verification flow, acceptance criteria, and assumptions or stop conditions.",
@@ -6997,7 +8469,13 @@ function readOllamaUsage(response, fallbackInputTokens, fallbackOutputTokens) {
   };
 }
 
-async function callGatewayModelAgent(args) {
+async function callGatewayExecutor(args) {
+  if (
+    defaultLlmProvider === "fixture" &&
+    /^(1|true|yes)$/i.test(process.env.HIREME_ALLOW_FIXTURE_LLM || "")
+  ) {
+    return callFixtureAgent(args);
+  }
   if (defaultLlmProvider === "openai") {
     return callOpenAIAgent(args);
   }
@@ -7011,6 +8489,92 @@ async function callGatewayModelAgent(args) {
   };
 }
 
+async function callFixtureAgent({
+  agent,
+  task,
+  requestDigest,
+  callId,
+  harnessRuntimeContext,
+  responseMode,
+}) {
+  const startedAt = Date.now();
+  const outputText = readFixtureExecutorOutput({
+    agent,
+    task,
+  });
+  if (hasPrivateHarnessEcho(outputText, harnessRuntimeContext)) {
+    return {
+      status: "failed",
+      provider: "fixture",
+      model: "fixture",
+      message: "Executor output echoed private Harness content and was blocked.",
+    };
+  }
+  const outputContractApplied = summarizeOutputContractForSafeResult(
+    buildAgentOutputContract({
+      agent,
+      runtimeContext: harnessRuntimeContext,
+      responseMode,
+    }),
+  );
+  const result = {
+    type: "fixture_agent_result",
+    provider: "fixture",
+    model: "fixture",
+    requestDigest,
+    outputText,
+    outputTextDigest: `sha256:${sha256Hex(outputText)}`,
+    protectedGuidanceApplied: true,
+    outputContractApplied,
+    creatorSecretsReturned: false,
+    outputMode:
+      responseMode === "direct_answer" ? "hirer_facing_answer" : "local_codex_execution_brief",
+    responseMode,
+  };
+  return {
+    status: "completed",
+    provider: "fixture",
+    model: "fixture",
+    responseId: `fixture_${callId}`,
+    result,
+    usage: {
+      inputTokens: estimateTokenCount(JSON.stringify({ task, requestDigest })),
+      outputTokens: estimateTokenCount(outputText),
+    },
+    latencyMs: Date.now() - startedAt,
+  };
+}
+
+function readFixtureExecutorOutput({ agent, task }) {
+  const sequenceText = process.env.HIREME_LLM_FIXTURE_OUTPUTS;
+  if (sequenceText) {
+    try {
+      const sequence = JSON.parse(sequenceText);
+      if (Array.isArray(sequence) && sequence.length) {
+        const index = Math.min(fixtureExecutorOutputIndex, sequence.length - 1);
+        fixtureExecutorOutputIndex += 1;
+        const item = sequence[index];
+        return typeof item === "string" ? item : JSON.stringify(item);
+      }
+    } catch {
+      // Fall through to the single-output fixture.
+    }
+  }
+  return (
+    process.env.HIREME_LLM_FIXTURE_OUTPUT ||
+    JSON.stringify({
+      outputText: "Fixture Agent response.",
+      attachments: [
+        {
+          filename: "fixture-agent-result.txt",
+          mimeType: "text/plain",
+          text: `Fixture result for ${agent.id}: ${task}`,
+        },
+      ],
+    })
+  );
+}
+
 async function callOllamaAgent({
   agent,
   task,
@@ -7018,6 +8582,7 @@ async function callOllamaAgent({
   requestDigest,
   callId,
   harnessRuntimeContext,
+  conversationContext,
   responseMode,
 }) {
   if (!isOllamaConfigured()) {
@@ -7025,19 +8590,19 @@ async function callOllamaAgent({
       status: "skipped",
       provider: "ollama",
       reason: "OLLAMA_API_KEY is not configured.",
-      model: defaultOllamaModel,
     };
   }
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), defaultModelTimeoutMs);
   const startedAt = Date.now();
-  const input = buildGatewayModelAgentInput({
+  const input = buildGatewayExecutorInput({
     agent,
     task,
     safeResult,
     requestDigest,
     harnessRuntimeContext,
+    conversationContext,
   });
   const body = {
     model: defaultOllamaModel,
@@ -7045,7 +8610,7 @@ async function callOllamaAgent({
     messages: [
       {
         role: "system",
-        content: buildGatewayModelInstructions(responseMode),
+        content: buildGatewayExecutorInstructions(responseMode),
       },
       {
         role: "user",
@@ -7083,7 +8648,6 @@ async function callOllamaAgent({
       writeGatewayLog("ollama_agent_call_failed", {
         callId,
         agentId: agent.id,
-        model: defaultOllamaModel,
         statusCode: response.status,
         message,
         responseDigest: `sha256:${sha256Hex(responseText || "")}`,
@@ -7091,7 +8655,6 @@ async function callOllamaAgent({
       return {
         status: "failed",
         provider: "ollama",
-        model: defaultOllamaModel,
         statusCode: response.status,
         message,
       };
@@ -7102,7 +8665,6 @@ async function callOllamaAgent({
       return {
         status: "failed",
         provider: "ollama",
-        model: defaultOllamaModel,
         message: "Ollama returned an empty Agent response.",
       };
     }
@@ -7110,14 +8672,12 @@ async function callOllamaAgent({
       writeGatewayLog("ollama_agent_output_blocked", {
         callId,
         agentId: agent.id,
-        model: defaultOllamaModel,
         reason: "private_harness_echo_detected",
       });
       return {
         status: "failed",
         provider: "ollama",
-        model: defaultOllamaModel,
-        message: "Model output echoed private Harness content and was blocked.",
+        message: "Executor output echoed private Harness content and was blocked.",
       };
     }
     const fallbackOutputTokens = estimateTokenCount(outputText);
@@ -7137,7 +8697,6 @@ async function callOllamaAgent({
     const result = {
       type: "ollama_agent_result",
       provider: "ollama",
-      model: defaultOllamaModel,
       outputText,
       outputTextDigest: `sha256:${sha256Hex(outputText)}`,
       protectedGuidanceApplied: true,
@@ -7150,7 +8709,6 @@ async function callOllamaAgent({
     writeGatewayLog("ollama_agent_call_completed", {
       callId,
       agentId: agent.id,
-      model: defaultOllamaModel,
       inputTokens: usage.inputTokens,
       outputTokens: usage.outputTokens,
       latencyMs,
@@ -7159,7 +8717,6 @@ async function callOllamaAgent({
     return {
       status: "completed",
       provider: "ollama",
-      model: defaultOllamaModel,
       result,
       usage,
       latencyMs,
@@ -7169,13 +8726,11 @@ async function callOllamaAgent({
     writeGatewayLog("ollama_agent_call_failed", {
       callId,
       agentId: agent.id,
-      model: defaultOllamaModel,
       message,
     });
     return {
       status: "failed",
       provider: "ollama",
-      model: defaultOllamaModel,
       message,
     };
   } finally {
@@ -7190,6 +8745,7 @@ async function callOpenAIAgent({
   requestDigest,
   callId,
   harnessRuntimeContext,
+  conversationContext,
   responseMode,
 }) {
   if (!isOpenAIConfigured()) {
@@ -7197,24 +8753,24 @@ async function callOpenAIAgent({
       status: "skipped",
       provider: "openai",
       reason: "OPENAI_API_KEY is not configured.",
-      model: defaultOpenAIModel,
     };
   }
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), defaultModelTimeoutMs);
   const startedAt = Date.now();
-  const input = buildGatewayModelAgentInput({
+  const input = buildGatewayExecutorInput({
     agent,
     task,
     safeResult,
     requestDigest,
     harnessRuntimeContext,
+    conversationContext,
   });
   const body = {
     model: defaultOpenAIModel,
     max_output_tokens: defaultModelMaxOutputTokens,
-    instructions: buildGatewayModelInstructions(responseMode),
+    instructions: buildGatewayExecutorInstructions(responseMode),
     input: JSON.stringify(input, null, 2),
   };
   const reasoningEffort = process.env.HIREME_OPENAI_REASONING_EFFORT;
@@ -7248,7 +8804,6 @@ async function callOpenAIAgent({
       writeGatewayLog("openai_agent_call_failed", {
         callId,
         agentId: agent.id,
-        model: defaultOpenAIModel,
         statusCode: response.status,
         message,
         responseDigest: `sha256:${sha256Hex(responseText || "")}`,
@@ -7256,7 +8811,6 @@ async function callOpenAIAgent({
       return {
         status: "failed",
         provider: "openai",
-        model: defaultOpenAIModel,
         statusCode: response.status,
         message,
       };
@@ -7267,7 +8821,6 @@ async function callOpenAIAgent({
       return {
         status: "failed",
         provider: "openai",
-        model: defaultOpenAIModel,
         responseId: data?.id || null,
         message: "OpenAI returned an empty Agent response.",
       };
@@ -7276,16 +8829,14 @@ async function callOpenAIAgent({
       writeGatewayLog("openai_agent_output_blocked", {
         callId,
         agentId: agent.id,
-        model: defaultOpenAIModel,
         responseId: data?.id || null,
         reason: "private_harness_echo_detected",
       });
       return {
         status: "failed",
         provider: "openai",
-        model: defaultOpenAIModel,
         responseId: data?.id || null,
-        message: "Model output echoed private Harness content and was blocked.",
+        message: "Executor output echoed private Harness content and was blocked.",
       };
     }
     const fallbackOutputTokens = estimateTokenCount(outputText);
@@ -7305,7 +8856,6 @@ async function callOpenAIAgent({
     const result = {
       type: "openai_agent_result",
       provider: "openai",
-      model: defaultOpenAIModel,
       responseId: data?.id || null,
       outputText,
       outputTextDigest: `sha256:${sha256Hex(outputText)}`,
@@ -7319,7 +8869,6 @@ async function callOpenAIAgent({
     writeGatewayLog("openai_agent_call_completed", {
       callId,
       agentId: agent.id,
-      model: defaultOpenAIModel,
       responseId: data?.id || null,
       inputTokens: usage.inputTokens,
       outputTokens: usage.outputTokens,
@@ -7329,7 +8878,6 @@ async function callOpenAIAgent({
     return {
       status: "completed",
       provider: "openai",
-      model: defaultOpenAIModel,
       responseId: data?.id || null,
       result,
       usage,
@@ -7340,13 +8888,11 @@ async function callOpenAIAgent({
     writeGatewayLog("openai_agent_call_failed", {
       callId,
       agentId: agent.id,
-      model: defaultOpenAIModel,
       message,
     });
     return {
       status: "failed",
       provider: "openai",
-      model: defaultOpenAIModel,
       message,
     };
   } finally {

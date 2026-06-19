@@ -44,7 +44,7 @@ export async function encryptWithSealEnvelope({
     keyServerIds,
     sealApproveTarget: buildSealApproveTarget(readSealPackageId()),
     kmsKeyId: process.env.HIREME_PLATFORM_KMS_KEY_ID || "platform:local-dev-key",
-    policyModel: "paid-hire-receipt-and-approved-platform-gateway",
+    policyMode: "paid-hire-receipt-and-approved-platform-gateway",
   };
   const encryptedObject = {
     format: platformEncryptionFormat,
@@ -87,9 +87,12 @@ export function approveSealAccess({
   }
 
   return {
-    model: "platform-managed-decrypt-approval",
+    approvalMode: "platform-managed-decrypt-approval",
     provider: sealMetadata?.provider || platformEncryptionProvider,
-    policyModel: sealMetadata?.policyModel || "paid-hire-receipt-and-approved-platform-gateway",
+    policyMode:
+      sealMetadata?.policyMode ||
+      sealMetadata?.policyModel ||
+      "paid-hire-receipt-and-approved-platform-gateway",
     agentId,
     packageId: sealMetadata?.packageId || readSealPackageId(),
     sealApproveTarget:
@@ -165,7 +168,7 @@ export function readSealEnvelopeMetadata(encryptedBytes) {
       threshold: null,
       keyServerIds: [],
       sealApproveTarget: buildSealApproveTarget(readSealPackageId()),
-      policyModel: "legacy-local-runner-only",
+      policyMode: "legacy-local-runner-only",
     };
   }
   return encryptedObject.platform || encryptedObject.seal || {};

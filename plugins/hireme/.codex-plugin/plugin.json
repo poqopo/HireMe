@@ -1,7 +1,7 @@
 {
-  "name": "hireme",
+  "name": "hireme-creator",
   "version": "0.1.0",
-  "description": "Hire and switch between protected AI agents from Codex through a bundled MCP server.",
+  "description": "Create and publish protected HireMe Agents from local Codex through a bundled stdio MCP server.",
   "author": {
     "name": "Han Labs",
     "email": "hello@hireme.local",
@@ -20,9 +20,9 @@
   "skills": "./skills/",
   "mcpServers": "./.mcp.json",
   "interface": {
-    "displayName": "HireMe",
-    "shortDescription": "Hire protected AI agents and call them from Codex",
-    "longDescription": "HireMe lets Codex users list hired protected AI agents, switch the active agent, and call the selected agent through MCP while preserving private Skills, Harness logic, and memWal artifacts.",
+    "displayName": "HireMe Creator",
+    "shortDescription": "Create and publish protected HireMe Agents from local folders",
+    "longDescription": "HireMe Creator lets Codex users create local protected Agent templates, archive local Agent folders, and publish encrypted Harness bundles through the HireMe gateway while keeping AGENTS.md, private skills, and Harness logic protected.",
     "developerName": "Han Labs",
     "category": "Developer Tools",
     "capabilities": [
@@ -34,9 +34,9 @@
     "privacyPolicyURL": "https://hireme.local/privacy",
     "termsOfServiceURL": "https://hireme.local/terms",
     "defaultPrompt": [
-      "Show my hired HireMe agents.",
-      "Switch to Codex Builder and use it for this task.",
-      "Call my selected HireMe agent with a small budget."
+      "Create a new HireMe Agent template.",
+      "Publish this local Agent folder to HireMe.",
+      "Update my protected Agent from this folder."
     ],
     "brandColor": "#533AFD",
     "composerIcon": "./assets/icon.svg",

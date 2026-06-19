@@ -101,7 +101,7 @@ export async function sealAgentFolder({
     sealApproveTarget: sealMetadata.sealApproveTarget,
     sealThreshold: sealMetadata.threshold,
     sealKeyServerIds: sealMetadata.keyServerIds,
-    sealPolicyModel: sealMetadata.policyModel,
+    sealPolicyMode: sealMetadata.policyMode || sealMetadata.policyModel,
     sealCiphertextFormat: platformEncryptionFormat,
     walrusBlobId,
     walrusSuiObjectId: suiObjectId,

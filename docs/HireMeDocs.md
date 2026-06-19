@@ -424,18 +424,34 @@ Steps:
 
 After submission, the gateway validates the archive, encrypts the Harness, stores protected artifact references, and registers the public Agent card.
 
-#### 5.3 Method 2: Publish From Codex Through MCP
+#### 5.3 Method 2: Publish From Codex Through the Creator MCP
 
-Use the MCP flow when you prefer to work from Codex.
+Use the local `hireme-creator` stdio MCP flow when you prefer to work from Codex. The OAuth HTTP MCP server named `hireme` is for buyer/hirer actions such as discovery, Try/Hire entitlement checks, payments, and Agent calls; it does not create local folders or archive local files.
 
 Typical flow:
 
-1. Ask Codex to create a HireMe Agent template.
-2. HireMe MCP calls `hireme_create_agent_template`.
-3. Edit the generated folder: `AGENTS.md`, skills, examples, and private workflow files.
-4. When the Harness is ready, ask Codex to publish it.
-5. HireMe MCP calls `hireme_create_agent_from_folder`.
-6. The gateway archives, encrypts, uploads, and registers the Agent.
+1. Install or enable the `hireme-creator` Codex plugin.
+2. Ask Codex to create a HireMe Agent template.
+3. `hireme-creator` calls `hireme_create_agent_template`.
+4. Edit the generated folder: `AGENTS.md`, skills, examples, and private workflow files.
+5. When the Harness is ready, ask Codex to publish it.
+6. `hireme-creator` calls `hireme_create_agent_from_folder`.
+7. The gateway archives, encrypts, uploads, and registers the Agent.
+
+Public website setup:
+
+```bash
+# Install the HireMe Creator plugin
+codex plugin marketplace add poqopo/HireMe --ref main
+codex plugin add hireme-creator --marketplace hireme-local
+
+# Connect the hired-Agent MCP server to the Render gateway
+codex mcp remove hireme || true
+codex mcp add hireme --url https://hireme-gateway.onrender.com/mcp --oauth-resource https://hireme-gateway.onrender.com/mcp
+codex mcp login --scopes hireme:agents,hireme:call,hireme:manage hireme
+```
+
+Use `localhost:8787` only when testing a local gateway. Website users should use `https://hireme-gateway.onrender.com`.
 
 Example Codex request:
 

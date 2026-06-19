@@ -1,10 +1,16 @@
 {
   "mcpServers": {
-    "hireme": {
+    "hireme-creator": {
       "command": "node",
       "args": [
         "./mcp/server.mjs"
       ],
+      "env": {
+        "HIREME_MCP_PROFILE": "creator",
+        "HIREME_MCP_GATEWAY_URL": "https://hireme-gateway.onrender.com",
+        "HIREME_MCP_GATEWAY_REQUIRED": "1",
+        "HIREME_MCP_GATEWAY_TIMEOUT_MS": "30000"
+      },
       "startup_timeout_sec": 10,
       "tool_timeout_sec": 60,
       "enabled": true,
