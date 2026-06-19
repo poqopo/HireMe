@@ -217,6 +217,14 @@ if (!toolList?.result?.tools?.some((tool) => tool.name === "hireme_register_agen
   throw new Error("hireme_register_agent was not advertised by tools/list");
 }
 
+if (
+  !toolList?.result?.tools?.some(
+    (tool) => tool.name === "hireme_update_agent_from_folder",
+  )
+) {
+  throw new Error("hireme_update_agent_from_folder was not advertised by tools/list");
+}
+
 if (!callResult?.result?.content?.[0]?.text?.includes('"agent"')) {
   throw new Error("hireme_call_agent did not return the expected call result");
 }

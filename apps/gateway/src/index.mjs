@@ -487,6 +487,20 @@ const server = createServer(async (req, res) => {
       return;
     }
 
+    if (req.method === "POST" && url.pathname === "/v1/agents/update") {
+      const result = await updateAgentFromMultipart(req);
+      writeGatewayLog("agent_update_http", {
+        agentId: result.publicAgent?.id,
+        versionNumber: result.version?.versionNumber,
+        provider: result.protectedArtifact?.encryptionProvider,
+        ciphertextFormat: result.protectedArtifact?.ciphertextFormat,
+        walrusBlobId: result.protectedArtifact?.walrusBlobId,
+        storageProvider: result.upload?.storageProvider,
+      });
+      sendJson(res, 200, result);
+      return;
+    }
+
     const body = await readJson(req);
 
     if (req.method === "POST" && url.pathname === "/v1/agents/list") {
@@ -506,6 +520,11 @@ const server = createServer(async (req, res) => {
 
     if (req.method === "POST" && url.pathname === "/v1/agents/create-from-folder") {
       sendJson(res, 200, await createAgentFromLocalFolder(body));
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/v1/agents/update-from-folder") {
+      sendJson(res, 200, await updateAgentFromLocalFolder(body));
       return;
     }
 
@@ -951,6 +970,52 @@ const httpMcpTools = [
           minimum: 0,
           description: "Legacy alias. Use creator_fee_per_1m_tokens_sui.",
         },
+        result_title: { type: "string" },
+        result_summary: { type: "string" },
+        result_sample: { type: "string" },
+        result_media_url: { type: "string" },
+        result_media_type: { type: "string", enum: ["image", "video"] },
+        exclude: { type: "array", items: { type: "string" } },
+      },
+      required: [
+        "folder_path",
+        "agent_id",
+        "name",
+        "creator",
+        "category",
+        "headline",
+        "public_summary",
+        "public_mcp_contract",
+        "skills",
+        "price_per_1m_tokens_sui",
+      ],
+    },
+  },
+  {
+    name: "hireme_update_agent_from_folder",
+    title: "Update Agent from local folder",
+    description:
+      "Update an existing protected Agent by archiving a local Agent working folder, encrypting and uploading a new artifact, creating the next Agent version, and switching the Agent to that version.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        folder_path: { type: "string" },
+        agent_id: { type: "string" },
+        name: { type: "string" },
+        creator: { type: "string" },
+        category: { type: "string" },
+        status: { type: "string" },
+        headline: { type: "string" },
+        public_summary: { type: "string" },
+        public_mcp_contract: { type: "string" },
+        memwal_policy: { type: "string" },
+        skills: { type: "array", items: { type: "string" } },
+        protected_asset_classes: { type: "array", items: { type: "string" } },
+        price_per_1m_tokens_sui: { type: "number", minimum: 0 },
+        base_price_per_1m_tokens_sui: { type: "number", minimum: 0 },
+        creator_fee_per_1m_tokens_sui: { type: "number", minimum: 0 },
+        version_number: { type: "integer", minimum: 1 },
+        release_notes: { type: "string" },
         result_title: { type: "string" },
         result_summary: { type: "string" },
         result_sample: { type: "string" },
@@ -1681,6 +1746,8 @@ async function callHttpMcpTool(name, args = {}, session) {
       return mcpTextResult(await registerAgentFromMcp(scopedArgs));
     case "hireme_create_agent_from_folder":
       return mcpTextResult(await createAgentFromLocalFolder(scopedArgs));
+    case "hireme_update_agent_from_folder":
+      return mcpTextResult(await updateAgentFromLocalFolder(scopedArgs));
     case "hireme_call_walrus_agent":
       return mcpTextResult(await readWalrusAgentArtifact({
         blob_id: args.blob_id || args.blobId,
@@ -4733,6 +4800,33 @@ async function createAgentFromMultipart(req) {
   });
 }
 
+async function updateAgentFromMultipart(req) {
+  const { fields, files } = await readMultipartForm(req);
+  const metadata = fields.metadata ? parseJsonField(fields.metadata, "metadata") : fields;
+  const harnessFile =
+    files.harness ||
+    files.agent_file ||
+    files.agentFile ||
+    files.file ||
+    Object.values(files)[0];
+
+  if (!harnessFile?.data?.length) {
+    throw Object.assign(new Error("Missing Harness archive file field: harness"), {
+      statusCode: 400,
+      code: "missing_harness_archive",
+    });
+  }
+
+  return createAgentFromArchiveUpload({
+    metadata: {
+      ...metadata,
+      update_mode: true,
+    },
+    harnessFile,
+    registeredVia: "web_multipart_update",
+  });
+}
+
 async function createAgentFromLocalFolder(args = {}) {
   const folderPath = resolveAgentFolderPath(args.folder_path || args.folderPath);
   const metadata = normalizeCreateAgentFolderMetadata(args);
@@ -4754,6 +4848,7 @@ async function createAgentFromLocalFolder(args = {}) {
       exclude: normalizeStringList(args.exclude),
     });
     const archiveData = await readFile(archivePath);
+    const updateMode = Boolean(metadata.update_mode || metadata.updateMode);
     return createAgentFromArchiveUpload({
       metadata: {
         ...metadata,
@@ -4761,7 +4856,11 @@ async function createAgentFromLocalFolder(args = {}) {
           ...(metadata.metadata && typeof metadata.metadata === "object"
             ? metadata.metadata
             : {}),
-          source: metadata.metadata?.source || "mcp_create_agent_from_folder",
+          source:
+            metadata.metadata?.source ||
+            (updateMode
+              ? "mcp_update_agent_from_folder"
+              : "mcp_create_agent_from_folder"),
           sourceFolderName: basename(folderPath),
         },
       },
@@ -4770,11 +4869,24 @@ async function createAgentFromLocalFolder(args = {}) {
         contentType: "application/gzip",
         data: archiveData,
       },
-      registeredVia: "mcp_create_agent_from_folder",
+      registeredVia: updateMode
+        ? "mcp_update_agent_from_folder"
+        : "mcp_create_agent_from_folder",
     });
   } finally {
     await rm(workDir, { recursive: true, force: true });
   }
+}
+
+async function updateAgentFromLocalFolder(args = {}) {
+  return createAgentFromLocalFolder({
+    ...args,
+    update_mode: true,
+    metadata: {
+      ...(args.metadata && typeof args.metadata === "object" ? args.metadata : {}),
+      source: args.metadata?.source || "mcp_update_agent_from_folder",
+    },
+  });
 }
 
 async function createAgentFromArchiveUpload({
@@ -4786,6 +4898,21 @@ async function createAgentFromArchiveUpload({
     metadata.agent_id || metadata.agentId || metadata.name,
     "agent",
   );
+  const updateMode = Boolean(metadata.update_mode || metadata.updateMode);
+  const versionNumber =
+    metadata.version_number || metadata.versionNumber
+      ? Math.max(
+          1,
+          Math.trunc(
+            readOptionalNumber(
+              metadata.version_number ?? metadata.versionNumber,
+              1,
+            ),
+          ),
+        )
+      : updateMode
+        ? await readNextAgentVersionNumber(agentId)
+        : 1;
   const rootDir = resolve(
     process.env.HIREME_GATEWAY_UPLOAD_DIR || ".hireme/gateway/uploads",
   );
@@ -4838,6 +4965,11 @@ async function createAgentFromArchiveUpload({
     const registration = await registerAgentFromMcp({
       ...metadata,
       agent_id: agentId,
+      version_number: versionNumber,
+      release_notes:
+        metadata.release_notes ||
+        metadata.releaseNotes ||
+        (updateMode ? "Updated through HireMe Agent update flow." : undefined),
       walrus_blob_id: storage.blobId,
       sui_object_id: storage.suiObjectId,
       ciphertext_digest: ciphertextDigest,
@@ -4876,6 +5008,15 @@ async function createAgentFromArchiveUpload({
 
     return {
       ...registration,
+      status: updateMode ? "updated" : registration.status,
+      updateMode,
+      version: {
+        versionNumber,
+        releaseNotes:
+          metadata.release_notes ||
+          metadata.releaseNotes ||
+          (updateMode ? "Updated through HireMe Agent update flow." : "Registered through HireMe MCP."),
+      },
       upload: {
         status: "stored",
         storageProvider: storage.provider,
@@ -6577,6 +6718,37 @@ async function readSupabaseAgentRowBySlug(admin, agentId) {
 
   if (error || !data) return null;
   return data;
+}
+
+async function readNextAgentVersionNumber(agentId) {
+  const admin = createSupabaseAdminClient();
+  if (!admin) return 2;
+
+  try {
+    const agentRow = await readSupabaseAgentRowBySlug(admin, agentId);
+    if (!agentRow) {
+      throw Object.assign(new Error(`Agent not found for update: ${agentId}`), {
+        statusCode: 404,
+        code: "agent_not_found",
+      });
+    }
+
+    const { data, error } = await admin
+      .from("agent_versions")
+      .select("version_number")
+      .eq("agent_id", agentRow.id)
+      .order("version_number", { ascending: false })
+      .limit(1);
+
+    if (error) throw error;
+    const currentMax = Array.isArray(data) && data[0]?.version_number
+      ? Number(data[0].version_number)
+      : 1;
+    return Math.max(1, Math.trunc(currentMax)) + 1;
+  } catch (error) {
+    if (error?.statusCode) throw error;
+    return 2;
+  }
 }
 
 function mapEntitlementRow(row, agent) {

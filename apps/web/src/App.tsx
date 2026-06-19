@@ -323,6 +323,10 @@ type GatewayAgentRegistrationResult = {
     reason?: string;
     error?: string;
   };
+  version?: {
+    versionNumber?: number;
+    releaseNotes?: string;
+  };
 };
 
 type MyPageTab = "registered" | "hired" | "activity";
@@ -996,6 +1000,69 @@ async function createAgentWithGatewayUpload({
   formData.append("harness", harnessFile, harnessFile.name);
 
   const response = await fetch(`${gatewayUrl}/v1/agents/create`, {
+    method: "POST",
+    headers: gatewayAuthHeaders(),
+    body: formData,
+  });
+
+  if (!response.ok) {
+    throw new Error(`Gateway ${response.status}: ${await response.text()}`);
+  }
+
+  return (await response.json()) as GatewayAgentRegistrationResult;
+}
+
+async function updateAgentWithGatewayUpload({
+  agent,
+  harnessFile,
+  releaseNotes,
+  user,
+}: {
+  agent: Agent;
+  harnessFile: File;
+  releaseNotes: string;
+  user: AuthUser | null;
+}): Promise<GatewayAgentRegistrationResult> {
+  const creator =
+    agent.creator || user?.displayName || user?.email || user?.wallet || "Web creator";
+  const tokenPrice = agent.pricePer1MTokensSui ?? agent.pricePerCallUsd;
+  const metadata = {
+    agent_id: agent.id,
+    name: agent.name,
+    handle: agent.handle,
+    creator,
+    category: agent.category,
+    status: agent.status,
+    headline: agent.headline,
+    public_summary: agent.publicSummary || agent.headline,
+    public_mcp_contract:
+      agent.publicContract || `${agent.id}(task, context, budget_calls)`,
+    memwal_policy: agent.memwalPolicy,
+    skills: agent.skills,
+    protected_asset_classes: agent.protectedAssets?.length
+      ? agent.protectedAssets
+      : ["AGENTS.md", "skills/**", "private prompts"],
+    price_per_1m_tokens_sui: tokenPrice,
+    price_per_1m_tokens_usd: tokenPrice,
+    price_per_call_usd: tokenPrice,
+    storage_network: "walrus-testnet",
+    release_notes: releaseNotes || "Updated from the HireMe web creator UI.",
+    result_title: agent.resultPreview.title,
+    result_summary: agent.resultPreview.summary,
+    result_sample: agent.resultPreview.sample,
+    result_media_url: agent.resultPreview.mediaUrl,
+    result_media_type: agent.resultPreview.mediaType,
+    metadata: {
+      source: "web_update_agent",
+      updatedBy:
+        user?.email || user?.wallet || user?.displayName || "anonymous-web-user",
+    },
+  };
+  const formData = new FormData();
+  formData.append("metadata", JSON.stringify(metadata));
+  formData.append("harness", harnessFile, harnessFile.name);
+
+  const response = await fetch(`${gatewayUrl}/v1/agents/update`, {
     method: "POST",
     headers: gatewayAuthHeaders(),
     body: formData,
@@ -3332,6 +3399,12 @@ function AgentDetailPage({
   const [accessActionType, setAccessActionType] = useState<AgentAccessType | null>(
     null,
   );
+  const [updateHarnessFile, setUpdateHarnessFile] = useState<File | null>(null);
+  const [updateReleaseNotes, setUpdateReleaseNotes] = useState("");
+  const [isUpdatingAgent, setIsUpdatingAgent] = useState(false);
+  const [updateAgentError, setUpdateAgentError] = useState<string | null>(null);
+  const [updateAgentResult, setUpdateAgentResult] =
+    useState<GatewayAgentRegistrationResult | null>(null);
 
   useEffect(() => {
     let isCurrent = true;
@@ -3382,6 +3455,25 @@ function AgentDetailPage({
         item.handle.replace(/^@[^/]+\//, "") === agentId ||
         item.handle === agentId),
   );
+  const localCreatedRecord = createdAgentRecords.find(
+    (record) => record.agentSlug === agent?.id || record.id === agent?.id,
+  );
+  const agentOwnerKeys = agent
+    ? [agent.creator, agent.team.owner, agent.handle, agent.id]
+        .map((value) => value.trim().toLowerCase())
+    : [];
+  const userOwnerKeys = user
+    ? [user.email, user.displayName, user.wallet]
+        .map((value) => value?.trim().toLowerCase())
+        .filter((value): value is string => Boolean(value))
+    : [];
+  const canUpdateAgent = Boolean(
+    user &&
+      agent &&
+      (localCreatedRecord?.creatorId === creatorIdFor(user) ||
+        localCreatedRecord?.creatorEmail === user.email ||
+        userOwnerKeys.some((key) => agentOwnerKeys.includes(key))),
+  );
   const access = user
     ? accessSnapshot.find(
         (record) =>
@@ -3422,6 +3514,63 @@ function AgentDetailPage({
       );
     } finally {
       setAccessActionType(null);
+    }
+  }
+
+  async function updateAgentHarness() {
+    if (!agent) return;
+    if (!user) {
+      onRequireLogin();
+      return;
+    }
+    if (!updateHarnessFile) {
+      setUpdateAgentError("Upload a new Harness archive first.");
+      return;
+    }
+
+    setIsUpdatingAgent(true);
+    setUpdateAgentError(null);
+    setUpdateAgentResult(null);
+    try {
+      const result = await updateAgentWithGatewayUpload({
+        agent,
+        harnessFile: updateHarnessFile,
+        releaseNotes: updateReleaseNotes,
+        user,
+      });
+      if (localCreatedRecord) {
+        writeCreatedAgentRecord({
+          ...localCreatedRecord,
+          walrusBlobId:
+            result.protectedArtifact?.walrusBlobId ||
+            localCreatedRecord.walrusBlobId,
+          suiObjectId:
+            result.protectedArtifact?.suiObjectId ||
+            localCreatedRecord.suiObjectId,
+          ciphertextDigest:
+            result.protectedArtifact?.ciphertextDigest ||
+            localCreatedRecord.ciphertextDigest,
+          fileCount: result.upload?.entryCount || localCreatedRecord.fileCount,
+          createdAt: result.registeredAt || new Date().toISOString(),
+          status: "Published",
+          source: "gateway",
+          gatewayError: result.supabase?.error,
+        });
+        setCreatedAgentRecords(readAllCreatedAgents());
+      }
+      const refreshedAgents = await loadMarketplaceAgents();
+      setMarketplaceAgents(
+        refreshedAgents.agents.length ? refreshedAgents.agents : fallbackAgents,
+      );
+      setUpdateHarnessFile(null);
+      setUpdateReleaseNotes("");
+      setUpdateAgentResult(result);
+    } catch (error) {
+      setUpdateAgentError(
+        error instanceof Error ? error.message : "Agent update failed.",
+      );
+    } finally {
+      setIsUpdatingAgent(false);
     }
   }
 
@@ -3575,6 +3724,69 @@ function AgentDetailPage({
           </div>
 
           <aside className="space-y-5 lg:sticky lg:top-24">
+            {canUpdateAgent ? (
+              <Card className="border-[#cfe0ff] bg-[#f7fbff]">
+                <CardHeader>
+                  <CardTitle>Update Agent</CardTitle>
+                  <CardDescription>
+                    Publish a new protected version with a replacement Harness archive.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <label className="flex min-h-28 cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-[#89a8e8] bg-white p-4 text-center transition hover:bg-[#f8fbff]">
+                    <UploadCloud className="size-6 text-[#274690]" />
+                    <span className="mt-2 text-sm font-semibold text-[#1c1e54]">
+                      Upload new Harness
+                    </span>
+                    <span className="mt-1 text-xs text-muted-foreground">
+                      ZIP, TAR.GZ, or GZ
+                    </span>
+                    <input
+                      accept=".zip,.gz,.tgz,.tar.gz,application/zip,application/gzip"
+                      className="sr-only"
+                      onChange={(event) =>
+                        setUpdateHarnessFile(event.target.files?.[0] || null)
+                      }
+                      type="file"
+                    />
+                    {updateHarnessFile ? (
+                      <span className="mt-3 max-w-full truncate rounded-full bg-[#edfff4] px-3 py-1 text-xs font-semibold text-[#166534]">
+                        {updateHarnessFile.name}
+                      </span>
+                    ) : null}
+                  </label>
+                  <textarea
+                    className="mt-3 min-h-20 w-full rounded-md border border-input bg-white px-3 py-2 text-sm text-foreground shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    onChange={(event) => setUpdateReleaseNotes(event.target.value)}
+                    placeholder="Release notes"
+                    value={updateReleaseNotes}
+                  />
+                  <Button
+                    className="mt-3 w-full"
+                    disabled={isUpdatingAgent || !updateHarnessFile}
+                    onClick={() => void updateAgentHarness()}
+                    type="button"
+                  >
+                    <UploadCloud />
+                    {isUpdatingAgent ? "Updating..." : "Publish update"}
+                  </Button>
+                  {updateAgentError ? (
+                    <div className="mt-3 rounded-lg border border-[#ead2df] bg-white px-3 py-2 text-xs leading-5 text-[#9f1239]">
+                      {updateAgentError}
+                    </div>
+                  ) : null}
+                  {updateAgentResult ? (
+                    <div className="mt-3 rounded-lg border border-[#cfe0ff] bg-white px-3 py-2 text-xs leading-5 text-[#274690]">
+                      Version{" "}
+                      {updateAgentResult.version?.versionNumber || "updated"} is
+                      current. Walrus blob:{" "}
+                      {updateAgentResult.protectedArtifact?.walrusBlobId ||
+                        "registered"}
+                    </div>
+                  ) : null}
+                </CardContent>
+              </Card>
+            ) : null}
             <Card>
               <CardHeader><CardTitle>Performance & usage</CardTitle><CardDescription>Marketplace averages from completed runs.</CardDescription></CardHeader>
               <CardContent><dl className="grid gap-3 text-sm">{[["Average time", formatDuration(agent.latencyMs)], ["Average usage", formatTokens(averageTokens)], ["Last updated", "Current release"], ["Version", "v1.0"], ["Completed runs", formatRuns(agent.calls)], ["Rating", agent.rating ? `${agent.rating.toFixed(1)} / 5` : "New"]].map(([label, value]) => <div className="flex items-center justify-between gap-4 border-b border-border pb-3 last:border-0 last:pb-0" key={label}><dt className="text-muted-foreground">{label}</dt><dd className="number-cell font-medium text-[#171452]">{value}</dd></div>)}</dl></CardContent>

@@ -741,6 +741,105 @@ const inputSchemas = {
       "price_per_1m_tokens_sui",
     ],
   },
+  hireme_update_agent_from_folder: {
+    type: "object",
+    properties: {
+      folder_path: {
+        type: "string",
+        description:
+          "Local Agent working folder containing AGENTS.md. The MCP server archives this folder as tar.gz before uploading a new version.",
+      },
+      agent_id: {
+        type: "string",
+        description: "Existing marketplace slug, for example private-code-reviewer.",
+      },
+      name: { type: "string" },
+      handle: {
+        type: "string",
+        description: "Optional public handle. Defaults to @agents/<agent_id>.",
+      },
+      creator: {
+        type: "string",
+        description: "Creator display name used for the public marketplace card.",
+      },
+      category: {
+        type: "string",
+        enum: ["Research", "Code", "Data", "Security", "Growth", "Ops"],
+      },
+      status: {
+        type: "string",
+        enum: ["Available", "Private Beta", "Busy"],
+      },
+      headline: { type: "string" },
+      public_summary: {
+        type: "string",
+        description: "Public description. Do not include private prompts or AGENTS.md content.",
+      },
+      public_mcp_contract: {
+        type: "string",
+        description: "Public callable contract, for example review_pull_request(diff, repo_context).",
+      },
+      skills: {
+        type: "array",
+        items: { type: "string" },
+        description: "Public skill labels only, not skill source files.",
+      },
+      protected_asset_classes: {
+        type: "array",
+        items: { type: "string" },
+        description: "Public labels such as AGENTS.md, skills/**, harness/**.",
+      },
+      memwal_policy: { type: "string" },
+      price_per_1m_tokens_sui: {
+        type: "number",
+        minimum: 0,
+        description: "Execution price in SUI per one million input+output tokens.",
+      },
+      base_price_per_1m_tokens_sui: { type: "number", minimum: 0 },
+      creator_fee_per_1m_tokens_sui: { type: "number", minimum: 0 },
+      price_per_1m_tokens_usd: {
+        type: "number",
+        minimum: 0,
+        description: "Legacy alias. Use price_per_1m_tokens_sui.",
+      },
+      base_price_per_1m_tokens_usd: {
+        type: "number",
+        minimum: 0,
+        description: "Legacy alias. Use base_price_per_1m_tokens_sui.",
+      },
+      creator_fee_per_1m_tokens_usd: {
+        type: "number",
+        minimum: 0,
+        description: "Legacy alias. Use creator_fee_per_1m_tokens_sui.",
+      },
+      release_notes: { type: "string" },
+      version_number: { type: "integer", minimum: 1 },
+      result_title: { type: "string" },
+      result_summary: { type: "string" },
+      result_sample: { type: "string" },
+      result_media_url: { type: "string" },
+      result_media_type: { type: "string", enum: ["image", "video"] },
+      max_budget_calls: { type: "integer", minimum: 1 },
+      exclude: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "Optional extra tar exclude patterns. Common heavy folders are excluded by default.",
+      },
+    },
+    required: [
+      "folder_path",
+      "agent_id",
+      "name",
+      "creator",
+      "category",
+      "headline",
+      "public_summary",
+      "public_mcp_contract",
+      "skills",
+      "price_per_1m_tokens_sui",
+    ],
+  },
   hireme_validate_platform_encrypted_harness: {
     type: "object",
     properties: {
@@ -937,6 +1036,13 @@ const tools = [
     inputSchema: inputSchemas.hireme_create_agent_from_folder,
   },
   {
+    name: "hireme_update_agent_from_folder",
+    title: "Update Agent from local folder",
+    description:
+      "Archive a local Agent working folder as tar.gz, upload it to the gateway, create the next protected Agent version, and make it current. The tool never returns plaintext private files.",
+    inputSchema: inputSchemas.hireme_update_agent_from_folder,
+  },
+  {
     name: "hireme_validate_platform_encrypted_harness",
     title: "Validate platform encrypted Harness through gateway",
     description:
@@ -1100,11 +1206,13 @@ async function callGatewayMultipart(path, formData, options = {}) {
   }
 }
 
-async function createAgentFromFolder(args = {}) {
+async function uploadAgentFolder(args = {}, options = {}) {
   const folderPath = resolveAgentFolderPath(args.folder_path || args.folderPath);
   const agentId = normalizeSlug(args.agent_id || args.name, "agent");
   const workDir = await mkdtemp(join(tmpdir(), `hireme-${agentId}-`));
   const archivePath = join(workDir, `${agentId}.tar.gz`);
+  const endpoint = options.endpoint || "/v1/agents/create";
+  const retryTool = options.retryTool || "hireme_create_agent_from_folder";
 
   try {
     await archiveAgentFolder({
@@ -1114,10 +1222,14 @@ async function createAgentFromFolder(args = {}) {
     });
     const archiveBytes = await readFile(archivePath);
     const metadata = normalizeCreateAgentFolderMetadata(args, {
-      registeredVia: "mcp_create_agent_from_folder",
+      registeredVia: options.registeredVia || "mcp_create_agent_from_folder",
       sourceFolderName: basename(folderPath),
       archivedBy: "hireme_mcp_stdio",
+      ...(options.updateMode ? { updateMode: true } : {}),
     });
+    if (options.updateMode) {
+      metadata.update_mode = true;
+    }
     const formData = new FormData();
     formData.append("metadata", JSON.stringify(metadata));
     formData.append(
@@ -1126,7 +1238,7 @@ async function createAgentFromFolder(args = {}) {
       `${agentId}.tar.gz`,
     );
 
-    const gateway = await callGatewayMultipart("/v1/agents/create", formData, {
+    const gateway = await callGatewayMultipart(endpoint, formData, {
       timeoutMs: Number(process.env.HIREME_MCP_CREATE_TIMEOUT_MS || 60_000),
     });
     if (gateway) {
@@ -1144,9 +1256,9 @@ async function createAgentFromFolder(args = {}) {
     return {
       status: "gateway_required",
       reason:
-        "Creating an Agent from a folder requires the HireMe gateway so the archive can be encrypted, uploaded, and registered.",
+        `${options.updateMode ? "Updating" : "Creating"} an Agent from a folder requires the HireMe gateway so the archive can be encrypted, uploaded, and registered.`,
       runGateway: "npm run gateway:dev",
-      retryTool: "hireme_create_agent_from_folder",
+      retryTool,
       mcpArchive: {
         folderPath,
         archiveFileName: `${agentId}.tar.gz`,
@@ -1157,6 +1269,23 @@ async function createAgentFromFolder(args = {}) {
   } finally {
     await rm(workDir, { recursive: true, force: true });
   }
+}
+
+async function createAgentFromFolder(args = {}) {
+  return uploadAgentFolder(args, {
+    endpoint: "/v1/agents/create",
+    retryTool: "hireme_create_agent_from_folder",
+    registeredVia: "mcp_create_agent_from_folder",
+  });
+}
+
+async function updateAgentFromFolder(args = {}) {
+  return uploadAgentFolder(args, {
+    endpoint: "/v1/agents/update",
+    retryTool: "hireme_update_agent_from_folder",
+    registeredVia: "mcp_update_agent_from_folder",
+    updateMode: true,
+  });
 }
 
 function normalizeCreateAgentFolderMetadata(args = {}, auditMetadata = {}) {
@@ -2006,6 +2135,8 @@ async function callTool(name, args = {}) {
     }
     case "hireme_create_agent_from_folder":
       return textResult(await createAgentFromFolder(args));
+    case "hireme_update_agent_from_folder":
+      return textResult(await updateAgentFromFolder(args));
     case "hireme_validate_platform_encrypted_harness":
     case "hireme_validate_sealed_harness": {
       const agentId = args.agent_id;
@@ -2044,7 +2175,7 @@ async function callTool(name, args = {}) {
         template:
           "To start a new creator Agent, call hireme_create_agent_template or say '나 에이전트 만들건데 템플릿 만들어줘'. It creates AGENTS.md, public.json, skills, harness policy, and examples.",
         registerAgent:
-          "To publish a local working Agent folder, call hireme_create_agent_from_folder with folder_path and public metadata. If you already have encrypted Walrus metadata, call hireme_register_agent.",
+          "To publish a local working Agent folder, call hireme_create_agent_from_folder with folder_path and public metadata. To update an already published Agent, call hireme_update_agent_from_folder with the same agent_id and the new folder_path. If you already have encrypted Walrus metadata, call hireme_register_agent.",
         privacy:
           "Creator AGENTS.md and skills folders must never be shipped as Codex skills/plugins to hirers. The installed plugin is only a public connector to the protected MCP gateway.",
       });
@@ -2544,7 +2675,7 @@ async function handleRequest(message) {
             version: "0.1.0",
           },
           instructions:
-            "HireMe exposes hired protected AI agents. For '내가 누구로 로그인되어 있어?' or identity checks, call hireme_whoami. For '내가 쓸 수 있는 agent 보여줘', call hireme_list_my_agents. For plain-language delegation such as 'launch-operator에게 제품 출시 페이지 방향을 잡아달라고 해', call hireme_request with the user's sentence as request. If the user wants to start building a new Agent template, call hireme_create_agent_template or route the natural request through hireme_request. Use hireme_create_agent_from_folder when the user has a local Agent working folder containing AGENTS.md and wants to create/publish it; the MCP server archives the folder as tar.gz and uploads it to the gateway. Use hireme_register_agent only when encrypted Walrus artifact metadata already exists. Use hireme_call_agent only when you already have structured agent_id/task arguments. Never request or reveal creator AGENTS.md files, private skills folders, Harness internals, plugin source, or protected memWal/Walrus artifacts.",
+            "HireMe exposes hired protected AI agents. For '내가 누구로 로그인되어 있어?' or identity checks, call hireme_whoami. For '내가 쓸 수 있는 agent 보여줘', call hireme_list_my_agents. For plain-language delegation such as 'launch-operator에게 제품 출시 페이지 방향을 잡아달라고 해', call hireme_request with the user's sentence as request. If the user wants to start building a new Agent template, call hireme_create_agent_template or route the natural request through hireme_request. Use hireme_create_agent_from_folder when the user has a local Agent working folder containing AGENTS.md and wants to create/publish it; use hireme_update_agent_from_folder to publish a new version for an existing agent_id. The MCP server archives the folder as tar.gz and uploads it to the gateway. Use hireme_register_agent only when encrypted Walrus artifact metadata already exists. Use hireme_call_agent only when you already have structured agent_id/task arguments. Never request or reveal creator AGENTS.md files, private skills folders, Harness internals, plugin source, or protected memWal/Walrus artifacts.",
         });
         break;
       case "tools/list":

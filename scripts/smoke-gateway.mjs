@@ -167,7 +167,8 @@ try {
     httpMcpOutput.initialize?.result?.serverInfo?.name !== "hireme" ||
     !httpMcpTools.some((tool) => tool.name === "hireme_whoami") ||
     !httpMcpTools.some((tool) => tool.name === "hireme_list_my_agents") ||
-    !httpMcpTools.some((tool) => tool.name === "hireme_call_agent")
+    !httpMcpTools.some((tool) => tool.name === "hireme_call_agent") ||
+    !httpMcpTools.some((tool) => tool.name === "hireme_update_agent_from_folder")
   ) {
     throw new Error("HTTP MCP OAuth flow did not initialize HireMe tools");
   }
