@@ -2130,8 +2130,8 @@ function ProtectedExecutionSection() {
 
 function AgentPerformanceSection() {
   return (
-    <section id="agent-performance" className="landing-wave landing-wave-white bg-gradient-to-b from-[#f4f9ff] via-[#f8fbff] to-[#eef4ff] px-4 py-16 shadow-[inset_0_1px_0_rgba(255,255,255,0.9)] md:px-8 md:py-24">
-      <div className="relative z-10 mx-auto page-shell">
+    <section id="agent-performance" className="agent-performance-section relative isolate -mt-px flex items-center overflow-hidden px-4 py-24 md:px-8 md:py-28 lg:min-h-[calc(100svh-72px)] lg:py-32">
+      <div className="relative z-10 mx-auto page-shell w-full">
         <div className="reveal" data-reveal>
           <div className="mb-5 flex items-center gap-3 text-sm font-semibold text-[#3182f6]">
             <span className="flex size-11 items-center justify-center rounded-2xl bg-[#eaf5ff] text-[#0877ec] shadow-sm">
@@ -2148,7 +2148,7 @@ function AgentPerformanceSection() {
           </p>
         </div>
 
-        <div className="mt-10 grid gap-5 lg:grid-cols-[1fr_auto_1fr] lg:items-center">
+        <div className="mt-10 grid gap-5 pb-8 lg:grid-cols-[1fr_auto_1fr] lg:items-center lg:pb-12">
           <div className="reveal" data-reveal>
             <HarnessImageCard
               caption="Without Harness"
@@ -2156,11 +2156,11 @@ function AgentPerformanceSection() {
               label="Before"
             />
           </div>
-          <div className="reveal stagger-item flex items-center justify-center text-center lg:flex-col" data-reveal style={revealDelayStyle(120)}>
-            <div className="flex size-11 items-center justify-center rounded-full border border-[#d8d4e2] bg-white text-xs font-semibold text-[#494556] shadow-sm">
+          <div className="reveal stagger-item flex items-center justify-center gap-3 text-center lg:flex-col" data-reveal style={revealDelayStyle(120)}>
+            <div className="flex size-11 items-center justify-center rounded-full border border-[rgba(49,130,246,0.18)] bg-white/[0.86] text-xs font-semibold text-[#3182f6] shadow-[0_8px_20px_rgba(30,64,175,0.07)]">
               →
             </div>
-            <div className="mt-0 text-xs font-semibold uppercase tracking-[0.08em] text-[#6b7684] lg:mt-3">
+            <div className="text-xs font-semibold uppercase tracking-[0.04em] text-[#6b7684]">
               Harness applied
             </div>
           </div>
@@ -2173,17 +2173,6 @@ function AgentPerformanceSection() {
           </div>
         </div>
 
-        <div className="reveal stagger-item mt-7 grid gap-3 md:grid-cols-3" data-reveal style={revealDelayStyle(220)}>
-          <div className="rounded-2xl border border-[#dbeafe] bg-white/85 p-4 docs-card-copy">
-            Better structure
-          </div>
-          <div className="rounded-2xl border border-[#dbeafe] bg-white/85 p-4 docs-card-copy">
-            More reliable output
-          </div>
-          <div className="rounded-2xl border border-[#dbeafe] bg-white/85 p-4 docs-card-copy">
-            Hidden checks applied
-          </div>
-        </div>
       </div>
     </section>
   );
@@ -2199,12 +2188,12 @@ function HarnessImageCard({
   label: string;
 }) {
   return (
-    <figure className="overflow-hidden rounded-3xl border border-[#cfe3f8] bg-white shadow-[rgba(30,64,175,0.11)_0_20px_50px]">
-      <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
-        <figcaption className="text-sm font-medium text-[#1c1e54]">
+    <figure className="overflow-hidden rounded-[28px] border border-[rgba(49,130,246,0.14)] bg-white/[0.88] shadow-[0_18px_46px_rgba(30,64,175,0.075)]">
+      <div className="flex items-center justify-between gap-3 border-b border-[rgba(49,130,246,0.1)] px-4 py-3">
+        <figcaption className="text-sm font-medium text-[#191f28]">
           {caption}
         </figcaption>
-        <span className="rounded-full bg-[#eaf5ff] px-3 py-1.5 text-xs font-medium text-[#0753d6]">
+        <span className="rounded-full border border-[rgba(49,130,246,0.1)] bg-[rgba(232,243,255,0.66)] px-3 py-1.5 text-xs font-medium text-[#4e5968]">
           {label}
         </span>
       </div>
@@ -2274,8 +2263,16 @@ function MakeAgentSection() {
 
 function CreatorIpSection() {
   return (
-    <section id="creator-ip" className="landing-wave landing-wave-white overflow-hidden bg-gradient-to-b from-[#eef5ff] via-[#f7fbff] to-[#eaf4ff] px-4 py-16 text-[#0d253d] shadow-[inset_0_1px_0_rgba(255,255,255,0.9)] md:px-8 md:py-24">
-      <div className="mx-auto grid page-shell gap-10 lg:grid-cols-[0.92fr_1.08fr] lg:items-center">
+    <section id="creator-ip" className="creator-ip-section relative isolate -mt-px flex items-center overflow-hidden px-4 py-24 text-[#0d253d] md:px-8 md:py-28 lg:min-h-[calc(100svh-72px)] lg:py-32">
+      <div
+        aria-hidden="true"
+        className="creator-ip-transition-top pointer-events-none absolute -inset-x-8 -top-4 z-0 h-64 md:h-72"
+      />
+      <div
+        aria-hidden="true"
+        className="creator-ip-transition-bottom pointer-events-none absolute -inset-x-8 -bottom-4 z-0 h-56 md:h-64"
+      />
+      <div className="relative z-10 mx-auto grid page-shell w-full gap-10 lg:grid-cols-[0.92fr_1.08fr] lg:items-center">
         <div className="reveal" data-reveal>
           <div className="mb-5 flex items-center gap-3 text-sm font-semibold text-[#3182f6]">
             <span className="flex size-11 items-center justify-center rounded-2xl bg-white text-[#0877ec] shadow-sm">
@@ -2293,35 +2290,37 @@ function CreatorIpSection() {
 
         <div className="reveal stagger-item" data-reveal style={revealDelayStyle(140)}>
           <div className="grid gap-4 md:grid-cols-[1fr_auto_1fr] md:items-stretch">
-            <div className="rounded-[28px] border border-[#dbeafe] bg-white/85 p-5 shadow-[rgba(30,64,175,0.08)_0_16px_36px]">
+            <div className="rounded-[28px] border border-[rgba(49,130,246,0.12)] bg-white/[0.82] p-5 shadow-[0_18px_44px_rgba(30,64,175,0.065)] md:p-6">
               <div className="docs-card-title text-[#191f28]">
                 Buyer sees
               </div>
-              <div className="mt-4 grid gap-2">
+              <div className="mt-4 grid">
                 {creatorIpLayers[0].items.map((item, index) => (
-                  <div className="reveal stagger-item rounded-lg bg-[#f4f9ff] px-3 py-2 docs-card-copy" data-reveal style={revealDelayStyle(index * 70)} key={item}>
-                    {item}
+                  <div className="reveal stagger-item flex items-center gap-3 border-b border-[rgba(49,130,246,0.09)] px-1 py-2.5 docs-card-copy last:border-b-0" data-reveal style={revealDelayStyle(index * 70)} key={item}>
+                    <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-[rgba(49,130,246,0.42)]" />
+                    <span>{item}</span>
                   </div>
                 ))}
               </div>
             </div>
             <div className="flex items-center justify-center">
               <div className="flex h-full min-h-24 items-center justify-center md:flex-col">
-                <div className="hidden h-24 w-px bg-gradient-to-b from-transparent via-[#c7c1e4] to-transparent md:block" />
-                <div className="rounded-full border border-[#d8d4e2] bg-[#f7f5ff] px-4 py-2 text-xs font-semibold text-[#494556] md:my-3">
+                <div className="hidden h-24 w-px bg-gradient-to-b from-transparent via-[rgba(49,130,246,0.18)] to-transparent md:block" />
+                <div className="rounded-full border border-[rgba(49,130,246,0.16)] bg-[rgba(232,243,255,0.72)] px-4 py-2 text-xs font-semibold text-[#4e5968] md:my-3">
                   boundary
                 </div>
-                <div className="hidden h-24 w-px bg-gradient-to-b from-transparent via-[#c7c1e4] to-transparent md:block" />
+                <div className="hidden h-24 w-px bg-gradient-to-b from-transparent via-[rgba(49,130,246,0.18)] to-transparent md:block" />
               </div>
             </div>
-            <div className="rounded-[28px] border border-[#dbeafe] bg-white/85 p-5 shadow-[rgba(30,64,175,0.08)_0_16px_36px]">
+            <div className="rounded-[28px] border border-[rgba(49,130,246,0.12)] bg-white/[0.82] p-5 shadow-[0_18px_44px_rgba(30,64,175,0.065)] md:p-6">
               <div className="docs-card-title text-[#191f28]">
                 Creator keeps
               </div>
-              <div className="mt-4 grid gap-2">
+              <div className="mt-4 grid">
                 {creatorIpLayers[1].items.map((item, index) => (
-                  <div className="reveal stagger-item rounded-lg bg-[#f4f9ff] px-3 py-2 docs-card-copy" data-reveal style={revealDelayStyle(index * 70)} key={item}>
-                    {item}
+                  <div className="reveal stagger-item flex items-center gap-3 border-b border-[rgba(49,130,246,0.09)] px-1 py-2.5 docs-card-copy last:border-b-0" data-reveal style={revealDelayStyle(index * 70)} key={item}>
+                    <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-[rgba(49,130,246,0.42)]" />
+                    <span>{item}</span>
                   </div>
                 ))}
               </div>
