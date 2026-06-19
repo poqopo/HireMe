@@ -2011,6 +2011,138 @@ function EnokiCallbackPage() {
   );
 }
 
+function HeroAgentPreview() {
+  return (
+    <div
+      aria-hidden="true"
+      className="hero-demo-visual pointer-events-none relative mx-auto min-h-[410px] w-full max-w-[570px] select-none sm:min-h-[450px] lg:min-h-[510px]"
+    >
+      <div className="hero-demo-glow absolute inset-x-[10%] top-[16%] h-[64%] rounded-full bg-[rgba(124,92,255,0.15)] blur-[100px]" />
+
+      <div className="absolute inset-x-[3%] top-1 flex items-center justify-between gap-2 sm:inset-x-[5%]">
+        <div className="hero-demo-chip flex items-center gap-2 rounded-full border border-[rgba(124,92,255,0.09)] bg-white/[0.34] py-1.5 pl-1.5 pr-3 text-[10px] font-semibold text-[#756b8d] backdrop-blur-xl">
+          <span className="flex size-7 items-center justify-center rounded-full bg-[rgba(124,92,255,0.08)] text-[#8475a8]">
+            <UserRound className="size-3.5" />
+          </span>
+          You
+        </div>
+        <div className="hero-demo-chip hero-demo-chip-agent flex translate-y-2 items-center gap-2 rounded-full border border-[rgba(124,92,255,0.1)] bg-white/[0.38] py-1.5 pl-1.5 pr-3 text-[10px] font-semibold text-[#6e618b] backdrop-blur-xl">
+          <span className="flex size-7 items-center justify-center rounded-full bg-[rgba(124,92,255,0.1)] text-[#7560b5]">
+            <Bot className="size-3.5" />
+          </span>
+          Design Agent
+        </div>
+        <div className="hero-demo-chip flex translate-y-4 items-center gap-2 rounded-full border border-[rgba(124,92,255,0.09)] bg-white/[0.3] px-3 py-2 text-[10px] font-semibold text-[#756b8d] backdrop-blur-xl">
+          Result ready
+        </div>
+      </div>
+
+      <div className="absolute inset-x-[3%] top-[16%] h-[330px] sm:inset-x-0 sm:h-[350px] lg:top-[18%]">
+        <div
+          className="hero-demo-card hero-demo-card--task h-[300px] sm:h-[320px]"
+          style={{ animationDelay: "0s" }}
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[#7d7199]">Before: rough idea</span>
+            <span className="text-[10px] font-medium text-[#a097b4]">01</span>
+          </div>
+          <div className="mt-5 text-xl font-bold tracking-[-0.025em] text-[#2d2740] sm:text-2xl">
+            Make this landing page clearer.
+          </div>
+          <div className="mt-6 rounded-[20px] border border-[rgba(124,92,255,0.1)] bg-white/[0.36] p-4">
+            <div className="h-2 w-[82%] rounded-full bg-[rgba(99,70,245,0.12)]" />
+            <div className="mt-3 h-2 w-[64%] rounded-full bg-[rgba(99,70,245,0.08)]" />
+            <div className="mt-5 inline-flex rounded-full border border-[rgba(124,92,255,0.1)] px-3 py-1.5 text-[10px] font-semibold text-[#807594]">
+              Landing page review
+            </div>
+          </div>
+        </div>
+
+        <div
+          className="hero-demo-card hero-demo-card--working h-[300px] sm:h-[320px]"
+          style={{ animationDelay: "-9s" }}
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[#7d7199]">Agent running</span>
+            <span className="text-[10px] font-medium text-[#a097b4]">02</span>
+          </div>
+          <div className="mt-5 text-xl font-bold tracking-[-0.025em] text-[#2d2740] sm:text-2xl">
+            Design Agent is running
+          </div>
+          <div className="mt-4 inline-flex items-center gap-1.5 rounded-full border border-[rgba(124,92,255,0.11)] bg-[rgba(124,92,255,0.055)] px-3 py-1.5 text-[10px] font-semibold text-[#74668f]">
+            <ShieldCheck className="size-3.5" />
+            Protected Harness
+          </div>
+          <div className="mt-7">
+            <div className="flex items-center justify-between text-[10px] font-medium text-[#948aa7]">
+              <span>Applying standards and hidden checks</span>
+              <span>Working</span>
+            </div>
+            <div className="hero-demo-progress mt-3 h-1.5 overflow-hidden rounded-full bg-[rgba(124,92,255,0.08)]" />
+            <div className="mt-5 grid grid-cols-3 gap-3">
+              <div className="h-14 rounded-2xl border border-[rgba(124,92,255,0.08)] bg-white/[0.26]" />
+              <div className="h-14 rounded-2xl border border-[rgba(124,92,255,0.08)] bg-white/[0.22]" />
+              <div className="h-14 rounded-2xl border border-[rgba(124,92,255,0.08)] bg-white/[0.18]" />
+            </div>
+          </div>
+        </div>
+
+        <div
+          className="hero-demo-card hero-demo-card--result-primary h-[300px] sm:h-[320px]"
+          style={{ animationDelay: "-6s" }}
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[#6f6190]">After: polished landing</span>
+            <span className="rounded-full border border-[rgba(124,92,255,0.1)] bg-[rgba(124,92,255,0.05)] px-2.5 py-1 text-[9px] font-semibold text-[#756890]">Delivered</span>
+          </div>
+          <div className="mt-4 text-xl font-bold tracking-[-0.025em] text-[#2d2740] sm:text-2xl">
+            Hero copy improved
+          </div>
+          <div className="mt-5 rounded-[20px] border border-[rgba(124,92,255,0.09)] bg-white/[0.32] p-4">
+            <div className="h-3 w-[72%] rounded-full bg-[rgba(79,53,216,0.16)]" />
+            <div className="mt-3 h-2 w-[88%] rounded-full bg-[rgba(99,70,245,0.09)]" />
+            <div className="mt-2 h-2 w-[76%] rounded-full bg-[rgba(99,70,245,0.07)]" />
+            <div className="mt-5 flex gap-2">
+              <div className="h-7 w-20 rounded-full bg-[rgba(99,70,245,0.13)]" />
+              <div className="h-7 w-24 rounded-full border border-[rgba(124,92,255,0.1)] bg-white/[0.18]" />
+            </div>
+          </div>
+          <div className="mt-4 text-xs font-semibold text-[#756890]">CTA hierarchy fixed</div>
+        </div>
+
+        <div
+          className="hero-demo-card hero-demo-card--result-secondary h-[300px] sm:h-[320px]"
+          style={{ animationDelay: "-3s" }}
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[#6f6190]">Prompt ready</span>
+            <span className="text-[10px] font-medium text-[#a097b4]">04</span>
+          </div>
+          <div className="mt-4 text-xl font-bold tracking-[-0.025em] text-[#2d2740] sm:text-2xl">
+            Codex prompt generated
+          </div>
+          <div className="mt-5 rounded-[20px] border border-[rgba(124,92,255,0.09)] bg-[#2f2942]/[0.82] p-4">
+            <div className="h-2 w-[44%] rounded-full bg-[rgba(196,184,255,0.42)]" />
+            <div className="mt-3 h-2 w-[82%] rounded-full bg-[rgba(196,184,255,0.24)]" />
+            <div className="mt-2 h-2 w-[68%] rounded-full bg-[rgba(196,184,255,0.18)]" />
+            <div className="mt-2 h-2 w-[74%] rounded-full bg-[rgba(196,184,255,0.14)]" />
+          </div>
+          <div className="mt-4 grid grid-cols-2 gap-3 text-[10px] font-semibold text-[#756890]">
+            <span className="flex items-center gap-1.5">
+              <CheckCircle2 className="size-3.5 text-[#806bd0]" />
+              Design reviewed
+            </span>
+            <span className="flex items-center gap-1.5">
+              <CheckCircle2 className="size-3.5 text-[#806bd0]" />
+              Result delivered
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function LandingPage() {
   const revealScopeRef = useRef<HTMLElement | null>(null);
 
@@ -2025,11 +2157,11 @@ function LandingPage() {
         aria-hidden="true"
         className="pointer-events-none h-0"
       />
-      <section className="hero-visual relative overflow-hidden px-4 pb-12 pt-0 md:px-8 md:pb-16 md:pt-0 xl:pb-20 xl:pt-0">
-        <div className="mx-auto flex min-h-[calc(100svh-12rem)] page-shell items-center">
-          <div className="landing-hero-copy max-w-3xl py-0">
+      <section className="hero-visual relative overflow-hidden px-4 pb-16 pt-8 md:px-8 md:pb-20 md:pt-10 lg:py-12">
+        <div className="mx-auto grid min-h-[calc(100svh-5rem)] page-shell w-full items-center gap-14 lg:grid-cols-[minmax(0,0.98fr)_minmax(400px,1.02fr)] lg:gap-20 xl:gap-24">
+          <div className="landing-hero-copy max-w-[680px] py-0">
             <div className="reveal stagger-item" data-reveal>
-              <h1 className="hero-title balanced-text content-measure text-[#191f28]">
+              <h1 className="hero-title balanced-text text-[#191f28]">
                 Hire Agents that already know the job.
               </h1>
             </div>
@@ -2038,10 +2170,8 @@ function LandingPage() {
               data-reveal
               style={revealDelayStyle(140)}
             >
-              <p className="body-copy pretty-text mt-6 content-measure">
-                Hire protected AI Agents, not copyable prompts. Creators keep
-                private harness hidden while buyers get reliable results
-                through secure execution.
+              <p className="body-copy pretty-text mt-6 max-w-[620px]">
+                Hire protected AI Agents, not copyable prompts. Creators keep the Harness. Buyers get the result.
               </p>
             </div>
             <div
@@ -2050,17 +2180,32 @@ function LandingPage() {
               style={revealDelayStyle(240)}
             >
               <div className="mt-8 flex flex-wrap gap-3">
-                <Button asChild size="lg">
+                <Button
+                  asChild
+                  className="border-transparent bg-gradient-to-r from-[#7c5cff] via-[#6346f5] to-[#4f35d8] text-white shadow-[0_18px_40px_rgba(99,70,245,0.24)] hover:shadow-[0_24px_52px_rgba(99,70,245,0.32)] active:shadow-[0_12px_24px_rgba(79,53,216,0.2)] focus-visible:ring-[rgba(124,92,255,0.38)]"
+                  size="lg"
+                >
                   <Link to="/agents">
                     <Bot /> Hire an Agent
                   </Link>
                 </Button>
-                <Button asChild size="lg" variant="secondary">
+                <Button
+                  asChild
+                  className="border-[rgba(124,92,255,0.26)] bg-white/[0.78] text-[#6346f5] shadow-[0_16px_32px_rgba(79,53,216,0.08)] hover:border-[rgba(124,92,255,0.36)] hover:bg-[#f7f5ff] hover:shadow-[0_20px_40px_rgba(79,53,216,0.13)] focus-visible:ring-[rgba(124,92,255,0.32)]"
+                  size="lg"
+                  variant="secondary"
+                >
                   <Link to="/agents/create">
                     <UploadCloud /> Publish an Agent
                   </Link>
                 </Button>
               </div>
+            </div>
+          </div>
+
+          <div className="reveal stagger-item" data-reveal style={revealDelayStyle(180)}>
+            <div className="lg:translate-x-8 xl:translate-x-14">
+              <HeroAgentPreview />
             </div>
           </div>
         </div>
