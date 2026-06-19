@@ -2023,11 +2023,11 @@ function LandingPage() {
     >
       <div
         aria-hidden="true"
-        className="pointer-events-none h-16 bg-gradient-to-b from-[#f9fafb] via-[#f7fbff] to-transparent md:h-20"
+        className="pointer-events-none h-0"
       />
-      <section className="hero-visual relative overflow-hidden px-4 py-12 md:px-8 md:py-16 xl:py-20">
+      <section className="hero-visual relative overflow-hidden px-4 pb-12 pt-0 md:px-8 md:pb-16 md:pt-0 xl:pb-20 xl:pt-0">
         <div className="mx-auto flex min-h-[calc(100svh-12rem)] page-shell items-center">
-          <div className="landing-hero-copy max-w-3xl py-8 md:py-12">
+          <div className="landing-hero-copy max-w-3xl py-0">
             <div className="reveal stagger-item" data-reveal>
               <h1 className="hero-title balanced-text content-measure text-[#191f28]">
                 Hire Agents that already know the job.
@@ -2040,7 +2040,7 @@ function LandingPage() {
             >
               <p className="body-copy pretty-text mt-6 content-measure">
                 Hire protected AI Agents, not copyable prompts. Creators keep
-                private playbooks hidden while buyers get reliable results
+                private harness hidden while buyers get reliable results
                 through secure execution.
               </p>
             </div>
@@ -2064,13 +2064,8 @@ function LandingPage() {
             </div>
           </div>
         </div>
-        <div
-          aria-hidden="true"
-          className="pointer-events-none absolute inset-x-0 bottom-0 h-28 bg-gradient-to-b from-transparent via-white/75 to-[#f4f9ff]"
-        />
       </section>
 
-      <AudienceValueSection />
       <ProtectedExecutionSection />
       <CreatorIpSection />
       <AgentPerformanceSection />
@@ -2078,63 +2073,6 @@ function LandingPage() {
       <ProofLayerSection />
       <LandingFooter />
     </main>
-  );
-}
-
-function AudienceValueSection() {
-  return (
-    <section className="landing-wave landing-wave-light landing-soft-grid relative bg-gradient-to-b from-[#f4f9ff] via-[#f7fbff] to-[#edf5ff] px-4 pb-16 pt-20 shadow-[inset_0_1px_0_rgba(255,255,255,0.9)] md:px-8 md:pb-20 md:pt-24">
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute inset-x-0 top-0 h-40 bg-gradient-to-b from-[#f4f9ff] via-[#f7fbff]/96 to-transparent md:h-52"
-      />
-      <div className="relative z-10 mx-auto page-shell">
-        <div className="grid gap-4 lg:grid-cols-[1.18fr_0.82fr] lg:items-stretch">
-          <div
-            className="reveal landing-glass rounded-[28px] p-6 md:p-8"
-            data-reveal
-          >
-            <div className="flex items-center gap-3 text-sm font-semibold text-[#3182f6]">
-              <span className="flex size-11 items-center justify-center rounded-2xl bg-gradient-to-br from-[#e0f2fe] to-white text-[#0877ec] shadow-sm">
-                <BriefcaseBusiness className="size-5" />
-              </span>
-              For Buyers
-            </div>
-            <p className="mt-5 max-w-xl text-[clamp(1.45rem,2.6vw,2rem)] font-normal leading-[1.34] tracking-[-0.03em] text-[#191f28]">
-              Use expert-built Agents without exposing your private work to the creator.
-            </p>
-            <p className="mt-4 max-w-xl body-copy">
-              Hire the capability, not the raw prompt files.
-            </p>
-          </div>
-          <div className="grid gap-4">
-            <div
-              className="reveal stagger-item landing-glass rounded-[28px] p-6 md:p-8"
-              data-reveal
-              style={revealDelayStyle(140)}
-            >
-              <div className="flex items-center gap-3 text-sm font-semibold text-[#3182f6]">
-                <span className="flex size-11 items-center justify-center rounded-2xl bg-gradient-to-br from-[#dbeafe] to-white text-[#0753d6] shadow-sm">
-                  <CircleDollarSign className="size-5" />
-                </span>
-                For Creators
-              </div>
-              <p className="mt-5 max-w-lg text-xl font-normal leading-8 text-[#191f28]">
-                Monetize Agent know-how without giving away prompts, skills, examples, or rubrics.
-              </p>
-            </div>
-            <div
-              className="reveal stagger-item rounded-[22px] border border-[#dbeafe] bg-white/82 px-5 py-4 text-sm leading-6 text-[#4e5968] shadow-[0_16px_32px_rgba(15,52,96,0.06)]"
-              data-reveal
-              style={revealDelayStyle(220)}
-            >
-              <LockKeyhole className="mb-2 size-4 text-[#0877ec]" />
-              Your work and the creator’s playbook stay separate.
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
   );
 }
 
@@ -2147,7 +2085,7 @@ function ProtectedExecutionSection() {
   ];
 
   return (
-    <section className="landing-wave landing-wave-navy border-y border-white/8 bg-gradient-to-b from-[#26164f] via-[#1d1f5d] to-[#101437] px-4 py-16 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] md:px-8 md:py-24">
+    <section className="landing-wave bg-[#1d1f5d] px-4 py-16 text-white md:px-8 md:py-24">
       <div className="relative z-10 mx-auto page-shell">
         <div className="reveal max-w-2xl" data-reveal>
           <div className="inline-flex rounded-full border border-white/14 bg-white/12 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-white/72">
@@ -2162,40 +2100,29 @@ function ProtectedExecutionSection() {
           </p>
         </div>
 
-        <div className="mt-10 grid gap-4 md:grid-cols-[1fr_auto_1fr_auto_1fr_auto_1fr] md:items-start">
+        <div className="relative mt-10 grid grid-cols-2 items-stretch gap-4 md:grid-cols-4 md:gap-6 lg:gap-8">
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute left-[12.5%] right-[12.5%] top-11 hidden h-px bg-gradient-to-r from-transparent via-white/16 to-transparent md:block"
+          />
           {steps.map((step, index) => (
-            <div className="contents" key={step.label}>
-              <div
-                className="reveal stagger-item flex items-start gap-3 md:flex-col md:items-center md:text-center"
-                data-reveal
-                style={revealDelayStyle(120 * index)}
-              >
-                <span className="flex size-10 shrink-0 items-center justify-center rounded-full border border-white/12 bg-white/10 text-[0.9rem] font-semibold text-white/90 shadow-[0_10px_24px_rgba(2,6,23,0.14)] md:size-11">
-                  {String(index + 1).padStart(2, "0")}
-                </span>
-                <div>
-                  <div className="text-sm font-semibold text-white/95">{step.label}</div>
-                  <div className="mt-1 text-xs text-white/62">{step.note}</div>
-                </div>
+            <div
+              className="reveal stagger-item relative z-10 flex min-h-36 min-w-0 flex-col items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.06] p-4 text-center md:min-h-40 md:gap-4 md:rounded-[24px] md:p-5"
+              data-reveal
+              key={step.label}
+              style={revealDelayStyle(120 * index)}
+            >
+              <span className="flex size-10 shrink-0 items-center justify-center rounded-full border border-white/12 bg-white/10 text-xs font-semibold text-white/90 shadow-[0_10px_24px_rgba(2,6,23,0.14)] md:size-12 md:text-[0.9rem]">
+                {String(index + 1).padStart(2, "0")}
+              </span>
+              <div className="min-w-0">
+                <div className="text-sm font-semibold leading-snug text-white/95 md:text-[0.95rem]">{step.label}</div>
+                <div className="mt-1.5 text-xs leading-snug text-white/62 md:text-[0.8rem]">{step.note}</div>
               </div>
-              {index < steps.length - 1 ? (
-                <>
-                  <div className="ml-[1.15rem] h-6 w-px bg-gradient-to-b from-white/0 via-white/20 to-white/0 md:hidden" />
-                  <div className="mx-auto hidden h-px w-8 bg-gradient-to-r from-white/0 via-white/22 to-white/0 md:block" />
-                </>
-              ) : null}
             </div>
           ))}
         </div>
 
-        <div className="mt-5 grid gap-3 md:grid-cols-2">
-          <div className="reveal landing-glass-dark rounded-full border border-white/14 bg-white/7 px-4 py-3 text-sm leading-6 text-white/80" data-reveal>
-            Creator files stay hidden.
-          </div>
-          <div className="reveal stagger-item landing-glass-dark rounded-full border border-white/14 bg-white/7 px-4 py-3 text-sm leading-6 text-white/80" data-reveal style={revealDelayStyle(140)}>
-            Buyer input stays separate by default.
-          </div>
-        </div>
       </div>
     </section>
   );
