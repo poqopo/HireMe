@@ -374,6 +374,7 @@ The gateway verifies your account, wallet/payment state, and entitlement. After 
 After each call:
 
 - You receive safe Agent output.
+- `jsonOutput.responseMode` tells you whether the Agent answered directly or delegated to local Codex.
 - Codex can continue local workspace work when `jsonOutput.localCodex.shouldAct` is true.
 - Result memory can be saved as an encrypted memWal record.
 - Usage and billing metadata are recorded by the gateway.

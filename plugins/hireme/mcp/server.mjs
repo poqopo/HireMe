@@ -356,6 +356,12 @@ const inputSchemas = {
         minLength: 1,
         description: "The task to send to the hired agent",
       },
+      response_mode: {
+        type: "string",
+        enum: ["direct_answer", "local_codex_execution_brief"],
+        description:
+          "Optional explicit output mode. Omit to let the gateway infer whether the agent should answer directly or hand off to local Codex.",
+      },
       budget_calls: {
         type: "integer",
         minimum: 1,
@@ -1534,6 +1540,34 @@ function buildAgentTemplateFiles({
   ];
 }
 
+function classifyAgentResponseMode(task, requestedMode) {
+  const normalizedRequestedMode = String(requestedMode || "").trim().toLowerCase();
+  if (normalizedRequestedMode === "direct_answer" || normalizedRequestedMode === "direct") {
+    return "direct_answer";
+  }
+  if (
+    normalizedRequestedMode === "local_codex_execution_brief" ||
+    normalizedRequestedMode === "local_codex" ||
+    normalizedRequestedMode === "delegate"
+  ) {
+    return "local_codex_execution_brief";
+  }
+
+  const text = String(task || "").trim().toLowerCase();
+  if (!text) return "direct_answer";
+
+  const localCodexSignals = [
+    /\b(code|coding|repo|repository|file|folder|branch|diff|pull request|pr|patch|commit|test|build|run|install|deploy|browser|screenshot|open|edit|write|create|generate|implement|fix|debug|refactor|migrate|schema|component|api|endpoint|script|sql|migration|release|ship|publish|inspect)\b/i,
+    /코드|파일|폴더|레포|리포|수정|구현|테스트|빌드|실행|설치|배포|브라우저|스크린샷|열어|편집|작성|생성|만들|고쳐|디버그|리팩터|마이그레이션|스키마|컴포넌트|엔드포인트|스크립트|SQL|릴리스|출시|검사|디자인|설계|초안/,
+  ];
+
+  if (localCodexSignals.some((pattern) => pattern.test(text))) {
+    return "local_codex_execution_brief";
+  }
+
+  return "direct_answer";
+}
+
 async function callTool(name, args = {}) {
   switch (name) {
     case "hireme_whoami": {
@@ -1718,14 +1752,33 @@ async function callTool(name, args = {}) {
       const agent = findAgent(args.agent_id || activeAgentId);
       const callId = `call_${Date.now().toString(36)}`;
       const budgetCalls = args.budget_calls || 1;
+      const responseMode = classifyAgentResponseMode(
+        args.task,
+        args.response_mode || args.responseMode,
+      );
       const fallbackPayload = {
-        type: "protected_agent_guidance",
+        type:
+          responseMode === "direct_answer"
+            ? "protected_agent_answer"
+            : "protected_agent_guidance",
+        outputMode:
+          responseMode === "direct_answer"
+            ? "hirer_facing_answer"
+            : "local_codex_execution_brief",
         summary:
-          "Demo response: the selected protected agent accepted the task. Production will execute the encrypted Agent folder inside the MCP gateway and return only safe output.",
+          responseMode === "direct_answer"
+            ? "Demo response: the selected protected agent answered directly in local fallback mode."
+            : "Demo response: the selected protected agent accepted the task. Production will execute the encrypted Agent folder inside the MCP gateway and return only safe output.",
+        outputText:
+          responseMode === "direct_answer"
+            ? "Demo response: the selected protected agent answered directly in local fallback mode."
+            : "Demo response: the selected protected agent accepted the task. Production will execute the encrypted Agent folder inside the MCP gateway and return only safe output.",
         recommendations: [
           `Use the public contract ${agent.harnessSummary}.`,
           "Start npm run gateway:dev for protected artifact execution.",
-          "Keep creator AGENTS.md, skills, and harness files out of the local Codex plugin.",
+          responseMode === "direct_answer"
+            ? "This request is answer-only in local fallback mode; no local Codex handoff is required."
+            : "Keep creator AGENTS.md, skills, and harness files out of the local Codex plugin.",
         ],
       };
       return textResult({
@@ -1756,6 +1809,7 @@ async function callTool(name, args = {}) {
           type: fallbackPayload.type,
           generatedBy: "hireme-mcp-local-fallback",
           executionMode: "local-fallback",
+          responseMode,
           agent: {
             id: agent.id,
             name: agent.name,
@@ -1775,18 +1829,23 @@ async function callTool(name, args = {}) {
           },
           payload: fallbackPayload,
           localCodex: {
-            shouldAct: true,
+            shouldAct: responseMode === "local_codex_execution_brief",
             instruction:
-              "Use jsonOutput.payload as demo execution-brief guidance only. Start the HireMe gateway for protected Agent execution with full planning and verification flow.",
+              responseMode === "local_codex_execution_brief"
+                ? "Use jsonOutput.payload as demo execution-brief guidance only. Start the HireMe gateway for protected Agent execution with full planning and verification flow."
+                : "Treat jsonOutput.payload as the agent's direct answer. No local Codex follow-up is required unless the caller asks for additional workspace work.",
             preferredSource: "jsonOutput.payload.outputText || jsonOutput.payload",
-            expectedBriefShape: [
-              "objective",
-              "execution_plan",
-              "implementation_guidance",
-              "verification_flow",
-              "acceptance_criteria",
-              "assumptions_or_stop_conditions",
-            ],
+            expectedBriefShape:
+              responseMode === "local_codex_execution_brief"
+                ? [
+                    "objective",
+                    "execution_plan",
+                    "implementation_guidance",
+                    "verification_flow",
+                    "acceptance_criteria",
+                    "assumptions_or_stop_conditions",
+                  ]
+                : ["direct_answer", "short_explanation_or_follow_up"],
             blockedSources: ["AGENTS.md", "skills/**", "harness/**"],
           },
         },

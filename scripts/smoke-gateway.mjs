@@ -64,9 +64,24 @@ try {
   }
   if (
     directCall.jsonOutput?.schema !== "hireme.protected_agent_json_output.v1" ||
+    directCall.jsonOutput?.responseMode !== "local_codex_execution_brief" ||
     directCall.jsonOutput?.localCodex?.shouldAct !== true
   ) {
     throw new Error("Gateway direct call did not return local Codex JSON output");
+  }
+
+  const greetingCall = await postJson(`${gatewayUrl}/v1/agent-call`, gatewayKey, {
+    agent_id: "codex-builder",
+    hirer_id: "smoke-hirer",
+    task: "안녕이라고 인사해줘",
+    budget_calls: 1,
+  });
+  if (
+    greetingCall.jsonOutput?.schema !== "hireme.protected_agent_json_output.v1" ||
+    greetingCall.jsonOutput?.responseMode !== "direct_answer" ||
+    greetingCall.jsonOutput?.localCodex?.shouldAct !== false
+  ) {
+    throw new Error("Gateway greeting call did not return a direct answer mode");
   }
 
   const naturalCall = await postJson(`${gatewayUrl}/v1/agent-call`, gatewayKey, {

@@ -57,6 +57,18 @@ const requests = [
     id: 5,
     method: "tools/call",
     params: {
+      name: "hireme_call_agent",
+      arguments: {
+        task: "안녕이라고 인사해줘",
+        budget_calls: 1,
+      },
+    },
+  },
+  {
+    jsonrpc: "2.0",
+    id: 6,
+    method: "tools/call",
+    params: {
       name: "hireme_validate_sealed_harness",
       arguments: {
         hire_receipt_object_id: "hire_receipt_local_paid_demo",
@@ -65,7 +77,7 @@ const requests = [
   },
   {
     jsonrpc: "2.0",
-    id: 6,
+    id: 7,
     method: "tools/call",
     params: {
       name: "hireme_request",
@@ -76,7 +88,7 @@ const requests = [
   },
   {
     jsonrpc: "2.0",
-    id: 7,
+    id: 8,
     method: "tools/call",
     params: {
       name: "hireme_call_walrus_agent",
@@ -88,7 +100,7 @@ const requests = [
   },
   {
     jsonrpc: "2.0",
-    id: 8,
+    id: 9,
     method: "tools/call",
     params: {
       name: "hireme_read_memwal",
@@ -99,7 +111,7 @@ const requests = [
   },
   {
     jsonrpc: "2.0",
-    id: 9,
+    id: 10,
     method: "tools/call",
     params: {
       name: "hireme_register_agent",
@@ -125,7 +137,7 @@ const requests = [
   },
   {
     jsonrpc: "2.0",
-    id: 10,
+    id: 11,
     method: "tools/call",
     params: {
       name: "hireme_whoami",
@@ -157,12 +169,13 @@ const responses = stdout
 
 const toolList = responses.find((response) => response.id === 2);
 const callResult = responses.find((response) => response.id === 4);
-const validateResult = responses.find((response) => response.id === 5);
-const naturalResult = responses.find((response) => response.id === 6);
-const walrusResult = responses.find((response) => response.id === 7);
-const memwalResult = responses.find((response) => response.id === 8);
-const registerResult = responses.find((response) => response.id === 9);
-const whoamiResult = responses.find((response) => response.id === 10);
+const greetingResult = responses.find((response) => response.id === 5);
+const validateResult = responses.find((response) => response.id === 6);
+const naturalResult = responses.find((response) => response.id === 7);
+const walrusResult = responses.find((response) => response.id === 8);
+const memwalResult = responses.find((response) => response.id === 9);
+const registerResult = responses.find((response) => response.id === 10);
+const whoamiResult = responses.find((response) => response.id === 11);
 
 if (!toolList?.result?.tools?.some((tool) => tool.name === "hireme_whoami")) {
   throw new Error("hireme_whoami was not advertised by tools/list");
@@ -214,6 +227,21 @@ if (
   )
 ) {
   throw new Error("hireme_call_agent did not return local Codex JSON output");
+}
+
+if (
+  !callResult?.result?.content?.[0]?.text?.includes(
+    '"responseMode": "local_codex_execution_brief"',
+  )
+) {
+  throw new Error("hireme_call_agent did not mark the execution brief mode");
+}
+
+if (
+  !greetingResult?.result?.content?.[0]?.text?.includes('"responseMode": "direct_answer"') ||
+  !greetingResult?.result?.content?.[0]?.text?.includes('"shouldAct": false')
+) {
+  throw new Error("hireme_call_agent did not return the direct answer mode");
 }
 
 if (
