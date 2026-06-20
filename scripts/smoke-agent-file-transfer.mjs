@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
 const port = Number.parseInt(
@@ -16,13 +16,22 @@ const tempRoot = resolve(".hireme/tmp");
 const agentFolder = join(tempRoot, agentId);
 const fixtureFileText =
   "안녕 from HireMe file-transfer smoke.\nThis content came back as an MCP resource.\n";
+const fixturePngBase64 =
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=";
+const fixturePngBytes = Buffer.from(fixturePngBase64, "base64");
 const fixtureOutput = JSON.stringify({
-  outputText: "Generated a text file for the hirer.",
+  outputText: "Generated a text file and a tiny PNG for the hirer.",
   attachments: [
     {
       filename: "hireme-file-agent-result.txt",
       mimeType: "text/plain; charset=utf-8",
       text: fixtureFileText,
+    },
+    {
+      filename: "hireme-file-agent-result.png",
+      mimeType: "image/png",
+      encoding: "base64",
+      data: fixturePngBase64,
     },
   ],
 });
@@ -97,11 +106,11 @@ try {
     hirerId,
     task: "파일로 안녕을 한 번 더 보내줘",
   });
-  assertMcpResource(mcpCall);
+  await assertMcpResource(mcpCall);
 
   console.log("HireMe Agent file-transfer smoke passed");
   console.log(`Agent: ${agentId}`);
-  console.log("Verified: create-from-folder -> try -> gateway attachment -> MCP resource");
+  console.log("Verified: create-from-folder -> try -> gateway attachments -> MCP resource/image -> local files");
 } catch (err) {
   if (gatewayStdout.trim()) {
     console.error(gatewayStdout.trim());
@@ -176,30 +185,39 @@ async function postJson(url, body) {
 }
 
 function assertGatewayAttachment(callResult, label) {
-  const attachment = callResult.result?.attachments?.[0];
-  if (!attachment) {
-    throw new Error(`${label} call did not include result.attachments[0]`);
+  const attachments = callResult.result?.attachments || [];
+  const textAttachment = attachments.find((attachment) =>
+    /text\/plain/.test(attachment.mimeType || ""),
+  );
+  const pngAttachment = attachments.find((attachment) =>
+    /image\/png/.test(attachment.mimeType || ""),
+  );
+  if (!textAttachment || !pngAttachment) {
+    throw new Error(`${label} call did not include text and PNG result attachments`);
   }
-  const decoded = Buffer.from(attachment.data || "", "base64").toString("utf8");
+  const decoded = Buffer.from(textAttachment.data || "", "base64").toString("utf8");
   if (decoded !== fixtureFileText) {
     throw new Error(
       `${label} attachment bytes did not round-trip: ${JSON.stringify({
         decoded,
         expected: fixtureFileText,
         attachment: {
-          filename: attachment.filename,
-          mimeType: attachment.mimeType,
-          source: attachment.source,
-          sizeBytes: attachment.sizeBytes,
+          filename: textAttachment.filename,
+          mimeType: textAttachment.mimeType,
+          source: textAttachment.source,
+          sizeBytes: textAttachment.sizeBytes,
         },
       })}`,
     );
   }
-  if (callResult.result?.outputFiles?.[0]?.data) {
+  if (!Buffer.from(pngAttachment.data || "", "base64").equals(fixturePngBytes)) {
+    throw new Error(`${label} PNG attachment bytes did not round-trip`);
+  }
+  if ((callResult.result?.outputFiles || []).some((file) => file?.data)) {
     throw new Error(`${label} outputFiles metadata leaked base64 data`);
   }
-  if (callResult.userMemWal?.safeSummary?.attachmentCount !== 1) {
-    throw new Error(`${label} memWal safe summary did not count the attachment`);
+  if (callResult.userMemWal?.safeSummary?.attachmentCount !== 2) {
+    throw new Error(`${label} memWal safe summary did not count the attachments`);
   }
 }
 
@@ -269,25 +287,40 @@ async function callPluginThroughMcp({ agentId, hirerId, task }) {
     .find((response) => response.id === 2);
 }
 
-function assertMcpResource(response) {
+async function assertMcpResource(response) {
   if (response?.error) {
     throw new Error(`MCP call returned error: ${JSON.stringify(response.error)}`);
   }
   const content = response?.result?.content || [];
   const text = content.find((item) => item.type === "text")?.text || "";
-  const resource = content.find((item) => item.type === "resource")?.resource;
-  if (!resource) {
-    throw new Error(`MCP call did not return a resource attachment: ${JSON.stringify(response)}`);
+  const resources = content
+    .filter((item) => item.type === "resource")
+    .map((item) => item.resource);
+  const textResource = resources.find((resource) =>
+    /text\/plain/.test(resource?.mimeType || ""),
+  );
+  const pngResource = resources.find((resource) =>
+    /image\/png/.test(resource?.mimeType || ""),
+  );
+  const imageContent = content.find((item) => item.type === "image");
+  if (!textResource || !pngResource) {
+    throw new Error(`MCP call did not return resource attachments: ${JSON.stringify(response)}`);
   }
-  const decoded = Buffer.from(resource.blob || "", "base64").toString("utf8");
+  const decoded = Buffer.from(textResource.blob || "", "base64").toString("utf8");
   if (decoded !== fixtureFileText) {
     throw new Error("MCP resource blob did not round-trip");
   }
-  if (!resource.uri?.startsWith("hireme-result://")) {
-    throw new Error("MCP resource did not use a hireme-result URI");
+  if (!pngResource.blob || !Buffer.from(pngResource.blob, "base64").equals(fixturePngBytes)) {
+    throw new Error("MCP PNG resource blob did not round-trip");
   }
-  if (!/text\/plain/.test(resource.mimeType || "")) {
-    throw new Error("MCP resource did not preserve text/plain MIME type");
+  if (!imageContent || imageContent.mimeType !== "image/png") {
+    throw new Error("MCP call did not return an image content item for the PNG attachment");
+  }
+  if (!Buffer.from(imageContent.data || "", "base64").equals(fixturePngBytes)) {
+    throw new Error("MCP image content data did not round-trip");
+  }
+  if (!textResource.uri?.startsWith("hireme-result://")) {
+    throw new Error("MCP resource did not use a hireme-result URI");
   }
   if (!text.includes("<attached:")) {
     throw new Error("MCP text response did not redact inline base64 data");
@@ -295,4 +328,30 @@ function assertMcpResource(response) {
   if (text.includes(Buffer.from(fixtureFileText, "utf8").toString("base64"))) {
     throw new Error("MCP text response leaked the base64 blob");
   }
+  if (!text.includes("Output files saved locally:")) {
+    throw new Error("MCP text response did not include a local saved-file section");
+  }
+  const savedPaths = extractMarkdownLinkPaths(text);
+  if (savedPaths.length < 2) {
+    throw new Error(`MCP text response did not include a saved-file link: ${text}`);
+  }
+  const savedTextPath = savedPaths.find((path) => path.endsWith(".txt"));
+  const savedPngPath = savedPaths.find((path) => path.endsWith(".png"));
+  if (!savedTextPath || !savedPngPath) {
+    throw new Error(`MCP text response did not include saved text and PNG links: ${text}`);
+  }
+  const savedText = await readFile(savedTextPath, "utf8");
+  if (savedText !== fixtureFileText) {
+    throw new Error("MCP saved local file did not round-trip");
+  }
+  const savedPng = await readFile(savedPngPath);
+  if (!savedPng.equals(fixturePngBytes)) {
+    throw new Error("MCP saved local PNG did not round-trip");
+  }
+}
+
+function extractMarkdownLinkPaths(text) {
+  return [...text.matchAll(/\[[^\]]+\]\((?:<([^>]+)>|([^)\n]+))\)/g)]
+    .map((match) => match[1] || match[2])
+    .filter(Boolean);
 }

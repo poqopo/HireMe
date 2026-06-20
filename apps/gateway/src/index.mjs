@@ -2617,7 +2617,7 @@ function mcpTextResult(value) {
             ? displayValue
             : JSON.stringify(displayValue, null, 2),
       },
-      ...attachments.map(mcpAttachmentResource),
+      ...attachments.flatMap(mcpAttachmentContentItems),
     ],
   };
 }
@@ -2652,6 +2652,24 @@ function collectMcpResultAttachments(value) {
     }
   }
   return attachments;
+}
+
+function mcpAttachmentContentItems(attachment) {
+  const imageContent = mcpAttachmentImageContent(attachment);
+  const resourceContent = mcpAttachmentResource(attachment);
+  return imageContent ? [imageContent, resourceContent] : [resourceContent];
+}
+
+function mcpAttachmentImageContent(attachment) {
+  const mimeType = attachment.mimeType || "application/octet-stream";
+  if (!String(mimeType).toLowerCase().startsWith("image/")) return null;
+  const data = readStringField(attachment, ["data", "base64", "contentBase64", "blob"]);
+  if (!data) return null;
+  return {
+    type: "image",
+    data,
+    mimeType,
+  };
 }
 
 function mcpAttachmentResource(attachment) {

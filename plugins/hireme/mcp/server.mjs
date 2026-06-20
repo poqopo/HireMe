@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
@@ -1356,17 +1358,19 @@ function findAgent(agentId) {
 
 function textResult(value) {
   const attachments = collectResultAttachments(value);
+  const materializedAttachments = materializeResultAttachments(attachments, value);
   const displayValue = attachments.length ? redactAttachmentDataForText(value) : value;
+  const text =
+    typeof displayValue === "string"
+      ? displayValue
+      : JSON.stringify(displayValue, null, 2);
   return {
     content: [
       {
         type: "text",
-        text:
-          typeof displayValue === "string"
-            ? displayValue
-            : JSON.stringify(displayValue, null, 2),
+        text: `${text}${formatMaterializedAttachments(materializedAttachments)}`,
       },
-      ...attachments.map(attachmentToMcpResourceContent),
+      ...attachments.flatMap(attachmentToMcpContentItems),
     ],
   };
 }
@@ -1404,6 +1408,24 @@ function collectResultAttachments(value) {
   return attachments;
 }
 
+function attachmentToMcpContentItems(attachment) {
+  const imageContent = attachmentToMcpImageContent(attachment);
+  const resourceContent = attachmentToMcpResourceContent(attachment);
+  return imageContent ? [imageContent, resourceContent] : [resourceContent];
+}
+
+function attachmentToMcpImageContent(attachment) {
+  const mimeType = attachment.mimeType || "application/octet-stream";
+  if (!String(mimeType).toLowerCase().startsWith("image/")) return null;
+  const data = readStringField(attachment, ["data", "base64", "contentBase64", "blob"]);
+  if (!data) return null;
+  return {
+    type: "image",
+    data,
+    mimeType,
+  };
+}
+
 function attachmentToMcpResourceContent(attachment) {
   const filename = safeAttachmentFilename(
     attachment.filename || attachment.name || "agent-result",
@@ -1416,6 +1438,81 @@ function attachmentToMcpResourceContent(attachment) {
       blob: readStringField(attachment, ["data", "base64", "contentBase64", "blob"]),
     },
   };
+}
+
+function materializeResultAttachments(attachments, resultValue) {
+  if (!attachments.length) return [];
+  return attachments.map((attachment, index) =>
+    materializeResultAttachment(attachment, resultValue, index),
+  );
+}
+
+function materializeResultAttachment(attachment, resultValue, index) {
+  const filename = safeAttachmentFilename(
+    attachment.filename || attachment.name || `agent-result-${index + 1}`,
+  );
+  const data = readStringField(attachment, ["data", "base64", "contentBase64", "blob"]);
+  if (!data) {
+    return {
+      filename,
+      error: "missing_attachment_data",
+    };
+  }
+
+  try {
+    const bytes = Buffer.from(data, "base64");
+    const digest =
+      readStringField(attachment, ["digest"]).replace(/^sha256:/i, "") ||
+      createHash("sha256").update(bytes).digest("hex");
+    const resultId =
+      readStringField(resultValue, ["callId", "call_id", "id"]) ||
+      readStringField(resultValue?.result, ["callId", "call_id", "id"]) ||
+      readStringField(resultValue?.jsonOutput, ["callId", "call_id", "id"]) ||
+      readStringField(resultValue?.jsonOutput?.payload, ["callId", "call_id", "id"]) ||
+      "latest";
+    const resultDir = join(
+      resolve(process.env.HIREME_MCP_RESULT_DIR || ".hireme/mcp-results"),
+      safeAttachmentFilename(`${resultId}-${digest.slice(0, 12)}`),
+    );
+    mkdirSync(resultDir, { recursive: true });
+    const filePath = resolve(resultDir, filename);
+    writeFileSync(filePath, bytes);
+    return {
+      filename,
+      path: filePath,
+      mimeType: attachment.mimeType || "application/octet-stream",
+      sizeBytes: bytes.byteLength,
+    };
+  } catch (err) {
+    return {
+      filename,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+function formatMaterializedAttachments(attachments) {
+  if (!attachments.length) return "";
+  const lines = ["", "", "Output files saved locally:"];
+  for (const attachment of attachments) {
+    if (attachment.path) {
+      const sizeText =
+        Number.isFinite(attachment.sizeBytes) && attachment.sizeBytes >= 0
+          ? `, ${attachment.sizeBytes} bytes`
+          : "";
+      lines.push(
+        `- [${attachment.filename}](${markdownFileTarget(attachment.path)}) (${attachment.mimeType}${sizeText})`,
+      );
+      continue;
+    }
+    lines.push(`- ${attachment.filename}: failed to save (${attachment.error || "unknown_error"})`);
+  }
+  return lines.join("\n");
+}
+
+function markdownFileTarget(filePath) {
+  const target = String(filePath).replace(/\\/g, "/");
+  return /\s/.test(target) ? `<${target}>` : target;
 }
 
 function redactAttachmentDataForText(value) {
