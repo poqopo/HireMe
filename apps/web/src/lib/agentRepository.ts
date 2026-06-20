@@ -1,4 +1,3 @@
-import { agents as fallbackAgents } from "@/lib/agents";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import type {
   Agent,
@@ -26,10 +25,7 @@ const categoryLabels: Record<
   research: "Research",
   code: "Code",
   data: "Data",
-  security: "Security",
-  growth: "Growth",
-  ops: "Ops",
-  other: "Ops",
+  image: "Image",
 };
 
 const statusLabels: Record<
@@ -46,9 +42,9 @@ const statusLabels: Record<
 export async function loadMarketplaceAgents(): Promise<AgentLoadResult> {
   if (!isSupabaseConfigured || !supabase) {
     return {
-      agents: sortAgentsNewestFirst(fallbackAgents),
+      agents: [],
       source: "mock",
-      message: "Supabase env is not configured; showing local demo data.",
+      message: "Supabase env is not configured; no marketplace agents loaded.",
     };
   }
 
@@ -68,7 +64,7 @@ export async function loadMarketplaceAgents(): Promise<AgentLoadResult> {
 
   if (error) {
     return {
-      agents: sortAgentsNewestFirst(fallbackAgents),
+      agents: [],
       source: "mock",
       message: `Supabase read failed: ${error.message}`,
     };
@@ -76,9 +72,9 @@ export async function loadMarketplaceAgents(): Promise<AgentLoadResult> {
 
   if (!data.length) {
     return {
-      agents: sortAgentsNewestFirst(fallbackAgents),
-      source: "mock",
-      message: "Supabase marketplace is empty; showing local demo data.",
+      agents: [],
+      source: "supabase",
+      message: "Supabase marketplace is empty.",
     };
   }
 

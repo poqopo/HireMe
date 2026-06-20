@@ -243,7 +243,7 @@ const agents = [
     name: "Agent Evaluator",
     handle: "@evals/sentinel",
     creator: "Eval Works",
-    category: "Security",
+    category: "Code",
     status: "Private Beta",
     headline: "Runs red-team evals against hired agents before production use.",
     publicSummary:
@@ -283,7 +283,7 @@ const agents = [
     name: "Launch Operator",
     handle: "@growth/launch-operator",
     creator: "Go To Market AI",
-    category: "Growth",
+    category: "Research",
     status: "Busy",
     headline: "Drafts launch assets from private positioning memory and public docs.",
     publicSummary:
@@ -303,7 +303,7 @@ const agents = [
     name: "Ops Router",
     handle: "@ops/router",
     creator: "Backoffice Labs",
-    category: "Ops",
+    category: "Code",
     status: "Available",
     headline: "Routes operational requests to the right tools with spend limits.",
     publicSummary:
@@ -2291,11 +2291,14 @@ function inferTemplateCategory(text) {
   const normalized = String(text || "").toLowerCase();
   if (/리서치|research|자료|조사/.test(normalized)) return "Research";
   if (/데이터|data|분석|analytics|sql/.test(normalized)) return "Data";
-  if (/보안|security|audit|감사|취약/.test(normalized)) return "Security";
-  if (/마케팅|growth|랜딩|landing|세일즈|sales|launch/.test(normalized)) {
-    return "Growth";
+  if (/이미지|image|그림|캐릭터|character|avatar|illustration|png|jpg|jpeg|webp/.test(normalized)) {
+    return "Image";
   }
-  if (/운영|ops|라우팅|workflow|워크플로/.test(normalized)) return "Ops";
+  if (/보안|security|audit|감사|취약/.test(normalized)) return "Code";
+  if (/마케팅|growth|랜딩|landing|세일즈|sales|launch/.test(normalized)) {
+    return "Research";
+  }
+  if (/운영|ops|라우팅|workflow|워크플로/.test(normalized)) return "Code";
   return "Code";
 }
 
@@ -7742,11 +7745,12 @@ function normalizeDisplayCategory(value) {
     research: "Research",
     code: "Code",
     data: "Data",
-    security: "Security",
-    growth: "Growth",
-    ops: "Ops",
+    image: "Image",
+    security: "Code",
+    growth: "Research",
+    ops: "Code",
   };
-  return categories[normalized] || "Ops";
+  return categories[normalized] || "Code";
 }
 
 function normalizeDisplayStatus(value) {

@@ -73,10 +73,7 @@ export type Database = {
         | "research"
         | "code"
         | "data"
-        | "security"
-        | "growth"
-        | "ops"
-        | "other";
+        | "image";
       agent_status: "draft" | "listed" | "private_beta" | "paused" | "archived";
       agent_version_status: "draft" | "sealed" | "published" | "deprecated";
       protected_artifact_kind:

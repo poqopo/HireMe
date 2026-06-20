@@ -65,7 +65,7 @@ try {
     agent_id: agentId,
     name: "File Transfer Smoke Agent",
     creator: "HireMe Smoke",
-    category: "Ops",
+    category: "Code",
     headline: "Returns a generated file attachment through the protected Agent path.",
     public_summary:
       "Temporary smoke-test Agent for validating generated file delivery to MCP clients.",

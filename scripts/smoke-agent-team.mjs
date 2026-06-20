@@ -158,7 +158,7 @@ async function createAgent({ agentId, folderPath, name, role }) {
     agent_id: agentId,
     name,
     creator: "HireMe Smoke",
-    category: "Ops",
+    category: "Code",
     headline: `Acts as the ${role} in a shared HireMe Agent team conversation.`,
     public_summary:
       "Temporary smoke-test Agent for validating shared-conversation Agent teams.",

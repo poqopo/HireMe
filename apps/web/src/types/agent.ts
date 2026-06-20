@@ -2,9 +2,7 @@ export type AgentCategory =
   | "Research"
   | "Code"
   | "Data"
-  | "Security"
-  | "Growth"
-  | "Ops";
+  | "Image";
 
 export type AgentStatus = "Available" | "Busy" | "Private Beta";
 

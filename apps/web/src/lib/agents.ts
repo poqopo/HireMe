@@ -5,9 +5,7 @@ export const categories: Array<"All" | AgentCategory> = [
   "Research",
   "Code",
   "Data",
-  "Security",
-  "Growth",
-  "Ops",
+  "Image",
 ];
 
 const tryCallAllowance = 100;
@@ -19,7 +17,7 @@ const protocolIntelligenceTeam: AgentTeam = {
   owner: "Han Labs",
   headline: "Research, evidence, and usage-ledger agents for Sui and Walrus teams.",
   publicSummary:
-    "A coordinated catalog for protocol research and metered data exports. Buyers pay per routed MCP call to the selected Agent.",
+    "A coordinated catalog for protocol research and metered data exports. Clients pay per routed MCP call to the selected Agent.",
   agentCount: 3,
   accent: "from-[#665efd] to-[#70e1c8]",
   billing: {
@@ -57,7 +55,7 @@ const launchSafetyTeam: AgentTeam = {
   owner: "Go To Market AI",
   headline: "Launch planning with safety checks before public release.",
   publicSummary:
-    "Growth output and eval checks are packaged as Agent-level MCP capabilities so buyers can plan, test, and ship from one marketplace.",
+    "Growth output and eval checks are packaged as Agent-level MCP capabilities so Clients can plan, test, and ship from one marketplace.",
   agentCount: 3,
   accent: "from-[#ea2261] to-[#f5a15d]",
   billing: {
@@ -166,7 +164,7 @@ export const agents: Agent[] = [
     status: "Available",
     headline: "Turns product specs into scoped PR-ready React and Supabase changes.",
     publicSummary:
-      "A coding agent tuned for Vite, shadcn/ui, Supabase schemas, and MCP integrations. Buyers see the output, not the hidden harness.",
+      "A coding agent tuned for Vite, shadcn/ui, Supabase schemas, and MCP integrations. Clients see the output, not the hidden harness.",
     publicContract: "repo_task(input, repo_context, budget_calls)",
     memwalPolicy: "Protected implementation recipes and repo-specific playbooks",
     skills: ["React Vite", "Supabase", "MCP scaffolding"],
@@ -246,7 +244,7 @@ export const agents: Agent[] = [
     team: launchSafetyTeam,
     teamRole: "Preflight evaluator",
     listedIndividually: false,
-    category: "Security",
+    category: "Code",
     status: "Private Beta",
     headline: "Runs red-team evals against hired agents before production use.",
     publicSummary:
@@ -330,7 +328,7 @@ export const agents: Agent[] = [
     team: launchSafetyTeam,
     teamRole: "Launch operator",
     listedIndividually: true,
-    category: "Growth",
+    category: "Research",
     status: "Busy",
     headline: "Drafts launch assets from private positioning memory and public docs.",
     publicSummary:
@@ -372,7 +370,7 @@ export const agents: Agent[] = [
     team: launchSafetyTeam,
     teamRole: "Conversion copy specialist",
     listedIndividually: false,
-    category: "Growth",
+    category: "Research",
     status: "Available",
     headline: "Drafts offer-aware copy variants for landing pages, emails, and launch ads.",
     publicSummary:
@@ -414,7 +412,7 @@ export const agents: Agent[] = [
     team: buildOpsTeam,
     teamRole: "Workflow router",
     listedIndividually: false,
-    category: "Ops",
+    category: "Code",
     status: "Available",
     headline: "Routes operational requests to the right tools with spend limits.",
     publicSummary:

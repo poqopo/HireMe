@@ -82,7 +82,7 @@ try {
     agent_id: agentId,
     name: "Agent Loop Smoke",
     creator: "HireMe Smoke",
-    category: "Ops",
+    category: "Code",
     headline: "Requests bounded Codex follow-up loops through its output.",
     public_summary:
       "Temporary smoke-test Agent for validating output-driven Codex loop calls.",

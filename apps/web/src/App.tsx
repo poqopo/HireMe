@@ -40,6 +40,7 @@ import {
   CircleDollarSign,
   Clock3,
   Copy,
+  ImageIcon,
   LockKeyhole,
   LogIn,
   LogOut,
@@ -54,8 +55,9 @@ import {
   UserRound,
   WalletCards,
   X,
+  type LucideIcon,
 } from "lucide-react";
-import { agents as fallbackAgents, categories } from "@/lib/agents";
+import { categories } from "@/lib/agents";
 import {
   loadMarketplaceAgents,
   sortAgentsNewestFirst,
@@ -104,6 +106,14 @@ const makeAgentSteps = [
   },
 ];
 
+const publishProgressSteps = [
+  "Preparing publish",
+  "Uploading result media",
+  "Publishing protected Harness",
+  "Saving Agent listing",
+  "Opening Agent page",
+] as const;
+
 const heroBeforeHarnessImage =
   "/assets/before/TalkMedia_i_9d68a183fdb2.png.png";
 const heroAfterHarnessImages = [
@@ -111,12 +121,13 @@ const heroAfterHarnessImages = [
   "/assets/after/TalkMedia_i_ba3f99282062.jpg.jpg",
   "/assets/after/TalkMedia_i_c1054053616e.jpg.jpg",
   "/assets/after/TalkMedia_i_c2e84200e6f5.jpg.jpg",
+  "/assets/after/TalkMedia_i_d8524efc8c6d.jpg.jpg"
 ];
 
 const creatorIpLayers = [
   {
-    label: "Buyer sees",
-    items: ["Skills", "Price", "Sample output", "Version notes"],
+    label: "Client sees",
+    items: ["Skills", "Price", "Sample input", "Result media"],
   },
   {
     label: "Creator keeps",
@@ -222,6 +233,35 @@ const hiddenMarketplaceAgentHandles = new Set(["@agents/codex-builder"]);
 const topicFilters = categories.filter(
   (category): category is Agent["category"] => category !== "All",
 );
+const categoryPricing: Record<
+  Agent["category"],
+  {
+    basePriceUsd: number;
+    Icon: LucideIcon;
+    iconClassName: string;
+  }
+> = {
+  Research: {
+    basePriceUsd: 0.12,
+    Icon: Search,
+    iconClassName: "from-[#eff6ff] to-[#dbeafe] text-[#1d4ed8]",
+  },
+  Code: {
+    basePriceUsd: 0.18,
+    Icon: Braces,
+    iconClassName: "from-[#f0fdf4] to-[#dcfce7] text-[#15803d]",
+  },
+  Data: {
+    basePriceUsd: 0.16,
+    Icon: ServerCog,
+    iconClassName: "from-[#ecfeff] to-[#cffafe] text-[#0e7490]",
+  },
+  Image: {
+    basePriceUsd: 0.2,
+    Icon: ImageIcon,
+    iconClassName: "from-[#fff7ed] to-[#dbeafe] text-[#1d4ed8]",
+  },
+};
 const catalogViews = [
   { id: "agents", label: "Single Agent" },
   { id: "teams", label: "Agent Team" },
@@ -271,8 +311,6 @@ type CreatedAgentRecord = {
   headline?: string;
   description: string;
   howToUse?: string;
-  typicalOutputTitle?: string;
-  typicalOutputSummary?: string;
   typicalOutputSample?: string;
   typicalOutputMediaUrl?: string;
   typicalOutputMediaPath?: string;
@@ -932,13 +970,12 @@ async function createAgentWithGatewayUpload({
   user,
 }: {
   draft: {
+    category: Agent["category"] | "";
     agentName: string;
     headline: string;
     description: string;
     howToUse: string;
-    typicalOutputTitle: string;
-    typicalOutputSummary: string;
-    typicalOutputSample: string;
+    sampleInput: string;
   };
   agentSlug: string;
   totalPricePerCallUsd: number;
@@ -958,7 +995,7 @@ async function createAgentWithGatewayUpload({
     name: draft.agentName,
     handle: `@agents/${agentSlug}`,
     creator,
-    category: "Code",
+    category: draft.category || "Code",
     status: "Available",
     headline: draft.headline,
     public_summary: draft.description || draft.headline,
@@ -977,14 +1014,15 @@ async function createAgentWithGatewayUpload({
     price_per_call_usd: totalPricePerCallUsd,
     free_calls: trialCallAllowance,
     storage_network: "walrus-testnet",
-    result_title: draft.typicalOutputTitle,
-    result_summary: draft.typicalOutputSummary,
-    result_sample: draft.typicalOutputSample,
+    result_title: "Sample Input",
+    result_summary: "",
+    result_sample: draft.sampleInput,
     result_media_url: typicalOutputUpload?.url,
     result_media_type: typicalOutputUpload?.type,
     metadata: {
       source: "web_create_agent",
       howToUse: draft.howToUse,
+      sampleInput: draft.sampleInput,
       typicalOutputMediaPath: typicalOutputUpload?.path,
     },
   };
@@ -1404,8 +1442,8 @@ function mapGatewayPublicAgentToAgent(agent: GatewayPublicAgent | undefined): Ag
     },
     teamRole: "Specialist",
     listedIndividually: true,
-    category: agent?.category || "Ops",
-    categories: [agent?.category || "Ops"],
+    category: agent?.category || "Code",
+    categories: [agent?.category || "Code"],
     status: agent?.status || "Available",
     headline,
     publicSummary: agent?.publicSummary || headline,
@@ -1440,89 +1478,6 @@ function mapGatewayPublicAgentToAgent(agent: GatewayPublicAgent | undefined): Ag
     },
     mcpPackage: `mcp://hireme/${id}`,
     accent: "from-[#533afd] to-[#6ee7f9]",
-  };
-}
-
-function mapCreatedAgentRecordToAgent(record: CreatedAgentRecord): Agent {
-  const creator = record.creatorEmail || "Local creator";
-  const headline = record.headline || record.description;
-  const publicContract = `${record.agentSlug}(task, context, budget_calls)`;
-  const isPublished = record.status === "Published";
-
-  return {
-    id: record.agentSlug,
-    name: record.agentName,
-    handle: `@agents/${record.agentSlug}`,
-    creator,
-    team: {
-      id: `local-${record.creatorId}`,
-      name: isPublished ? "My Published Agents" : "My Draft Agents",
-      handle: isPublished ? "@teams/my-published" : "@teams/my-drafts",
-      owner: creator,
-      headline: isPublished
-        ? "Protected Agents registered through the gateway."
-        : "Locally created protected Agent drafts.",
-      publicSummary:
-        isPublished
-          ? "Agents created from the web UI and registered through the HireMe gateway."
-          : "Draft Agents created from the web UI before production registration.",
-      agentCount: 1,
-      accent: "from-[#533afd] to-[#00b7a8]",
-      billing: {
-        unit: "per_agent",
-        basePriceUsd: record.pricePerCallUsd,
-        includedCalls: trialCallAllowance,
-        overagePricePerCallUsd: record.pricePerCallUsd,
-        note: `${formatAgentPrice(record.pricePerCallUsd)} through the executing Agent ledger.`,
-      },
-    },
-    teamRole: isPublished ? "Registered Agent" : "Draft Agent",
-    listedIndividually: true,
-    category: "Code",
-    categories: ["Code"],
-    status: "Available",
-    headline,
-    publicSummary: record.description,
-    publicContract,
-    memwalPolicy:
-      "Gateway-managed results are stored as hirer-scoped memWal metadata.",
-    skills: [
-      "Protected Harness",
-      "Codex MCP",
-      isPublished ? "Gateway Registered" : "Local Draft",
-    ],
-    protectedAssets: ["Agent Harness archive", "private prompts", "skills/**"],
-    sealedHarness: {
-      network: "walrus-testnet",
-      sealPolicyId: `platform:agent:${record.agentSlug}`,
-      walrusBlobId: record.walrusBlobId,
-      suiObjectId: record.suiObjectId,
-      ciphertextDigest: record.ciphertextDigest,
-      visibility:
-        isPublished
-          ? "This Agent was registered through the gateway. Hirers receive public metadata and safe results only."
-          : "This local draft exposes only public metadata until production registration.",
-    },
-    pricePerCallUsd: record.pricePerCallUsd,
-    freeCalls: trialCallAllowance,
-    rating: 0,
-    calls: 0,
-    latencyMs: 0,
-    avgInputTokens: 0,
-    avgOutputTokens: 0,
-    createdAt: record.createdAt,
-    updatedAt: record.createdAt,
-    resultPreview: {
-      title: record.typicalOutputTitle || `${record.agentName} result`,
-      summary:
-        record.typicalOutputSummary ||
-        "Shows the expected result shape for this locally created Agent.",
-      sample: record.typicalOutputSample || record.howToUse || headline,
-      mediaUrl: record.typicalOutputMediaUrl,
-      mediaType: record.typicalOutputMediaType,
-    },
-    mcpPackage: `mcp://hireme/${record.agentSlug}`,
-    accent: "from-[#533afd] to-[#00b7a8]",
   };
 }
 
@@ -2665,7 +2620,7 @@ function DocsPage() {
                 Protected Agents, not prompts.
               </h1>
               <p className="docs-summary-copy mt-4 max-w-[680px]">
-                Creators keep the Harness. Buyers hire the capability. HireMe runs the Agent between them.
+                Creators keep the Harness. Clients hire the capability. HireMe runs the Agent between them.
               </p>
             </div>
             <div className="mt-5 grid gap-4 lg:grid-cols-[1.1fr_0.9fr] lg:items-stretch">
@@ -2677,7 +2632,7 @@ function DocsPage() {
                   {[
                     {
                       title: "Agent = paid capability",
-                      copy: "Buyers choose the packaged workflow, not an engine setting.",
+                      copy: "Clients choose the packaged workflow, not an engine setting.",
                     },
                     {
                       title: "Harness = working method",
@@ -2705,13 +2660,13 @@ function DocsPage() {
               <div className="grid gap-4">
                 <div className="surface-card p-5 md:p-6">
                   <div className="docs-card-title text-[#191f28]">
-                    What buyers see
+                    What Clients see
                   </div>
                   <ul className="mt-3 grid gap-2 docs-card-copy">
                     <li>Agent name</li>
                     <li>Public skills</li>
                     <li>Price</li>
-                    <li>Sample output</li>
+                    <li>Sample input</li>
                   </ul>
                 </div>
                 <div className="surface-card p-5 md:p-6">
@@ -2737,7 +2692,7 @@ function DocsPage() {
             <div className="grid gap-5 lg:grid-cols-[1.05fr_0.95fr]">
               <div className="surface-card p-5 md:p-6">
                 <div className="docs-card-title text-[#191f28]">
-                  For creators and buyers
+                  For creators and Clients
                 </div>
                 <div className="mt-4 grid gap-4 sm:grid-cols-2">
                   <div className="rounded-2xl border border-[#dbeafe] bg-white p-4">
@@ -2750,7 +2705,7 @@ function DocsPage() {
                   </div>
                   <div className="rounded-2xl border border-[#dbeafe] bg-[#fbfdff] p-4">
                     <div className="docs-card-title text-[#191f28]">
-                      For buyers
+                      For Clients
                     </div>
                     <p className="mt-2 docs-card-copy">
                       Use a ready Agent without rebuilding workflows.
@@ -2781,7 +2736,7 @@ function DocsPage() {
             <div className="grid gap-5 lg:grid-cols-[1.08fr_0.92fr]">
               <div className="surface-card p-5 md:p-6">
                 <div className="docs-card-title text-[#191f28]">
-                  Buyers
+                  Clients
                 </div>
                 <p className="mt-3 docs-summary-copy max-w-[34rem]">
                   Use prepared Agents without exposing private work.
@@ -2810,7 +2765,7 @@ function DocsPage() {
                       Outcome first
                     </div>
                     <p className="mt-2 docs-card-copy">
-                      Buyers see result quality, not raw files.
+                      Clients see result quality, not raw files.
                     </p>
                   </div>
                 </div>
@@ -2840,7 +2795,7 @@ function DocsPage() {
                   </div>
                   <div className="mt-4 grid gap-3">
                     {[
-                      "Buyer task",
+                      "Client task",
                       "Secure runner",
                       "Private Harness",
                       "Result",
@@ -2864,24 +2819,24 @@ function DocsPage() {
           <DocsArticleSection
             id="features"
             kicker="03 / Features"
-            title="What buyers can see and what stays private"
+            title="What Clients can see and what stays private"
           >
             <div className="grid gap-5 lg:grid-cols-[0.9fr_1.1fr]">
               <div className="surface-card p-5 md:p-6">
                 <div className="docs-card-title text-[#191f28]">
-                  Buyers can see
+                  Clients can see
                 </div>
                 <ul className="mt-3 grid gap-2 docs-card-copy">
                   <li>Skills</li>
                   <li>Price</li>
-                  <li>Sample output</li>
+                  <li>Result media</li>
                   <li>Version notes</li>
                 </ul>
               </div>
               <div className="grid gap-4">
                 <div className="surface-card p-5 md:p-6">
                   <div className="docs-card-title text-[#191f28]">
-                    Buyers can't see
+                    Clients can't see
                   </div>
                   <ul className="mt-3 grid gap-2 docs-card-copy">
                     <li>AGENTS.md</li>
@@ -2922,7 +2877,7 @@ function DocsPage() {
             <div className="grid gap-5 lg:grid-cols-[1fr_1fr]">
               <div className="surface-card p-5 md:p-6">
                 <div className="docs-card-title text-[#191f28]">
-                  For buyers
+                  For Clients
                 </div>
                 <div className="mt-4 grid gap-3">
                   {[
@@ -2980,7 +2935,7 @@ function DocsPage() {
                     MCP hiring
                   </div>
                   <p className="mt-2 docs-card-copy">
-                    HireMe sits between the buyer and the creator’s private Harness.
+                    HireMe sits between the Client and the creator’s private Harness.
                   </p>
                 </div>
               </div>
@@ -3049,7 +3004,7 @@ function DocsPage() {
                 Details
               </div>
               <ul className="mt-2 grid gap-2 docs-card-copy">
-                <li>Buyers see the Agent card, sample output, price, and public MCP tools.</li>
+                <li>Clients see the Agent card, sample input, result media, price, and public MCP tools.</li>
                 <li>They do not receive AGENTS.md, private skills, prompts, examples, or work rules.</li>
               </ul>
             </div>
@@ -3139,11 +3094,11 @@ function DocsPage() {
                 },
                 {
                   title: "How does protected execution work?",
-                  copy: "Buyer input goes to the HireMe runner. The creator's Harness executes through a gateway-only run, and the buyer gets the result back without seeing the private files.",
+                  copy: "Client input goes to the HireMe runner. The creator's Harness executes through a gateway-only run, and the Client gets the result back without seeing the private files.",
                 },
                 {
                   title: "How does MCP hiring work?",
-                  copy: "Buyers can call HireMe Agents from Codex and other MCP clients. HireMe is the hiring and execution layer, not a closed editor.",
+                  copy: "Clients can call HireMe Agents from Codex and other MCP clients. HireMe is the hiring and execution layer, not a closed editor.",
                 },
                 {
                   title: "How does team memory work with memWal?",
@@ -3236,12 +3191,9 @@ function ExploreAgentsPage({
   const [catalogView, setCatalogView] = useState<CatalogView | null>(null);
   const [selectedTopics, setSelectedTopics] = useState<Agent["category"][]>([]);
   const [marketplaceAgents, setMarketplaceAgents] =
-    useState<Agent[]>(fallbackAgents);
+    useState<Agent[]>([]);
   const [accessSnapshot, setAccessSnapshot] =
     useState<AgentAccessRecord[]>(readAllAgentAccess);
-  const [createdAgentRecords, setCreatedAgentRecords] = useState<
-    CreatedAgentRecord[]
-  >(() => readAllCreatedAgents());
   const [dataSource, setDataSource] = useState<{
     source: AgentDataSource;
     message?: string;
@@ -3254,8 +3206,7 @@ function ExploreAgentsPage({
 
     void loadMarketplaceAgents().then((result) => {
       if (!isCurrent) return;
-      const nextAgents = result.agents.length ? result.agents : fallbackAgents;
-      setMarketplaceAgents(nextAgents);
+      setMarketplaceAgents(result.agents);
       setDataSource({ source: result.source, message: result.message });
     });
 
@@ -3264,34 +3215,7 @@ function ExploreAgentsPage({
     };
   }, []);
 
-  useEffect(() => {
-    const refreshCreatedRecords = () => {
-      setCreatedAgentRecords(readAllCreatedAgents());
-    };
-
-    window.addEventListener(
-      "hireme-created-agents-updated",
-      refreshCreatedRecords,
-    );
-    window.addEventListener("storage", refreshCreatedRecords);
-
-    return () => {
-      window.removeEventListener(
-        "hireme-created-agents-updated",
-        refreshCreatedRecords,
-      );
-      window.removeEventListener("storage", refreshCreatedRecords);
-    };
-  }, []);
-
-  const localCreatedAgents = useMemo(
-    () => createdAgentRecords.map(mapCreatedAgentRecordToAgent),
-    [createdAgentRecords],
-  );
-  const catalogAgents = useMemo(
-    () => mergeAgentCatalog(marketplaceAgents, localCreatedAgents),
-    [marketplaceAgents, localCreatedAgents],
-  );
+  const catalogAgents = marketplaceAgents;
 
   const filteredAgents = useMemo(() => {
     return catalogAgents.filter((agent) => {
@@ -3474,9 +3398,6 @@ function ExploreAgentsPage({
                 <span className="font-medium text-[#1c1e54]">
                   {dataSource.source === "supabase" ? "Supabase live" : "Local demo data"}
                 </span>
-                {localCreatedAgents.length ? (
-                  <><span className="text-muted-foreground">·</span><span className="font-medium text-[#1c1e54]">{localCreatedAgents.length} published here</span></>
-                ) : null}
                 {dataSource.message ? <span className="leading-5 text-muted-foreground">{dataSource.message}</span> : null}
               </div>
               <button className="rounded-md px-2 py-1 font-medium text-[#6b7280] underline-offset-4 transition hover:bg-[#f3f4f6] hover:text-[#111827] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6b7280]/40 focus-visible:ring-offset-2 active:bg-[#e5e7eb]" onClick={resetFilters} type="button">
@@ -3538,7 +3459,7 @@ function AgentDetailPage({
   const signAndExecuteTransaction = useSignAndExecuteTransaction();
   const { agentId = "" } = useParams();
   const [marketplaceAgents, setMarketplaceAgents] =
-    useState<Agent[]>(fallbackAgents);
+    useState<Agent[]>([]);
   const [accessSnapshot, setAccessSnapshot] =
     useState<AgentAccessRecord[]>(readAllAgentAccess);
   const [createdAgentRecords, setCreatedAgentRecords] = useState<
@@ -3560,7 +3481,7 @@ function AgentDetailPage({
 
     void loadMarketplaceAgents().then((result) => {
       if (!isCurrent) return;
-      setMarketplaceAgents(result.agents.length ? result.agents : fallbackAgents);
+      setMarketplaceAgents(result.agents);
     });
 
     return () => {
@@ -3588,14 +3509,7 @@ function AgentDetailPage({
     };
   }, []);
 
-  const localCreatedAgents = useMemo(
-    () => createdAgentRecords.map(mapCreatedAgentRecordToAgent),
-    [createdAgentRecords],
-  );
-  const catalogAgents = useMemo(
-    () => mergeAgentCatalog(marketplaceAgents, localCreatedAgents),
-    [marketplaceAgents, localCreatedAgents],
-  );
+  const catalogAgents = marketplaceAgents;
 
   const agent = catalogAgents.find(
     (item) =>
@@ -3708,9 +3622,7 @@ function AgentDetailPage({
         setCreatedAgentRecords(readAllCreatedAgents());
       }
       const refreshedAgents = await loadMarketplaceAgents();
-      setMarketplaceAgents(
-        refreshedAgents.agents.length ? refreshedAgents.agents : fallbackAgents,
-      );
+      setMarketplaceAgents(refreshedAgents.agents);
       setUpdateHarnessFile(null);
       setUpdateReleaseNotes("");
       setUpdateAgentResult(result);
@@ -3766,7 +3678,7 @@ function AgentDetailPage({
       ...agent.protectedAssets,
     ]),
   );
-  const buyerDeliverables = [
+  const clientDeliverables = [
     "Ready-to-run Agent access",
     "Result output",
     "MCP and tool access",
@@ -3840,13 +3752,12 @@ function AgentDetailPage({
             </Card>
 
             <Card>
-              <CardHeader><CardTitle>Sample input / Sample output</CardTitle><CardDescription>Review the expected request and result shape before you try the Agent.</CardDescription></CardHeader>
+              <CardHeader><CardTitle>Sample Input / Result Image or Video</CardTitle><CardDescription>Check the expected Client request and result media before you try the Agent.</CardDescription></CardHeader>
               <CardContent>
                 <div className="grid gap-4 md:grid-cols-2">
-                  <div className="rounded-xl border border-[#dedbea] bg-[#f8f7fb] p-4"><div className="text-xs font-semibold uppercase text-[#6b6580]">Sample input</div><p className="mt-3 text-sm leading-6 text-[#273951]">Use {agent.name} to handle a {agent.category.toLowerCase()} task. Apply the public requirements, identify risks, and return a result with clear next steps.</p></div>
-                  <div className="rounded-xl border border-[#d8d4e2] bg-[#f3f1f8] p-4"><div className="text-xs font-semibold uppercase text-[#6b6580]">{agent.resultPreview.title}</div><p className="mt-3 text-sm leading-6 text-[#273951]">{agent.resultPreview.summary}</p><div className="mt-3 border-t border-[#d8d4e2] pt-3 text-sm leading-6 text-[#494556]">{agent.resultPreview.sample}</div></div>
+                  <div className="rounded-xl border border-[#dedbea] bg-[#f8f7fb] p-4"><div className="text-xs font-semibold uppercase text-[#6b6580]">Sample Input</div><p className="mt-3 text-sm leading-6 text-[#273951]">{agent.resultPreview.sample}</p></div>
+                  <div className="rounded-xl border border-[#d8d4e2] bg-[#f3f1f8] p-4"><div className="text-xs font-semibold uppercase text-[#6b6580]">Result Image / Video</div>{agent.resultPreview.mediaUrl ? <div className="mt-3 overflow-hidden rounded-lg border border-[#d8d4e2] bg-white">{agent.resultPreview.mediaType === "video" ? <video className="aspect-video w-full bg-[#171452] object-contain" controls src={agent.resultPreview.mediaUrl} /> : <img alt={`${agent.name} result preview`} className="aspect-video w-full object-cover" src={agent.resultPreview.mediaUrl} />}</div> : <p className="mt-3 text-sm leading-6 text-[#273951]">{agent.resultPreview.summary}</p>}</div>
                 </div>
-                {agent.resultPreview.mediaUrl ? <div className="mt-4 overflow-hidden rounded-xl border border-[#dedbea] bg-[#f8f7fb]">{agent.resultPreview.mediaType === "video" ? <video className="aspect-video w-full bg-[#171452] object-contain" controls src={agent.resultPreview.mediaUrl} /> : <img alt={`${agent.name} sample output`} className="aspect-video w-full object-cover" src={agent.resultPreview.mediaUrl} />}</div> : null}
               </CardContent>
             </Card>
 
@@ -3857,12 +3768,12 @@ function AgentDetailPage({
 
             <div className="grid gap-6 md:grid-cols-2">
               <Card>
-                <CardHeader><CardTitle>What stays private</CardTitle><CardDescription>The buyer receives capability and results, never the creator’s private playbook.</CardDescription></CardHeader>
+                <CardHeader><CardTitle>What stays private</CardTitle><CardDescription>The Client receives capability and results, never the creator’s private playbook.</CardDescription></CardHeader>
                 <CardContent><ul className="grid gap-2 text-sm text-[#273951]">{privateItems.map((item) => <li className="rounded-lg border border-[#dedbea] bg-[#f8f7fb] px-3 py-2" key={item}>{item}</li>)}</ul></CardContent>
               </Card>
               <Card>
                 <CardHeader><CardTitle>What you get</CardTitle><CardDescription>Everything needed to use the Agent without copying its Harness.</CardDescription></CardHeader>
-                <CardContent><ul className="grid gap-2 text-sm text-[#273951]">{buyerDeliverables.map((item) => <li className="rounded-lg border border-[#d8d4e2] bg-[#f3f1f8] px-3 py-2" key={item}>{item}</li>)}</ul></CardContent>
+                <CardContent><ul className="grid gap-2 text-sm text-[#273951]">{clientDeliverables.map((item) => <li className="rounded-lg border border-[#d8d4e2] bg-[#f3f1f8] px-3 py-2" key={item}>{item}</li>)}</ul></CardContent>
               </Card>
             </div>
 
@@ -3963,7 +3874,7 @@ function MyAgentsPage({
   onWalletLinked: (wallet: string) => void;
 }) {
   const [marketplaceAgents, setMarketplaceAgents] =
-    useState<Agent[]>(fallbackAgents);
+    useState<Agent[]>([]);
   const [accessRecords, setAccessRecords] = useState<AgentAccessRecord[]>([]);
   const [memWalResults, setMemWalResults] = useState<GatewayMemWalResultPayload[]>([]);
   const [paymentActivities, setPaymentActivities] = useState<
@@ -3987,7 +3898,7 @@ function MyAgentsPage({
 
     void loadMarketplaceAgents().then((result) => {
       if (!isCurrent) return;
-      setMarketplaceAgents(result.agents.length ? result.agents : fallbackAgents);
+      setMarketplaceAgents(result.agents);
     });
 
     return () => {
@@ -4139,10 +4050,7 @@ function MyAgentsPage({
   );
 
   function resolveAgent(record: AgentAccessRecord) {
-    return (
-      marketplaceAgents.find((agent) => agent.id === record.agentId) ||
-      fallbackAgents.find((agent) => agent.id === record.agentId)
-    );
+    return marketplaceAgents.find((agent) => agent.id === record.agentId);
   }
 
   const creatorKeys = new Set(
@@ -4526,19 +4434,6 @@ function CreatedAgentCard({ record }: { record: CreatedAgentRecord }) {
                 src={record.typicalOutputMediaUrl}
               />
             )}
-          </div>
-        ) : null}
-
-        {record.typicalOutputTitle || record.typicalOutputSummary ? (
-          <div className="mt-5 rounded-lg border border-border bg-secondary p-3">
-            <div className="text-xs font-medium text-[#1c1e54]">
-              {record.typicalOutputTitle || "Result preview"}
-            </div>
-            {record.typicalOutputSummary ? (
-              <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                {record.typicalOutputSummary}
-              </p>
-            ) : null}
           </div>
         ) : null}
 
@@ -4928,7 +4823,7 @@ function AgentMarketCard({
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
                 <CardTitle className="truncate text-base">{agent.name}</CardTitle>
-                <span className="number-cell inline-flex items-center gap-1 text-xs font-medium text-[#494556]" title="Based on buyer feedback and completed runs.">
+                <span className="number-cell inline-flex items-center gap-1 text-xs font-medium text-[#494556]" title="Based on Client feedback and completed runs.">
                   <Star className="size-3 fill-[#533afd] text-[#533afd]" />
                   {agent.rating ? agent.rating.toFixed(1) : "New"}
                 </span>
@@ -5129,6 +5024,12 @@ function formatAgentPriceShort(price: number) {
   return `${displayPrice} SUI`;
 }
 
+function formatFileSize(size: number) {
+  if (size >= 1024 * 1024) return `${(size / 1024 / 1024).toFixed(1)} MB`;
+  if (size >= 1024) return `${Math.round(size / 1024)} KB`;
+  return `${size} B`;
+}
+
 function formatAccessDate(value: string | null) {
   if (!value) return "No expiry";
   const date = new Date(value);
@@ -5244,7 +5145,7 @@ function CreateAgentPage({ user }: { user: AuthUser | null }) {
     {
       label: "Pricing",
       id: "pricing",
-      description: "Buyer price.",
+      description: "Base price plus creator fee.",
     },
     {
       label: "Protection",
@@ -5252,9 +5153,9 @@ function CreateAgentPage({ user }: { user: AuthUser | null }) {
       description: "Upload the private Harness.",
     },
     {
-      label: "Review",
-      id: "review",
-      description: "Contract and sample output.",
+      label: "How to use",
+      id: "how-to-use",
+      description: "Usage guide and sample input.",
     },
     {
       label: "Publish",
@@ -5263,18 +5164,13 @@ function CreateAgentPage({ user }: { user: AuthUser | null }) {
     },
   ] as const;
   const [draft, setDraft] = useState({
-    agentName: "Private Code Reviewer",
-    headline: "Reviews pull requests and returns concrete risks, fixes, and verification steps.",
-    description:
-      "A protected code review Agent for product teams that need implementation feedback with consistent severity, fix guidance, and test recommendations.",
-    howToUse:
-      "Ask this Agent to review a pull request, migration, or implementation plan. Include the diff, repository context, and the kind of risk you want prioritized.",
-    typicalOutputTitle: "Pull request risk review",
-    typicalOutputSummary:
-      "Returns prioritized findings, suggested patches, missing tests, and rollout notes.",
-    typicalOutputSample:
-      "High: RLS policy allows cross-tenant reads. Fix by scoping owner_id in the policy and add a regression test for rejected tenant access.",
-    pricePerCallUsd: "1.000",
+    category: "" as Agent["category"] | "",
+    agentName: "",
+    headline: "",
+    description: "",
+    howToUse: "",
+    sampleInput: "",
+    creatorFeeUsd: "",
   });
   const [agentFiles, setAgentFiles] = useState<File[]>([]);
   const [typicalOutputMedia, setTypicalOutputMedia] = useState<File | null>(null);
@@ -5287,12 +5183,17 @@ function CreateAgentPage({ user }: { user: AuthUser | null }) {
   } | null>(null);
   const [sealedRecord, setSealedRecord] = useState<SealedHarnessRecord>();
   const [isSealing, setIsSealing] = useState(false);
+  const [publishProgressIndex, setPublishProgressIndex] = useState<number | null>(null);
   const [createError, setCreateError] = useState<string | null>(null);
-  const pricePerCallUsd = Math.max(
+  const selectedCategoryPricing = draft.category
+    ? categoryPricing[draft.category]
+    : null;
+  const basePriceUsd = selectedCategoryPricing?.basePriceUsd ?? 0;
+  const creatorFeeUsd = Math.max(
     0,
-    Number.parseFloat(draft.pricePerCallUsd) || 0,
+    Number.parseFloat(draft.creatorFeeUsd) || 0,
   );
-  const totalPricePerCallUsd = pricePerCallUsd;
+  const totalPricePerCallUsd = basePriceUsd + creatorFeeUsd;
   const agentSlug = slugifyAgentName(draft.agentName) || "new-agent";
   const publicCapability = `${agentSlug}(task, context, budget_calls)`;
   const memWalScope = `agent:${agentSlug}`;
@@ -5303,6 +5204,19 @@ function CreateAgentPage({ user }: { user: AuthUser | null }) {
       ? "video"
       : "image"
     : uploadedTypicalOutputMedia?.type;
+  const priceSummaryLabel = draft.category
+    ? formatAgentPrice(totalPricePerCallUsd)
+    : "Select a category";
+  const publishProgressPercent =
+    publishProgressIndex === null
+      ? 0
+      : Math.round(
+          ((publishProgressIndex + 1) / publishProgressSteps.length) * 100,
+        );
+  const publishProgressLabel =
+    publishProgressIndex === null
+      ? ""
+      : publishProgressSteps[publishProgressIndex];
 
   useEffect(() => {
     return () => {
@@ -5324,30 +5238,24 @@ function CreateAgentPage({ user }: { user: AuthUser | null }) {
     });
   }, [activeStep]);
 
-  useEffect(() => {
-    const activeSection = stepRefs.current[activeStep];
-    if (!activeSection) return;
-
-    activeSection.scrollIntoView({
-      behavior: prefersReducedMotion() ? "auto" : "smooth",
-      block: "start",
-    });
-  }, [activeStep]);
-
   const maxAccessibleStep = activeStep;
   const canAccessStep = (index: number) => index <= maxAccessibleStep;
 
   const validateStep = (stepIndex: number) => {
     switch (stepIndex) {
       case 0: {
+        if (!draft.category) return "Select a category before continuing.";
         if (!draft.agentName.trim()) return "Add an agent name before continuing.";
         if (!draft.headline.trim()) return "Add a one-line description before continuing.";
         if (!draft.description.trim()) return "Add a description before continuing.";
         return null;
       }
       case 1: {
-        if (Number.isNaN(pricePerCallUsd) || pricePerCallUsd < 0) {
-          return "Set a valid price before continuing.";
+        if (!draft.category) {
+          return "Select a category before pricing.";
+        }
+        if (Number.isNaN(creatorFeeUsd) || creatorFeeUsd < 0) {
+          return "Set a valid creator fee before continuing.";
         }
         return null;
       }
@@ -5356,10 +5264,8 @@ function CreateAgentPage({ user }: { user: AuthUser | null }) {
         return null;
       }
       case 3: {
-        if (!draft.howToUse.trim()) return "Describe how buyers should use this Agent.";
-        if (!draft.typicalOutputTitle.trim()) return "Add a sample result title.";
-        if (!draft.typicalOutputSummary.trim()) return "Add a sample result summary.";
-        if (!draft.typicalOutputSample.trim()) return "Add a sample result.";
+        if (!draft.howToUse.trim()) return "Describe how Clients should use this Agent.";
+        if (!draft.sampleInput.trim()) return "Add a sample input.";
         return null;
       }
       default:
@@ -5403,12 +5309,14 @@ function CreateAgentPage({ user }: { user: AuthUser | null }) {
   async function sealHarness() {
     setIsSealing(true);
     setCreateError(null);
+    setPublishProgressIndex(0);
     try {
       const harnessFile = agentFiles[0];
       if (!harnessFile) {
         throw new Error("Upload a .zip or .tar.gz Agent Harness before creating.");
       }
 
+      setPublishProgressIndex(1);
       const typicalOutputUpload = typicalOutputMedia
         ? await uploadTypicalOutputMedia({
             agentSlug,
@@ -5416,6 +5324,7 @@ function CreateAgentPage({ user }: { user: AuthUser | null }) {
           })
         : uploadedTypicalOutputMedia;
 
+      setPublishProgressIndex(2);
       const gatewayRegistration = await createAgentWithGatewayUpload({
         draft,
         agentSlug,
@@ -5471,6 +5380,7 @@ function CreateAgentPage({ user }: { user: AuthUser | null }) {
         createdAt: gatewayRegistration.registeredAt || new Date().toISOString(),
       };
 
+      setPublishProgressIndex(3);
       writeCreatedAgentRecord({
         id: record.id,
         creatorId: user ? creatorIdFor(user) : "local-anonymous",
@@ -5480,9 +5390,7 @@ function CreateAgentPage({ user }: { user: AuthUser | null }) {
         headline: draft.headline,
         description: draft.description || draft.headline,
         howToUse: draft.howToUse,
-        typicalOutputTitle: draft.typicalOutputTitle,
-        typicalOutputSummary: draft.typicalOutputSummary,
-        typicalOutputSample: draft.typicalOutputSample,
+        typicalOutputSample: draft.sampleInput,
         typicalOutputMediaUrl: typicalOutputUpload?.url,
         typicalOutputMediaPath: typicalOutputUpload?.path,
         typicalOutputMediaType: typicalOutputUpload?.type,
@@ -5499,8 +5407,10 @@ function CreateAgentPage({ user }: { user: AuthUser | null }) {
         setUploadedTypicalOutputMedia(typicalOutputUpload);
       }
       setSealedRecord(record);
+      setPublishProgressIndex(4);
       navigate(`/agents/${agentSlug}`);
     } catch (err) {
+      setPublishProgressIndex(null);
       setCreateError(
         err instanceof Error ? err.message : "Could not create Agent.",
       );
@@ -5514,6 +5424,14 @@ function CreateAgentPage({ user }: { user: AuthUser | null }) {
     (event: ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
       setDraft((current) => ({ ...current, [field]: event.target.value }));
     };
+
+  function handleAgentFileChange(event: ChangeEvent<HTMLInputElement>) {
+    const nextFiles = Array.from(event.target.files ?? []);
+    if (!nextFiles.length) return;
+    setCreateError(null);
+    setStepError(null);
+    setAgentFiles(nextFiles);
+  }
 
   function handleTypicalOutputMediaChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0] || null;
@@ -5545,6 +5463,7 @@ function CreateAgentPage({ user }: { user: AuthUser | null }) {
     {
       label: "Agent info",
       ready:
+        Boolean(draft.category) &&
         Boolean(draft.agentName.trim()) &&
         Boolean(draft.headline.trim()) &&
         Boolean(draft.description.trim()),
@@ -5552,20 +5471,19 @@ function CreateAgentPage({ user }: { user: AuthUser | null }) {
     {
       label: "Pricing",
       ready:
-        !Number.isNaN(pricePerCallUsd) &&
-        pricePerCallUsd >= 0,
+        Boolean(draft.category) &&
+        !Number.isNaN(creatorFeeUsd) &&
+        creatorFeeUsd >= 0,
     },
     {
       label: "Protection",
       ready: Boolean(agentFiles[0]),
     },
     {
-      label: "Review",
+      label: "How to use",
       ready:
         Boolean(draft.howToUse.trim()) &&
-        Boolean(draft.typicalOutputTitle.trim()) &&
-        Boolean(draft.typicalOutputSummary.trim()) &&
-        Boolean(draft.typicalOutputSample.trim()),
+        Boolean(draft.sampleInput.trim()),
     },
   ];
   const publishReady = wizardReadiness.every((item) => item.ready);
@@ -5579,17 +5497,20 @@ function CreateAgentPage({ user }: { user: AuthUser | null }) {
       case 0:
         return (
           <div className="grid gap-1.5 text-sm text-[#4e5968]">
-            <div className="font-medium text-[#191f28]">{draft.agentName || "Untitled Agent"}</div>
+            <div className="font-medium text-[#191f28]">
+              {draft.agentName || "Untitled Agent"}
+            </div>
+            <div>{draft.category || "Select a category"}</div>
             <div className="overflow-hidden [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2]">
-              {draft.headline || "Add a short summary for buyers."}
+              {draft.headline || "Add a short summary for Clients."}
             </div>
           </div>
         );
       case 1:
         return (
           <div className="grid gap-1.5 text-sm text-[#4e5968]">
-            <div className="font-medium text-[#191f28]">{formatAgentPrice(totalPricePerCallUsd)}</div>
-            <div>Buyer price per 1M tokens</div>
+            <div className="font-medium text-[#191f28]">{priceSummaryLabel}</div>
+            <div>Base price + creator fee per 1M tokens</div>
           </div>
         );
       case 2:
@@ -5605,10 +5526,10 @@ function CreateAgentPage({ user }: { user: AuthUser | null }) {
         return (
           <div className="grid gap-1.5 text-sm text-[#4e5968]">
             <div className="font-medium text-[#191f28]">
-              {draft.typicalOutputTitle || "Sample output"}
+              {draft.howToUse || "How Clients should use it"}
             </div>
             <div className="overflow-hidden [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2]">
-              {draft.typicalOutputSummary || "Add a concise result summary for buyers."}
+              {draft.sampleInput || "Add a sample input."}
             </div>
           </div>
         );
@@ -5616,7 +5537,7 @@ function CreateAgentPage({ user }: { user: AuthUser | null }) {
         return (
           <div className="grid gap-1.5 text-sm text-[#4e5968]">
             <div className="font-medium text-[#191f28]">
-              {publishReady ? "Ready to publish" : "Review required"}
+              {publishReady ? "Ready to publish" : "More info needed"}
             </div>
             <div>
               {publishReady
@@ -5631,32 +5552,14 @@ function CreateAgentPage({ user }: { user: AuthUser | null }) {
   };
 
   return (
-    <main className="min-h-screen bg-[#f6f9fc]">
-      <section className="border-b border-border bg-white px-4 py-8 md:px-8">
-        <div className="mx-auto max-w-7xl">
-          <Link className="inline-flex items-center gap-2 text-sm font-medium text-[#6b7684] transition hover:text-[#191f28]" to="/">
-            <ArrowLeft className="size-4" />
-            Home
-          </Link>
-          <div className="mt-6 max-w-3xl">
-            <div className="flex items-center gap-2 text-sm font-medium text-[#1c1e54]">
-              <PackageOpen className="size-4 text-primary" />
-              Create Agent
-            </div>
-            <h1 className="mt-3 text-4xl font-light leading-tight text-[#0d253d] md:text-5xl">
-              Publish a paid Agent
-            </h1>
-            <p className="mt-4 text-base leading-7 text-muted-foreground">
-              Define the public page, upload the protected Harness, and set a
-              token-based fee for Codex users.
-            </p>
-          </div>
-        </div>
-      </section>
-
-      <section className="px-4 py-8 md:px-8">
+    <main className="min-h-[calc(100vh-4.25rem)] bg-[#f6f9fc]">
+      <section className="px-4 py-3 md:px-8 md:py-4">
         <div className="mx-auto max-w-5xl">
-          <div className="stepStickyShell -mx-4 mb-6 px-4 md:mx-0 md:px-3">
+          <Link className="mb-2 inline-flex items-center gap-1.5 text-xs font-medium text-[#6b7684] transition hover:text-[#191f28]" to="/agents">
+            <ArrowLeft className="size-3.5" />
+            Back
+          </Link>
+          <div className="stepStickyShell -mx-4 mb-0 px-4 md:mx-0 md:px-3">
             <div className="stepNav flex gap-2.5 overflow-x-auto md:grid md:grid-cols-5 md:gap-3 md:overflow-visible">
               {stepItems.map((step, index) => {
                 const isActive = activeStep === index;
@@ -5666,7 +5569,7 @@ function CreateAgentPage({ user }: { user: AuthUser | null }) {
                   <button
                     aria-current={isActive ? "step" : undefined}
                     aria-disabled={isLocked ? true : undefined}
-                    className={`min-w-[9.2rem] flex-1 rounded-2xl border px-4 py-3.5 text-center text-xs font-semibold transition-colors duration-200 md:min-w-0 ${isActive ? "border-[#533afd]/35 bg-gradient-to-br from-[#efeaff] to-[#f8f5ff] text-[#2e2b8c] shadow-[0_8px_20px_rgba(83,58,253,0.08)]" : isCompleted ? "border-[#cfe0ff] bg-[#eef5ff] text-[#1f4da8]" : isLocked ? "cursor-not-allowed border-[#d9d5e2] bg-white/72 text-[#8b95a1]" : "border-[#d9d5e2] bg-white/94 text-[#5f6f85] hover:border-[#c8c2d8] hover:bg-[#fbfaff]"}`}
+                    className={`min-w-[9.2rem] flex-1 rounded-2xl border px-4 py-2.5 text-center text-xs font-semibold transition-colors duration-200 md:min-w-0 ${isActive ? "border-[#533afd]/35 bg-gradient-to-br from-[#efeaff] to-[#f8f5ff] text-[#2e2b8c] shadow-[0_8px_20px_rgba(83,58,253,0.08)]" : isCompleted ? "border-[#cfe0ff] bg-[#eef5ff] text-[#1f4da8]" : isLocked ? "cursor-not-allowed border-[#d9d5e2] bg-white/72 text-[#8b95a1]" : "border-[#d9d5e2] bg-white/94 text-[#5f6f85] hover:border-[#c8c2d8] hover:bg-[#fbfaff]"}`}
                     disabled={isLocked}
                     key={step.id}
                     onClick={() => goToStep(index)}
@@ -5685,7 +5588,7 @@ function CreateAgentPage({ user }: { user: AuthUser | null }) {
             </div>
           </div>
 
-          <div className="grid gap-6 pt-4 lg:grid-cols-[minmax(0,1fr)_20rem] lg:items-start lg:pt-6">
+          <div className="pt-0">
             <div className="space-y-5">
               {stepError ? (
                 <div className="rounded-2xl border border-[#d7d0f9] bg-[#f7f4ff] px-4 py-3 text-sm text-[#4b4a79]">
@@ -5702,21 +5605,68 @@ function CreateAgentPage({ user }: { user: AuthUser | null }) {
                 active={activeStep === 0}
                 body={
                   <div className="grid gap-4 md:grid-cols-2">
-                    <Field label="Agent name">
+                    <div className="min-w-0 md:col-span-2">
+                      <div className="mb-1.5 block text-xs font-medium text-muted-foreground">
+                        Category
+                        <span className="ml-1 text-[#e11d48]" aria-label="required">
+                          *
+                        </span>
+                      </div>
+                      <div className="-mx-1 flex w-full max-w-full gap-2 overflow-x-auto px-1 pb-1" data-category-row>
+                        {topicFilters.map((category) => {
+                          const categoryMeta = categoryPricing[category];
+                          const CategoryIcon = categoryMeta.Icon;
+                          const selected = draft.category === category;
+                          return (
+                            <button
+                              aria-pressed={selected}
+                              className={`flex h-14 min-w-[9.6rem] shrink-0 items-center gap-2 rounded-2xl border px-3 py-2 text-left transition ${
+                                selected
+                                  ? "border-[#533afd]/45 bg-[#f7f4ff] shadow-[0_12px_28px_rgba(83,58,253,0.12)]"
+                                  : "border-[#dbe3ef] bg-white hover:border-[#cfc6ff] hover:bg-[#fbfaff]"
+                              }`}
+                              key={category}
+                              onClick={() =>
+                                setDraft((current) => ({ ...current, category }))
+                              }
+                              type="button"
+                            >
+                              <span
+                                className={`flex size-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br ${categoryMeta.iconClassName}`}
+                              >
+                                <CategoryIcon className="size-4" aria-hidden="true" />
+                              </span>
+                              <span className="grid min-w-0 gap-0.5">
+                                <span className="truncate text-sm font-semibold text-[#191f28]">
+                                  {category}
+                                </span>
+                                <span className="number-cell text-[11px] font-semibold text-[#536073]">
+                                  Base {formatAgentPriceShort(categoryMeta.basePriceUsd)}
+                                </span>
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                    <Field label="Agent name" required>
                       <Input
+                        required
                         value={draft.agentName}
                         onChange={updateDraft("agentName")}
                       />
                     </Field>
-                    <Field label="One-line description">
+                    <Field label="One-line description" required>
                       <Input
+                        required
                         value={draft.headline}
                         onChange={updateDraft("headline")}
                       />
                     </Field>
-                    <Field className="md:col-span-2" label="Description">
+                    <Field className="md:col-span-2" label="Description" required>
                       <textarea
-                        className="min-h-24 w-full rounded-md border border-input bg-white px-3 py-2 text-sm text-foreground shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        required
+                        className="min-h-20 w-full rounded-md border border-input bg-white px-3 py-2 text-sm text-foreground shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
                         onChange={updateDraft("description")}
                         value={draft.description}
                       />
@@ -5725,7 +5675,7 @@ function CreateAgentPage({ user }: { user: AuthUser | null }) {
                 }
                 description="Name the Agent and explain what it does."
                 footer={
-                  <div className="flex flex-col gap-3 border-t border-[#ece8fb] pt-4 md:flex-row md:items-center md:justify-between">
+                  <div className="flex flex-col gap-3 border-t border-[#ece8fb] pt-3 md:flex-row md:items-center md:justify-between">
                     <Button disabled size="lg" type="button" variant="secondary">
                       Back
                     </Button>
@@ -5753,28 +5703,44 @@ function CreateAgentPage({ user }: { user: AuthUser | null }) {
                 active={activeStep === 1}
                 body={
                   <div className="grid gap-4 md:grid-cols-[1fr_1.2fr] md:items-end">
-                    <Field label="Price / 1M tokens">
+                    <Field label="Creator fee / 1M tokens">
                       <Input
                         min="0"
                         step="0.001"
                         type="number"
-                        value={draft.pricePerCallUsd}
-                        onChange={updateDraft("pricePerCallUsd")}
+                        value={draft.creatorFeeUsd}
+                        onChange={updateDraft("creatorFeeUsd")}
                       />
                     </Field>
                     <div className="rounded-2xl border border-[#cfe0ff] bg-[#f7fbff] px-4 py-3">
                       <div className="text-[10px] font-medium uppercase text-muted-foreground">
-                        Buyer price
+                        Client price / 1M tokens
                       </div>
-                      <div className="number-cell mt-1 text-xl font-semibold text-[#1c1e54]">
-                        {formatAgentPrice(totalPricePerCallUsd)}
+                      <div className="mt-2 grid gap-1.5 text-sm text-[#536073]">
+                        <div className="flex items-center justify-between gap-4">
+                          <span>Base</span>
+                          <span className="number-cell font-medium text-[#191f28]">
+                            {draft.category
+                              ? formatAgentPrice(basePriceUsd)
+                              : "Select category"}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between gap-4">
+                          <span>Creator fee</span>
+                          <span className="number-cell font-medium text-[#191f28]">
+                            {formatAgentPrice(creatorFeeUsd)}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="number-cell mt-3 border-t border-[#dbeafe] pt-3 text-xl font-semibold text-[#1c1e54]">
+                        Total {priceSummaryLabel}
                       </div>
                     </div>
                   </div>
                 }
-                description="Set the buyer price for this Agent."
+                description="The Client price is category base price plus your creator fee."
                 footer={
-                  <div className="flex flex-col gap-3 border-t border-[#ece8fb] pt-4 md:flex-row md:items-center md:justify-between">
+                  <div className="flex flex-col gap-3 border-t border-[#ece8fb] pt-3 md:flex-row md:items-center md:justify-between">
                     <Button onClick={handleBack} size="lg" type="button" variant="secondary">
                       <ArrowLeft />
                       Back
@@ -5813,9 +5779,7 @@ function CreateAgentPage({ user }: { user: AuthUser | null }) {
                     <input
                       accept=".zip,.gz,.tgz,.tar.gz,application/zip,application/gzip"
                       className="sr-only"
-                      onChange={(event) =>
-                        setAgentFiles(Array.from(event.target.files ?? []))
-                      }
+                      onChange={handleAgentFileChange}
                       type="file"
                     />
                     {agentFiles[0] ? (
@@ -5827,7 +5791,7 @@ function CreateAgentPage({ user }: { user: AuthUser | null }) {
                 }
                 description="Upload the protected Harness that stays private."
                 footer={
-                  <div className="flex flex-col gap-3 border-t border-[#ece8fb] pt-4 md:flex-row md:items-center md:justify-between">
+                  <div className="flex flex-col gap-3 border-t border-[#ece8fb] pt-3 md:flex-row md:items-center md:justify-between">
                     <Button onClick={handleBack} size="lg" type="button" variant="secondary">
                       <ArrowLeft />
                       Back
@@ -5856,33 +5820,21 @@ function CreateAgentPage({ user }: { user: AuthUser | null }) {
                 active={activeStep === 3}
                 body={
                   <div className="grid gap-4 md:grid-cols-2">
-                    <Field className="md:col-span-2" label="How buyers should use it">
+                    <Field className="md:col-span-2" label="How Clients should use it">
                       <textarea
                         className="min-h-24 w-full rounded-md border border-input bg-white px-3 py-2 text-sm shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
                         onChange={updateDraft("howToUse")}
                         value={draft.howToUse}
                       />
                     </Field>
-                    <Field label="Sample result title">
-                      <Input
-                        value={draft.typicalOutputTitle}
-                        onChange={updateDraft("typicalOutputTitle")}
-                      />
-                    </Field>
-                    <Field label="Sample result summary">
-                      <Input
-                        value={draft.typicalOutputSummary}
-                        onChange={updateDraft("typicalOutputSummary")}
-                      />
-                    </Field>
-                    <Field className="md:col-span-2" label="Sample result">
+                    <Field className="md:col-span-2" label="Sample Input">
                       <textarea
                         className="min-h-24 w-full rounded-md border border-input bg-white px-3 py-2 text-sm shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                        onChange={updateDraft("typicalOutputSample")}
-                        value={draft.typicalOutputSample}
+                        onChange={updateDraft("sampleInput")}
+                        value={draft.sampleInput}
                       />
                     </Field>
-                    <Field className="md:col-span-2" label="Result image or video">
+                    <Field className="md:col-span-2" label="Result Image / Video">
                       <input
                         accept=".jpg,.jpeg,.png,image/jpeg,image/png,video/*"
                         className="block w-full rounded-md border border-dashed border-input bg-white px-3 py-3 text-sm text-muted-foreground file:mr-4 file:rounded-full file:border-0 file:bg-secondary file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-primary"
@@ -5909,9 +5861,9 @@ function CreateAgentPage({ user }: { user: AuthUser | null }) {
                     ) : null}
                   </div>
                 }
-                description="Write the contract and show the sample output."
+                description="Tell Clients how to use this Agent and provide a sample input."
                 footer={
-                  <div className="flex flex-col gap-3 border-t border-[#ece8fb] pt-4 md:flex-row md:items-center md:justify-between">
+                  <div className="flex flex-col gap-3 border-t border-[#ece8fb] pt-3 md:flex-row md:items-center md:justify-between">
                     <Button onClick={handleBack} size="lg" type="button" variant="secondary">
                       <ArrowLeft />
                       Back
@@ -5933,88 +5885,103 @@ function CreateAgentPage({ user }: { user: AuthUser | null }) {
                 wrapperRef={(node) => {
                   stepRefs.current[3] = node;
                 }}
-                title="Review"
+                title="How to use"
               />
 
               <WizardStepCard
                 active={activeStep === 4}
                 body={
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <div className="rounded-[24px] border border-[#dbeafe] bg-[#f7fbff] p-4">
-                      <div className="text-xs font-semibold uppercase tracking-[0.08em] text-[#6b7684]">
-                        Summary
+                  <div className="grid gap-4">
+                    <div className="grid gap-3 rounded-[24px] border border-[#dbeafe] bg-[#f7fbff] p-4 text-sm text-[#4e5968]">
+                      <div className="flex items-start justify-between gap-4">
+                        <span>Agent name</span>
+                        <span className="max-w-[60%] text-right font-medium text-[#191f28]">
+                          {draft.agentName || "Untitled Agent"}
+                        </span>
                       </div>
-                      <div className="mt-3 grid gap-3 text-sm text-[#4e5968]">
-                        <div className="flex items-start justify-between gap-4">
-                          <span>Agent name</span>
-                          <span className="font-medium text-[#191f28]">
-                            {draft.agentName || "Untitled Agent"}
-                          </span>
-                        </div>
-                        <div className="flex items-start justify-between gap-4">
-                          <span>Price</span>
-                          <span className="font-medium text-[#191f28]">
-                            {formatAgentPrice(totalPricePerCallUsd)}
-                          </span>
-                        </div>
-                        <div className="flex items-start justify-between gap-4">
-                          <span>Access type</span>
-                          <span className="font-medium text-[#191f28]">
-                            Paid · Codex users
-                          </span>
-                        </div>
-                        <div className="flex items-start justify-between gap-4">
-                          <span>Protection</span>
-                          <span className="font-medium text-[#191f28]">
-                            {agentFiles[0]
-                              ? "Protected Harness uploaded"
-                              : "Harness missing"}
-                          </span>
-                        </div>
+                      <div className="flex items-start justify-between gap-4">
+                        <span>One-line description</span>
+                        <span className="max-w-[60%] text-right font-medium text-[#191f28]">
+                          {draft.headline || "No description"}
+                        </span>
                       </div>
-                    </div>
-                    <div className="rounded-[24px] border border-[#dbeafe] bg-white p-4">
-                      <div className="text-xs font-semibold uppercase tracking-[0.08em] text-[#6b7684]">
-                        Publish readiness
+                      <div className="flex items-start justify-between gap-4">
+                        <span>Price</span>
+                        <span className="number-cell font-medium text-[#191f28]">
+                          {priceSummaryLabel}
+                        </span>
                       </div>
-                      <div className="mt-3 grid gap-2">
-                        {wizardReadiness.map((item) => (
-                          <div className="flex items-center gap-2 text-sm text-[#4e5968]" key={item.label}>
-                            <span
-                              className={`flex size-6 items-center justify-center rounded-full border ${
-                                item.ready
-                                  ? "border-[#cfe0ff] bg-[#eef5ff] text-[#1f4da8]"
-                                  : "border-[#d9d5e2] bg-white text-[#9aa3b2]"
-                              }`}
-                            >
-                              {item.ready ? (
-                                <CheckCircle2 className="size-3.5" />
-                              ) : (
-                                "—"
-                              )}
-                            </span>
-                            <span>{item.label}</span>
+                      <div className="flex flex-col gap-3 rounded-2xl border border-[#dbeafe] bg-white p-3 md:flex-row md:items-center md:justify-between">
+                        <div>
+                          <div className="text-xs font-medium text-muted-foreground">
+                            Uploaded file
                           </div>
-                        ))}
+                          <div className="mt-1 text-sm font-medium text-[#191f28]">
+                            {agentFiles[0]?.name || "No file uploaded"}
+                          </div>
+                          {agentFiles[0] ? (
+                            <div className="mt-0.5 text-xs text-[#6b7684]">
+                              {formatFileSize(agentFiles[0].size)}
+                            </div>
+                          ) : null}
+                        </div>
+                        <label
+                          className={`inline-flex cursor-pointer items-center justify-center rounded-xl border border-[#cfe0ff] bg-[#eef5ff] px-3 py-2 text-xs font-semibold text-[#1f4da8] transition hover:bg-[#e0efff] ${
+                            isSealing ? "pointer-events-none opacity-50" : ""
+                          }`}
+                        >
+                          Change file
+                          <input
+                            accept=".zip,.gz,.tgz,.tar.gz,application/zip,application/gzip"
+                            className="sr-only"
+                            disabled={isSealing}
+                            onChange={handleAgentFileChange}
+                            type="file"
+                          />
+                        </label>
                       </div>
-                      <p className="mt-4 text-sm leading-6 text-[#6b7684]">
-                        {publishReady
-                          ? "Everything needed to publish is in place."
-                          : "Some required fields are still incomplete."}
-                      </p>
                     </div>
+                    {isSealing ? (
+                      <div className="rounded-[24px] border border-[#cfe0ff] bg-white p-4">
+                        <div className="flex items-center justify-between gap-4 text-xs font-semibold text-[#536073]">
+                          <span>{publishProgressLabel}</span>
+                          <span>
+                            {publishProgressIndex !== null
+                              ? `${publishProgressIndex + 1}/${publishProgressSteps.length}`
+                              : ""}
+                          </span>
+                        </div>
+                        <div
+                          aria-label="Publish progress"
+                          aria-valuemax={publishProgressSteps.length}
+                          aria-valuemin={0}
+                          aria-valuenow={
+                            publishProgressIndex === null
+                              ? 0
+                              : publishProgressIndex + 1
+                          }
+                          className="mt-3 h-2 overflow-hidden rounded-full bg-[#e8eef8]"
+                          role="progressbar"
+                        >
+                          <div
+                            className="h-full rounded-full bg-[#533afd] transition-[width] duration-500 ease-out"
+                            style={{ width: `${publishProgressPercent}%` }}
+                          />
+                        </div>
+                      </div>
+                    ) : null}
                   </div>
                 }
-                description="Review the public summary before publishing."
+                description="Confirm the final details before publishing."
                 footer={
-                  <div className="flex flex-col gap-3 border-t border-[#ece8fb] pt-4 md:flex-row md:items-center md:justify-between">
+                  <div className="flex flex-col gap-3 border-t border-[#ece8fb] pt-3 md:flex-row md:items-center md:justify-between">
                     <Button onClick={handleBack} size="lg" type="button" variant="secondary">
                       <ArrowLeft />
                       Back
                     </Button>
                     <Button
                       className="min-w-[10rem]"
-                      disabled={isSealing}
+                      disabled={isSealing || !publishReady}
                       onClick={handleNext}
                       size="lg"
                       type="button"
@@ -6034,98 +6001,6 @@ function CreateAgentPage({ user }: { user: AuthUser | null }) {
                 title="Publish"
               />
             </div>
-
-            <aside className="space-y-4 lg:sticky lg:top-[9rem]">
-              <Card className="rounded-[28px] border border-[#dbeafe] bg-white/90 shadow-[0_24px_80px_rgba(15,52,96,0.08)]">
-                <CardHeader>
-                  <CardTitle className="text-[1.1rem] tracking-[-0.03em] text-[#191f28]">
-                    Live Preview
-                  </CardTitle>
-                  <CardDescription>Updates as you fill the form.</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="rounded-[22px] border border-[#dbeafe] bg-[#f7fbff] p-4">
-                    <div className="text-xs font-semibold uppercase tracking-[0.08em] text-[#6b7684]">
-                      Agent name
-                    </div>
-                    <div className="mt-2 text-lg font-semibold tracking-[-0.03em] text-[#191f28]">
-                      {draft.agentName || "Untitled Agent"}
-                    </div>
-                    <p className="mt-2 text-sm leading-6 text-[#4e5968]">
-                      {draft.headline || "Add a short public summary."}
-                    </p>
-                  </div>
-                  <div className="grid gap-3 rounded-[22px] border border-[#dbeafe] bg-white p-4 text-sm text-[#4e5968]">
-                    <div className="flex items-center justify-between gap-4">
-                      <span>Price</span>
-                      <span className="font-semibold text-[#191f28]">
-                        {formatAgentPrice(totalPricePerCallUsd)}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between gap-4">
-                      <span>Access type</span>
-                      <span className="font-semibold text-[#191f28]">Paid</span>
-                    </div>
-                    <div className="flex items-center justify-between gap-4">
-                      <span>Protection</span>
-                      <span className="font-semibold text-[#191f28]">
-                        {agentFiles[0] ? "Protected" : "Pending"}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between gap-4">
-                      <span>Publish readiness</span>
-                      <span className="font-semibold text-[#191f28]">
-                        {publishReady ? "Ready" : "Incomplete"}
-                      </span>
-                    </div>
-                  </div>
-                  <div className="rounded-[22px] border border-[#dbeafe] bg-[#f7fbff] p-4">
-                    <div className="text-xs font-semibold uppercase tracking-[0.08em] text-[#6b7684]">
-                      Step progress
-                    </div>
-                    <div className="mt-3 grid gap-2">
-                      {wizardReadiness.map((item) => (
-                        <div className="flex items-center gap-2 text-sm" key={item.label}>
-                          <span
-                            className={`flex size-5 items-center justify-center rounded-full ${
-                              item.ready
-                                ? "bg-[#eef5ff] text-[#1f4da8]"
-                                : "bg-white text-[#9aa3b2]"
-                            }`}
-                          >
-                            {item.ready ? (
-                              <CheckCircle2 className="size-3.5" />
-                            ) : (
-                              "•"
-                            )}
-                          </span>
-                          <span className="text-[#4e5968]">{item.label}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-              <Card className="rounded-[28px] border border-[#dbeafe] bg-white/90 shadow-[0_24px_80px_rgba(15,52,96,0.08)]">
-                <CardHeader>
-                  <CardTitle className="text-[1.1rem] tracking-[-0.03em] text-[#191f28]">
-                    Protection status
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-2 text-sm leading-6 text-[#4e5968]">
-                  <div>
-                    {agentFiles[0]
-                      ? "Private Harness uploaded."
-                      : "Waiting for Harness upload."}
-                  </div>
-                  <div>
-                    {publishReady
-                      ? "Ready for publishing."
-                      : "Complete the current step to continue."}
-                  </div>
-                </CardContent>
-              </Card>
-            </aside>
           </div>
         </div>
 
@@ -6166,10 +6041,12 @@ function WizardStepCard({
   const isCompleted = state === "completed";
   const isLocked = state === "locked";
 
+  if (!active) return null;
+
   const shellClassName = [
-    "overflow-hidden rounded-[28px] border transition-all duration-500 ease-out",
+    "overflow-hidden rounded-b-[28px] rounded-t-none border border-t-0 transition-all duration-500 ease-out",
     isActive
-      ? "border-[#533afd]/35 bg-white shadow-[0_28px_90px_rgba(49,130,246,0.12)]"
+      ? "border-[#533afd]/35 bg-white shadow-[0_24px_70px_rgba(49,130,246,0.11)]"
       : isCompleted
         ? "border-[#cfe0ff] bg-[#f7fbff] shadow-[0_18px_50px_rgba(49,130,246,0.06)]"
         : "border-[#d9d5e2] bg-white/70 opacity-60",
@@ -6178,7 +6055,7 @@ function WizardStepCard({
   return (
     <div className="scroll-mt-28 md:scroll-mt-32" ref={wrapperRef}>
       <Card className={shellClassName}>
-      <div className="flex items-start justify-between gap-4 px-6 pt-5">
+      <div className="flex items-start justify-between gap-4 px-5 pt-4">
         {isCompleted && onEdit ? (
           <button
             className="flex flex-1 items-start gap-3 text-left transition hover:opacity-90"
@@ -6187,10 +6064,10 @@ function WizardStepCard({
           >
             <WizardStepBadge index={index} state={state} />
             <div className="min-w-0">
-              <div className="text-[1.12rem] font-semibold tracking-[-0.03em] text-[#191f28] md:text-[1.15rem]">
+              <div className="text-[1.05rem] font-semibold tracking-[-0.03em] text-[#191f28] md:text-[1.1rem]">
                 {title}
               </div>
-              <p className="mt-1 text-[0.92rem] leading-5 text-[#6b7684]">
+              <p className="mt-0.5 text-[0.88rem] leading-5 text-[#6b7684]">
                 {description}
               </p>
             </div>
@@ -6199,10 +6076,10 @@ function WizardStepCard({
           <div className="flex flex-1 items-start gap-3">
             <WizardStepBadge index={index} state={state} />
             <div className="min-w-0">
-              <div className="text-[1.12rem] font-semibold tracking-[-0.03em] text-[#191f28] md:text-[1.15rem]">
+              <div className="text-[1.05rem] font-semibold tracking-[-0.03em] text-[#191f28] md:text-[1.1rem]">
                 {title}
               </div>
-              <p className="mt-1 text-[0.92rem] leading-5 text-[#6b7684]">
+              <p className="mt-0.5 text-[0.88rem] leading-5 text-[#6b7684]">
                 {description}
               </p>
             </div>
@@ -6210,7 +6087,7 @@ function WizardStepCard({
         )}
 
         <div
-          className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold ${
+          className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-semibold ${
             isActive
               ? "border-[#cfc6ff] bg-[#f3efff] text-[#2e2b8c]"
               : isCompleted
@@ -6222,10 +6099,10 @@ function WizardStepCard({
         </div>
       </div>
 
-      <div className="px-6 pb-5 pt-4">
+      <div className="px-5 pb-4 pt-3">
         {isActive ? (
           <div
-            className={`grid gap-4 transition-all duration-500 ease-out ${
+            className={`grid gap-3 transition-all duration-500 ease-out ${
               active
                 ? "translate-y-0 opacity-100"
                 : "pointer-events-none -translate-y-3 opacity-0"
@@ -6262,7 +6139,7 @@ function WizardStepBadge({
 
   return (
     <span
-      className={`mt-0.5 flex size-10 shrink-0 items-center justify-center rounded-2xl border text-sm font-semibold transition-all ${
+      className={`mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-2xl border text-xs font-semibold transition-all ${
         isActive
           ? "border-[#533afd]/30 bg-gradient-to-br from-[#efeaff] to-[#f8f5ff] text-[#2e2b8c] shadow-[0_10px_24px_rgba(83,58,253,0.10)]"
           : isCompleted
@@ -6279,15 +6156,22 @@ function Field({
   label,
   className,
   children,
+  required = false,
 }: {
   label: string;
   className?: string;
   children: ReactNode;
+  required?: boolean;
 }) {
   return (
     <label className={`block ${className ?? ""}`}>
       <span className="mb-1.5 block text-xs font-medium text-muted-foreground">
         {label}
+        {required ? (
+          <span className="ml-1 text-[#e11d48]" aria-label="required">
+            *
+          </span>
+        ) : null}
       </span>
       {children}
     </label>

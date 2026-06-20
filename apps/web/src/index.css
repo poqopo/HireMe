@@ -725,18 +725,17 @@ select {
 }
 
 .stepStickyShell {
-  position: sticky;
-  top: 5rem;
-  z-index: 50;
+  position: relative;
+  z-index: 10;
   isolation: isolate;
   overflow: hidden;
-  border-radius: 28px;
-  padding: 12px;
+  border-radius: 28px 28px 0 0;
+  padding: 8px;
   background:
     linear-gradient(180deg, rgba(246, 250, 255, 0.98) 0%, rgba(246, 250, 255, 0.96) 100%);
   border: 1px solid rgba(207, 224, 255, 0.8);
+  border-bottom: 0;
   box-shadow:
-    0 16px 34px rgba(15, 52, 96, 0.08),
     inset 0 1px 0 rgba(255, 255, 255, 0.98);
   backdrop-filter: blur(18px);
   -webkit-backdrop-filter: blur(18px);
@@ -749,8 +748,7 @@ select {
 
 @media (max-width: 767px) {
   .stepStickyShell {
-    top: 5rem;
-    padding: 10px;
+    padding: 8px;
   }
 }
 
