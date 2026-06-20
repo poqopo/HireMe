@@ -135,8 +135,8 @@ const defaultOpenAIImageTimeoutMs = Math.max(
     Number(
       process.env.HIREME_OPENAI_IMAGE_TIMEOUT_MS ||
         process.env.HIREME_IMAGE_TIMEOUT_MS ||
-        "180000",
-    ) || 180_000,
+        "420000",
+    ) || 420_000,
   ),
 );
 const defaultModelMaxOutputTokens = Math.max(
