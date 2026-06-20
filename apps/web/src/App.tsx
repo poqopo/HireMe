@@ -5297,7 +5297,11 @@ function slugifyAgentName(value: string) {
 
 function typicalOutputMediaType(file: File): "image" | "video" {
   const extension = file.name.split(".").pop()?.toLowerCase() || "";
-  if (file.type === "image/jpeg" || ["jpg", "jpeg"].includes(extension)) {
+  if (
+    file.type === "image/jpeg" ||
+    file.type === "image/png" ||
+    ["jpg", "jpeg", "png"].includes(extension)
+  ) {
     return "image";
   }
   if (
@@ -5306,11 +5310,15 @@ function typicalOutputMediaType(file: File): "image" | "video" {
   ) {
     return "video";
   }
-  throw new Error("Result media must be a JPG image or video file.");
+  throw new Error("Result media must be a JPG, PNG, or video file.");
 }
 
 function safeUploadFileName(file: File) {
-  const fallbackExtension = file.type.startsWith("video/") ? "mp4" : "jpg";
+  const fallbackExtension = file.type.startsWith("video/")
+    ? "mp4"
+    : file.type === "image/png"
+      ? "png"
+      : "jpg";
   const extension = file.name.includes(".")
     ? file.name.split(".").pop() || fallbackExtension
     : fallbackExtension;
@@ -6014,7 +6022,7 @@ function CreateAgentPage({ user }: { user: AuthUser | null }) {
                     </Field>
                     <Field className="md:col-span-2" label="Result image or video">
                       <input
-                        accept=".jpg,.jpeg,video/*"
+                        accept=".jpg,.jpeg,.png,image/jpeg,image/png,video/*"
                         className="block w-full rounded-md border border-dashed border-input bg-white px-3 py-3 text-sm text-muted-foreground file:mr-4 file:rounded-full file:border-0 file:bg-secondary file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-primary"
                         onChange={handleTypicalOutputMediaChange}
                         type="file"
