@@ -175,6 +175,8 @@ memWalStored: true
 blobId: ...
 ```
 
+Before sending the second prompt, wait about 30 seconds or read the conversation until the first turn is visible. MemWal write/index can be asynchronous, so sending the follow-up immediately after the first image result may produce `previousTurnsLoaded: 0`.
+
 ### 6. Resume Session And Recall Memory
 
 Show:
