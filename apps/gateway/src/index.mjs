@@ -5066,10 +5066,10 @@ async function tryRunProtectedHarnessImageGeneration({
 }) {
   if (protectedHarnessImageGenerationDisabled) return null;
   if (!isOpenAIConfigured()) return null;
-  if (!isHarnessImageGenerationTask(task)) return null;
 
   const baseImage = findHarnessBaseImage(rootDir, files);
   if (!baseImage) return null;
+  if (!isHarnessImageGenerationTask(task, { hasBaseImage: true })) return null;
 
   const prompt = buildHarnessImageGenerationPrompt({
     agent,
@@ -5157,16 +5157,18 @@ async function tryRunProtectedHarnessImageGeneration({
   }
 }
 
-function isHarnessImageGenerationTask(task) {
+function isHarnessImageGenerationTask(task, { hasBaseImage = false } = {}) {
   const text = String(task || "").toLowerCase();
   if (!text.trim()) return false;
+  if (hasLocalWorkspaceExecutionSignal(text)) return false;
+
   const imageSignal =
     /(image|png|character|avatar|sprite|illustration|mascot|drawing|artwork|variant|zombie)/i.test(text) ||
-    /이미지|그림|캐릭터|아바타|일러스트|마스코트|변형|버전|좀비|그려/.test(text);
+    /이미지|그림|캐릭터|아바타|일러스트|마스코트|변형|버전|좀비|그려|동물|독수리|새|마법사/.test(text);
   const generationSignal =
     /(create|make|generate|edit|transform|variant|version|zombie)/i.test(text) ||
     /만들|생성|변형|버전|바꿔|그려|좀비/.test(text);
-  return imageSignal && generationSignal;
+  return generationSignal && (imageSignal || hasBaseImage);
 }
 
 function findHarnessBaseImage(rootDir, files) {
@@ -5748,10 +5750,7 @@ function classifyAgentResponseMode({ task, requestedMode }) {
 }
 
 function isHirerFacingCreativeGenerationTask(text) {
-  const hasLocalWorkspaceSignal =
-    /\b(code|repo|repository|file|folder|branch|diff|pull request|pr|patch|commit|test|build|run|install|deploy|browser|screenshot|component|api|endpoint|script|sql|migration)\b/i.test(text) ||
-    /코드|파일|폴더|레포|리포|커밋|테스트|빌드|실행|설치|배포|브라우저|스크린샷|컴포넌트|엔드포인트|스크립트|마이그레이션|SQL/.test(text);
-  if (hasLocalWorkspaceSignal) return false;
+  if (hasLocalWorkspaceExecutionSignal(text)) return false;
 
   const creativeSignal =
     /\b(image|character|avatar|sprite|illustration|mascot|drawing|artwork|logo|copy|tagline|story|poem|email|post|ad|variant|version|zombie)\b/i.test(text) ||
@@ -5760,6 +5759,13 @@ function isHirerFacingCreativeGenerationTask(text) {
     /\b(create|make|generate|draft|write|compose|design|draw|edit|transform)\b/i.test(text) ||
     /만들|생성|써줘|작성|초안|디자인|그려|바꿔|변형/.test(text);
   return creativeSignal && generationSignal;
+}
+
+function hasLocalWorkspaceExecutionSignal(text) {
+  return (
+    /\b(code|repo|repository|file|folder|branch|diff|pull request|pr|patch|commit|test|build|run|install|deploy|browser|screenshot|component|api|endpoint|script|sql|migration)\b/i.test(text) ||
+    /코드|파일|폴더|레포|리포|커밋|테스트|빌드|실행|설치|배포|브라우저|스크린샷|컴포넌트|엔드포인트|스크립트|마이그레이션|SQL/.test(text)
+  );
 }
 
 function summarizeAgentsMd(text) {
