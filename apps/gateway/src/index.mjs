@@ -129,6 +129,16 @@ const defaultOpenAIImageSize =
   process.env.HIREME_OPENAI_IMAGE_SIZE ||
   process.env.OPENAI_IMAGE_SIZE ||
   "1024x1024";
+const defaultOpenAIImageTimeoutMs = Math.max(
+  5_000,
+  Math.trunc(
+    Number(
+      process.env.HIREME_OPENAI_IMAGE_TIMEOUT_MS ||
+        process.env.HIREME_IMAGE_TIMEOUT_MS ||
+        "180000",
+    ) || 180_000,
+  ),
+);
 const defaultModelMaxOutputTokens = Math.max(
   64,
   Math.trunc(
@@ -5110,13 +5120,40 @@ async function tryRunProtectedHarnessImageGeneration({
       },
     };
   } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
     writeGatewayLog("protected_harness_image_generation_failed", {
       callId,
       agentId: agent.id,
       code: err?.code || "harness_image_generation_failed",
-      message: err instanceof Error ? err.message : String(err),
+      message,
     });
-    return null;
+    const outputText =
+      "이미지 생성에 실패했습니다. Agent Harness는 로드됐지만 이미지 API 호출이 완료되지 않았습니다.";
+    return {
+      finalResult: true,
+      execution: {
+        status: "failed",
+        kind: "harness_image_generation",
+        model: defaultOpenAIImageModel,
+        code: err?.code || "harness_image_generation_failed",
+        latencyMs: Date.now() - startedAt,
+      },
+      result: {
+        type: "protected_harness_image_error",
+        provider: "openai_image_edit",
+        model: defaultOpenAIImageModel,
+        outputText,
+        outputTextDigest: `sha256:${sha256Hex(outputText)}`,
+        outputMode: "hirer_facing_answer",
+        responseMode: responseMode || "direct_answer",
+        protectedGuidanceApplied: true,
+        creatorSecretsReturned: false,
+        error: {
+          code: err?.code || "harness_image_generation_failed",
+          message,
+        },
+      },
+    };
   }
 }
 
@@ -5181,7 +5218,7 @@ async function callOpenAIImageEdit({ baseImagePath, prompt }) {
   form.append("quality", defaultOpenAIImageQuality);
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), defaultModelTimeoutMs);
+  const timeout = setTimeout(() => controller.abort(), defaultOpenAIImageTimeoutMs);
   try {
     const response = await fetch(`${defaultOpenAIBaseUrl}/images/edits`, {
       method: "POST",
