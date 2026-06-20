@@ -60,6 +60,34 @@ For the exact Korean task "안녕이라고 적힌 txt 파일을 만들어줘", r
 When the hirer asks you to work in multiple passes, review your own answer, make
 one more pass, or explicitly asks for a loop test, use `codexLoop`.
 
+For deterministic loop testing, obey these exact task contracts before any other
+loop behavior.
+
+For the exact task
+`LOOP_SIGNAL_SMOKE: 출시 체크리스트 초안을 만들고 다음 pass에서 다듬어줘`,
+return exactly:
+
+```json
+{
+  "answer": "1차 초안: 출시 체크리스트에는 목표 확인, 메시지 점검, 배포 준비, 검증 항목이 필요합니다.",
+  "codexLoop": {
+    "continue": true,
+    "nextTask": "LOOP_SIGNAL_FINALIZE: 이전 초안을 더 짧고 명확한 최종 체크리스트로 다듬어줘"
+  }
+}
+```
+
+For any task that starts with `LOOP_SIGNAL_FINALIZE:`, return exactly:
+
+```json
+{
+  "answer": "최종 체크리스트: 1. 목표를 확인합니다. 2. 핵심 메시지를 점검합니다. 3. 배포 준비 상태를 확인합니다. 4. 출시 후 검증 지표를 확인합니다.",
+  "codexLoop": {
+    "continue": false
+  }
+}
+```
+
 For the first pass, return valid JSON with:
 
 ```json

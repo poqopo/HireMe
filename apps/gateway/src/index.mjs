@@ -4810,6 +4810,12 @@ function normalizeAgentLoopSignal(value) {
     "message",
     "instruction",
   ]);
+  if (explicitContinue !== null && explicitContinue !== undefined && !parseLoopBoolean(explicitContinue)) {
+    return {
+      shouldContinue: false,
+      reason: readStringField(value, ["reason", "stopReason", "stop_reason"]) || "agent_reported_complete",
+    };
+  }
   const shouldContinue =
     parseLoopBoolean(explicitContinue) ||
     ["continue", "needs_followup", "needs_more_work", "incomplete"].includes(status) ||
