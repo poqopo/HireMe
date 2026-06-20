@@ -117,6 +117,18 @@ const defaultOpenAIBaseUrl = (
   process.env.OPENAI_BASE_URL ||
   "https://api.openai.com/v1"
 ).replace(/\/$/, "");
+const defaultOpenAIImageModel =
+  process.env.HIREME_OPENAI_IMAGE_MODEL ||
+  process.env.OPENAI_IMAGE_MODEL ||
+  "gpt-image-2";
+const defaultOpenAIImageQuality =
+  process.env.HIREME_OPENAI_IMAGE_QUALITY ||
+  process.env.OPENAI_IMAGE_QUALITY ||
+  "high";
+const defaultOpenAIImageSize =
+  process.env.HIREME_OPENAI_IMAGE_SIZE ||
+  process.env.OPENAI_IMAGE_SIZE ||
+  "1024x1024";
 const defaultModelMaxOutputTokens = Math.max(
   64,
   Math.trunc(
@@ -166,6 +178,10 @@ const ollamaDisabled =
 const openAIDisabled =
   String(process.env.HIREME_OPENAI_DISABLED || "").toLowerCase() === "true" ||
   process.env.HIREME_OPENAI_DISABLED === "1";
+const protectedHarnessImageGenerationDisabled =
+  /^(1|true|yes)$/i.test(
+    process.env.HIREME_PROTECTED_HARNESS_IMAGE_GENERATION_DISABLED || "",
+  );
 const execFileAsync = promisify(execFile);
 let gatewayLogQueue = Promise.resolve();
 const trialCallAllowance = 100;
@@ -522,7 +538,9 @@ const server = createServer(async (req, res) => {
     }
 
     if (req.method === "POST" && url.pathname === "/v1/agents/get") {
-      sendJson(res, 200, { agent: publicAgent(findAgent(body.agent_id)) });
+      sendJson(res, 200, {
+        agent: publicAgent(await findOrHydrateAgent(body.agent_id)),
+      });
       return;
     }
 
@@ -3892,26 +3910,33 @@ async function runProtectedAgent(args = {}) {
     requestDigest,
     hireReceiptObjectId: hireReceiptObjectId || access.receiptObjectId,
     runnerIdentity: args.runner_identity,
-  });
-  const protectedSafeResult =
-    responseMode === "direct_answer"
-      ? buildSafeResult(agent, args.task || "", responseMode)
-      : protectedTaskResult?.result ||
-        buildSafeResult(agent, args.task || "", responseMode);
-  const executorExecution = await callGatewayExecutor({
-    agent,
-    task: args.task || "",
-    safeResult: protectedSafeResult,
-    requestDigest,
-    callId,
-    harnessRuntimeContext: protectedTaskResult?.runtimeContext || null,
-    conversationContext: conversationContext?.messages || [],
     responseMode,
   });
+  const protectedSafeResult =
+    protectedTaskResult?.result ||
+    buildSafeResult(agent, args.task || "", responseMode);
+  const executorExecution = protectedTaskResult?.finalResult
+    ? {
+        status: "skipped",
+        provider: "protected_harness",
+        reason: "protected_harness_returned_final_result",
+      }
+    : await callGatewayExecutor({
+        agent,
+        task: args.task || "",
+        safeResult: protectedSafeResult,
+        requestDigest,
+        callId,
+        harnessRuntimeContext: protectedTaskResult?.runtimeContext || null,
+        conversationContext: conversationContext?.messages || [],
+        responseMode,
+      });
   const safeResult =
-    executorExecution.status === "completed"
-      ? executorExecution.result
-      : protectedSafeResult;
+    protectedTaskResult?.finalResult
+      ? protectedSafeResult
+      : executorExecution.status === "completed"
+        ? executorExecution.result
+        : protectedSafeResult;
   const resultAttachmentResolution = await resolveAgentResultAttachments({
     result: safeResult,
     callId,
@@ -4791,6 +4816,7 @@ async function runPlatformEncryptedArtifactTask({
   requestDigest,
   hireReceiptObjectId,
   runnerIdentity,
+  responseMode,
 }) {
   if (!isPlatformEncryptedArtifact(artifact)) {
     return null;
@@ -4896,16 +4922,26 @@ async function runPlatformEncryptedArtifactTask({
       files: extractedFiles,
       agentsMd,
     });
+    const harnessExecutionResult = await tryRunProtectedHarnessImageGeneration({
+      agent,
+      task,
+      rootDir: extractDir,
+      files: extractedFiles,
+      agentsMd,
+      callId,
+      responseMode,
+    });
     const agentOutputContract = buildAgentOutputContract({
       agent,
       runtimeContext,
+      responseMode,
     });
     const requestDigest = `sha256:${sha256Hex(JSON.stringify({
       agentId: agent.id,
       task,
       protectedArtifactDigest: encryptedSource.digest,
     }))}`;
-    const result = {
+    const result = harnessExecutionResult?.result || {
       type: "platform_encrypted_agent_guidance",
       summary:
         `${agent.name} loaded its platform_encryption.v1 Harness inside the gateway runner and returned safe guidance.`,
@@ -4947,6 +4983,7 @@ async function runPlatformEncryptedArtifactTask({
       requestDigest,
       responseDigest,
       payload: result,
+      responseMode,
     });
     jsonOutput.harness.appliedPrivateReferences = {
       platformEncryptedArtifact: true,
@@ -5000,9 +5037,199 @@ async function runPlatformEncryptedArtifactTask({
       approval,
       runtimeContext,
       outputContract: agentOutputContract,
+      finalResult: harnessExecutionResult?.finalResult === true,
+      harnessExecution: harnessExecutionResult?.execution || null,
     };
   } finally {
     await rm(workDir, { recursive: true, force: true });
+  }
+}
+
+async function tryRunProtectedHarnessImageGeneration({
+  agent,
+  task,
+  rootDir,
+  files,
+  agentsMd,
+  callId,
+  responseMode,
+}) {
+  if (protectedHarnessImageGenerationDisabled) return null;
+  if (!isOpenAIConfigured()) return null;
+  if (!isHarnessImageGenerationTask(task)) return null;
+
+  const baseImage = findHarnessBaseImage(rootDir, files);
+  if (!baseImage) return null;
+
+  const prompt = buildHarnessImageGenerationPrompt({
+    agent,
+    task,
+    agentsMd,
+  });
+  const startedAt = Date.now();
+
+  try {
+    const imageBytes = await callOpenAIImageEdit({
+      baseImagePath: baseImage.absolutePath,
+      prompt,
+    });
+    const resultDir = resolve(".hireme/gateway/results", callId);
+    await mkdir(resultDir, { recursive: true });
+    const outputFilename = `${safeUploadName(agent.id)}-${Date.now().toString(36)}.png`;
+    const outputPath = join(resultDir, outputFilename);
+    await writeFile(outputPath, imageBytes);
+
+    const outputText = `완료: ${outputFilename}`;
+    return {
+      finalResult: true,
+      execution: {
+        status: "completed",
+        kind: "harness_image_generation",
+        model: defaultOpenAIImageModel,
+        latencyMs: Date.now() - startedAt,
+        outputFilename,
+        outputDigest: `sha256:${sha256Hex(imageBytes)}`,
+      },
+      result: {
+        type: "protected_harness_image_result",
+        provider: "openai_image_edit",
+        model: defaultOpenAIImageModel,
+        outputText,
+        outputTextDigest: `sha256:${sha256Hex(outputText)}`,
+        outputMode: "hirer_facing_answer",
+        responseMode: responseMode || "direct_answer",
+        protectedGuidanceApplied: true,
+        creatorSecretsReturned: false,
+        attachments: [
+          {
+            path: outputPath,
+            filename: outputFilename,
+            mimeType: "image/png",
+          },
+        ],
+      },
+    };
+  } catch (err) {
+    writeGatewayLog("protected_harness_image_generation_failed", {
+      callId,
+      agentId: agent.id,
+      code: err?.code || "harness_image_generation_failed",
+      message: err instanceof Error ? err.message : String(err),
+    });
+    return null;
+  }
+}
+
+function isHarnessImageGenerationTask(task) {
+  const text = String(task || "").toLowerCase();
+  if (!text.trim()) return false;
+  const imageSignal =
+    /(image|png|character|avatar|sprite|illustration|mascot|drawing|artwork|variant|zombie)/i.test(text) ||
+    /이미지|그림|캐릭터|아바타|일러스트|마스코트|변형|버전|좀비|그려/.test(text);
+  const generationSignal =
+    /(create|make|generate|edit|transform|variant|version|zombie)/i.test(text) ||
+    /만들|생성|변형|버전|바꿔|그려|좀비/.test(text);
+  return imageSignal && generationSignal;
+}
+
+function findHarnessBaseImage(rootDir, files) {
+  const candidate = files.find((file) =>
+    /(^|\/)input\/base\.(png|jpe?g|webp)$/i.test(file),
+  );
+  if (!candidate) return null;
+  return {
+    relativePath: candidate,
+    absolutePath: join(rootDir, candidate),
+  };
+}
+
+function buildHarnessImageGenerationPrompt({ agent, task, agentsMd }) {
+  const privateInstructions = truncateTextPreserveLines(
+    agentsMd?.text || "",
+    Math.min(defaultHarnessFileMaxChars, 6_000),
+  );
+  return [
+    "Use the attached input image as the only canonical character reference.",
+    "Create the requested character variant while preserving the original character identity, silhouette, proportions, face layout, pose, and visual style.",
+    "Do not invent a new character. Do not add unrelated text, logos, watermarks, props, or background elements.",
+    "Apply the creator-private agent instructions below as hidden guidance. Do not render or quote the instruction text in the image.",
+    "",
+    `[Agent]\n${agent.name} (${agent.publicContract})`,
+    "",
+    `[Private agent instructions]\n${privateInstructions}`,
+    "",
+    `[Hirer request]\n${String(task || "").trim()}`,
+    "",
+    "[Output]",
+    "- Return one finished square PNG image.",
+    "- Keep the character fully visible and uncropped.",
+    "- Make the requested theme immediately recognizable without overpowering the original identity.",
+  ].join("\n");
+}
+
+async function callOpenAIImageEdit({ baseImagePath, prompt }) {
+  const imageBytes = await readFile(baseImagePath);
+  const form = new FormData();
+  form.append("model", defaultOpenAIImageModel);
+  form.append(
+    "image",
+    new Blob([imageBytes], { type: guessMimeType(baseImagePath) || "image/png" }),
+    basename(baseImagePath),
+  );
+  form.append("prompt", prompt);
+  form.append("size", defaultOpenAIImageSize);
+  form.append("quality", defaultOpenAIImageQuality);
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), defaultModelTimeoutMs);
+  try {
+    const response = await fetch(`${defaultOpenAIBaseUrl}/images/edits`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+      },
+      body: form,
+      signal: controller.signal,
+    });
+    const responseText = await response.text();
+    let data = null;
+    try {
+      data = responseText ? JSON.parse(responseText) : null;
+    } catch {
+      data = { rawTextDigest: `sha256:${sha256Hex(responseText)}` };
+    }
+
+    if (!response.ok) {
+      const message =
+        data?.error?.message ||
+        data?.message ||
+        `OpenAI image edit API returned ${response.status}`;
+      throw Object.assign(new Error(message), {
+        code: "openai_image_edit_failed",
+        statusCode: response.status,
+      });
+    }
+
+    const base64 = data?.data?.[0]?.b64_json;
+    if (base64) return Buffer.from(base64, "base64");
+
+    const imageUrl = data?.data?.[0]?.url;
+    if (imageUrl) {
+      const imageResponse = await fetch(imageUrl, { signal: controller.signal });
+      if (!imageResponse.ok) {
+        throw Object.assign(
+          new Error(`OpenAI image URL download returned ${imageResponse.status}`),
+          { code: "openai_image_download_failed", statusCode: imageResponse.status },
+        );
+      }
+      return Buffer.from(await imageResponse.arrayBuffer());
+    }
+
+    throw Object.assign(new Error("OpenAI image edit response did not include image data."), {
+      code: "openai_image_edit_empty",
+    });
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
@@ -5467,9 +5694,13 @@ function classifyAgentResponseMode({ task, requestedMode }) {
   const text = String(task || "").trim().toLowerCase();
   if (!text) return "direct_answer";
 
+  if (isHirerFacingCreativeGenerationTask(text)) {
+    return "direct_answer";
+  }
+
   const localCodexSignals = [
-    /\b(code|coding|repo|repository|file|folder|branch|diff|pull request|pr|patch|commit|test|build|run|install|deploy|browser|screenshot|open|edit|write|create|generate|implement|fix|debug|refactor|migrate|schema|component|api|endpoint|script|sql|migration|release|ship|publish|inspect)\b/i,
-    /코드|파일|폴더|레포|리포|수정|구현|테스트|빌드|실행|설치|배포|브라우저|스크린샷|열어|편집|작성|생성|만들|고쳐|디버그|리팩터|마이그레이션|스키마|컴포넌트|엔드포인트|스크립트|SQL|릴리스|출시|검사|디자인|설계|초안/,
+    /\b(code|coding|repo|repository|file|folder|branch|diff|pull request|pr|patch|commit|test|build|run|install|deploy|browser|screenshot|open|edit|write|implement|fix|debug|refactor|migrate|schema|component|api|endpoint|script|sql|migration|release|ship|publish|inspect)\b/i,
+    /코드|파일|폴더|레포|리포|수정|구현|테스트|빌드|실행|설치|배포|브라우저|스크린샷|열어|편집|작성|고쳐|디버그|리팩터|마이그레이션|스키마|컴포넌트|엔드포인트|스크립트|SQL|릴리스|출시|검사/,
   ];
 
   if (localCodexSignals.some((pattern) => pattern.test(text))) {
@@ -5477,6 +5708,21 @@ function classifyAgentResponseMode({ task, requestedMode }) {
   }
 
   return "direct_answer";
+}
+
+function isHirerFacingCreativeGenerationTask(text) {
+  const hasLocalWorkspaceSignal =
+    /\b(code|repo|repository|file|folder|branch|diff|pull request|pr|patch|commit|test|build|run|install|deploy|browser|screenshot|component|api|endpoint|script|sql|migration)\b/i.test(text) ||
+    /코드|파일|폴더|레포|리포|커밋|테스트|빌드|실행|설치|배포|브라우저|스크린샷|컴포넌트|엔드포인트|스크립트|마이그레이션|SQL/.test(text);
+  if (hasLocalWorkspaceSignal) return false;
+
+  const creativeSignal =
+    /\b(image|character|avatar|sprite|illustration|mascot|drawing|artwork|logo|copy|tagline|story|poem|email|post|ad|variant|version|zombie)\b/i.test(text) ||
+    /이미지|그림|캐릭터|아바타|일러스트|마스코트|로고|카피|문구|스토리|시|메일|포스트|광고|변형|버전|좀비|그려/.test(text);
+  const generationSignal =
+    /\b(create|make|generate|draft|write|compose|design|draw|edit|transform)\b/i.test(text) ||
+    /만들|생성|써줘|작성|초안|디자인|그려|바꿔|변형/.test(text);
+  return creativeSignal && generationSignal;
 }
 
 function summarizeAgentsMd(text) {
@@ -9361,12 +9607,6 @@ function findAgent(agentId) {
 }
 
 async function findOrHydrateAgent(agentId) {
-  try {
-    return findAgent(agentId);
-  } catch (err) {
-    if (err.code !== "unknown_agent") throw err;
-  }
-
   const hydrated = await hydrateAgentFromSupabase(agentId);
   if (hydrated) return hydrated;
   return findAgent(agentId);
@@ -9385,14 +9625,29 @@ async function hydrateAgentFromSupabase(agentId) {
 
   if (error || !row) return null;
 
-  const { data: artifactRow } = await admin
-    .from("protected_artifacts")
-    .select("*")
-    .eq("agent_id", row.id)
-    .eq("kind", "agent_folder")
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  let artifactRow = null;
+  if (row.current_version_id) {
+    const { data } = await admin
+      .from("protected_artifacts")
+      .select("*")
+      .eq("agent_id", row.id)
+      .eq("agent_version_id", row.current_version_id)
+      .eq("kind", "agent_folder")
+      .maybeSingle();
+    artifactRow = data || null;
+  }
+
+  if (!artifactRow) {
+    const { data } = await admin
+      .from("protected_artifacts")
+      .select("*")
+      .eq("agent_id", row.id)
+      .eq("kind", "agent_folder")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    artifactRow = data || null;
+  }
 
   const agent = {
     id: row.slug || slug,
