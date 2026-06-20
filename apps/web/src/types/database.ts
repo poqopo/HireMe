@@ -59,6 +59,8 @@ export type Database = {
           price_per_1m_tokens_sui: number | null;
           free_calls: number | null;
           max_budget_calls: number | null;
+          created_at: string | null;
+          updated_at: string | null;
         };
         Insert: never;
         Update: never;

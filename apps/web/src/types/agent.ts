@@ -65,6 +65,8 @@ export type Agent = {
   avgInputTokens: number;
   avgOutputTokens: number;
   activeUsers?: number;
+  createdAt?: string;
+  updatedAt?: string;
   resultPreview: {
     title: string;
     summary: string;

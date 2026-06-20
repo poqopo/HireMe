@@ -46,21 +46,29 @@ const statusLabels: Record<
 export async function loadMarketplaceAgents(): Promise<AgentLoadResult> {
   if (!isSupabaseConfigured || !supabase) {
     return {
-      agents: fallbackAgents,
+      agents: sortAgentsNewestFirst(fallbackAgents),
       source: "mock",
       message: "Supabase env is not configured; showing local demo data.",
     };
   }
 
-  const { data, error } = await supabase
+  const createdOrderResult = await supabase
     .from("agent_marketplace_cards")
     .select("*")
-    .order("rating", { ascending: false })
-    .order("historical_calls", { ascending: false });
+    .order("created_at", { ascending: false, nullsFirst: false });
+  const fallbackOrderResult = createdOrderResult.error
+    ? await supabase
+        .from("agent_marketplace_cards")
+        .select("*")
+        .order("rating", { ascending: false })
+        .order("historical_calls", { ascending: false })
+    : createdOrderResult;
+
+  const { data, error } = fallbackOrderResult;
 
   if (error) {
     return {
-      agents: fallbackAgents,
+      agents: sortAgentsNewestFirst(fallbackAgents),
       source: "mock",
       message: `Supabase read failed: ${error.message}`,
     };
@@ -68,14 +76,14 @@ export async function loadMarketplaceAgents(): Promise<AgentLoadResult> {
 
   if (!data.length) {
     return {
-      agents: fallbackAgents,
+      agents: sortAgentsNewestFirst(fallbackAgents),
       source: "mock",
       message: "Supabase marketplace is empty; showing local demo data.",
     };
   }
 
   return {
-    agents: data.map(mapMarketplaceCardToAgent),
+    agents: sortAgentsNewestFirst(data.map(mapMarketplaceCardToAgent)),
     source: "supabase",
   };
 }
@@ -154,6 +162,8 @@ function mapMarketplaceCardToAgent(row: MarketplaceCardRow): Agent {
     avgInputTokens,
     avgOutputTokens,
     activeUsers: row.active_user_count ?? undefined,
+    createdAt: row.created_at ?? undefined,
+    updatedAt: row.updated_at ?? row.created_at ?? undefined,
     resultPreview: {
       title: row.result_title || `${skills[0]} result`,
       summary:
@@ -171,6 +181,22 @@ function mapMarketplaceCardToAgent(row: MarketplaceCardRow): Agent {
     mcpPackage: `mcp://hireme/${slug}`,
     accent: row.accent || "from-[#533afd] to-[#6ee7f9]",
   };
+}
+
+export function sortAgentsNewestFirst(agents: Agent[]) {
+  return agents
+    .map((agent, index) => ({ agent, index }))
+    .sort((a, b) => {
+      const newestDelta = agentTimestampMs(b.agent) - agentTimestampMs(a.agent);
+      if (newestDelta !== 0) return newestDelta;
+      return a.index - b.index;
+    })
+    .map(({ agent }) => agent);
+}
+
+function agentTimestampMs(agent: Agent) {
+  const timestamp = Date.parse(agent.createdAt || agent.updatedAt || "");
+  return Number.isFinite(timestamp) ? timestamp : 0;
 }
 
 function normalizeLegacyTokenPrice(value: number | null) {
