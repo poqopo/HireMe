@@ -345,6 +345,7 @@ const protectedArtifacts = new Map();
 const sessions = new Map([[defaultInstallationId, "walrus-researcher"]]);
 const mcpConversationSessions = new Map();
 const ledger = [];
+const agentJobs = new Map();
 const agentEntitlements = new Map();
 const suiPaymentIntents = new Map();
 const suiSettlementEvents = [];
@@ -355,6 +356,10 @@ const oauthTokens = new Map();
 const oauthGoogleStates = new Map();
 const oauthLoginSessions = new Map();
 const oauthScopes = ["hireme:agents", "hireme:call", "hireme:manage"];
+const defaultAgentJobTtlMs = Math.max(
+  60_000,
+  Math.trunc(Number(process.env.HIREME_AGENT_JOB_TTL_MS || "7200000") || 7_200_000),
+);
 
 for (const agent of agents) {
   protectedArtifacts.set(agent.id, {
@@ -663,7 +668,12 @@ const server = createServer(async (req, res) => {
     }
 
     if (req.method === "POST" && url.pathname === "/v1/agent-call") {
-      sendJson(res, 200, await runProtectedAgent(body));
+      sendJson(res, 200, await runProtectedAgentOrStartJob(body));
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/v1/agent-result") {
+      sendJson(res, 200, getProtectedAgentJobResult(body));
       return;
     }
 
@@ -986,8 +996,34 @@ const httpMcpTools = [
         },
         budget_calls: { type: "integer", minimum: 1 },
         hire_receipt_object_id: { type: "string" },
+        async_job: {
+          type: "boolean",
+          description:
+            "When true, enqueue the Agent call and return a jobId immediately. Poll with hireme_get_agent_result.",
+        },
+        wait_for_result: {
+          type: "boolean",
+          description:
+            "When false, enqueue the Agent call and return a jobId immediately. When true, force a synchronous result.",
+        },
       },
       required: ["task"],
+    },
+  },
+  {
+    name: "hireme_get_agent_result",
+    title: "Poll a HireMe agent job",
+    description:
+      "Return the status of an async protected Agent job and include the final result once it completes.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        job_id: {
+          type: "string",
+          description: "Agent job id returned by hireme_call_agent.",
+        },
+      },
+      required: ["job_id"],
     },
   },
   {
@@ -1829,7 +1865,7 @@ async function callHttpMcpTool(name, args = {}, session) {
       }
 
       const routed = routeNaturalRequest(args.request, args.agent_id, sessionKey);
-      const result = await runProtectedAgent({
+      const result = await runProtectedAgentOrStartJob({
         ...scopedArgs,
         agent_id: routed.agentId,
         task: routed.task,
@@ -1894,10 +1930,12 @@ async function callHttpMcpTool(name, args = {}, session) {
     case "hireme_list_conversations":
       return mcpTextResult(await listMcpConversations(scopedArgs));
     case "hireme_call_agent":
-      return mcpTextResult(await runProtectedAgent({
+      return mcpTextResult(await runProtectedAgentOrStartJob({
         ...scopedArgs,
         agent_id: args.agent_id || sessions.get(sessionKey) || "walrus-researcher",
       }));
+    case "hireme_get_agent_result":
+      return mcpTextResult(getProtectedAgentJobResult(scopedArgs));
     case "hireme_call_agent_loop":
       return mcpTextResult(await runProtectedAgentLoop({
         ...scopedArgs,
@@ -3311,6 +3349,15 @@ function publicAgent(agent) {
     rating: agent.rating,
     historicalCalls: agent.calls,
     medianLatencyMs: agent.latencyMs,
+    resultPreview:
+      agent.resultMediaUrl || agent.resultMediaType || agent.resultTitle || agent.resultSummary
+        ? {
+            title: agent.resultTitle || null,
+            summary: agent.resultSummary || null,
+            mediaUrl: agent.resultMediaUrl || null,
+            mediaType: agent.resultMediaType || null,
+          }
+        : null,
     hired: true,
   };
 }
@@ -3849,6 +3896,249 @@ function gatewayWhoami(args = {}) {
       supabaseConfigured: Boolean(createSupabaseAdminClient()),
     },
   };
+}
+
+async function runProtectedAgentOrStartJob(args = {}) {
+  const installationId = args.codex_installation_id || defaultInstallationId;
+  const agentId = args.agent_id || sessions.get(installationId) || "walrus-researcher";
+  const agent = await findOrHydrateAgent(agentId);
+  const normalizedArgs = {
+    ...args,
+    agent_id: agent.id,
+  };
+
+  if (shouldStartProtectedAgentJob(normalizedArgs, agent)) {
+    return startProtectedAgentJob(normalizedArgs, agent);
+  }
+
+  return runProtectedAgent(normalizedArgs);
+}
+
+function shouldStartProtectedAgentJob(args = {}, agent = {}) {
+  const waitForResult = readOptionalBoolean(
+    args.wait_for_result ?? args.waitForResult,
+  );
+  if (waitForResult === true) return false;
+  if (waitForResult === false) return true;
+
+  const explicitAsync = readOptionalBoolean(
+    args.async_job ??
+      args.asyncJob ??
+      args.background_job ??
+      args.backgroundJob ??
+      args.run_async ??
+      args.runAsync ??
+      args.async,
+  );
+  if (explicitAsync !== null) return explicitAsync;
+
+  const resultMediaType = String(
+    agent.resultMediaType ||
+      agent.result_media_type ||
+      agent.resultPreview?.mediaType ||
+      "",
+  ).toLowerCase();
+  return resultMediaType === "image" || resultMediaType === "video";
+}
+
+function startProtectedAgentJob(args = {}, agent = {}) {
+  pruneProtectedAgentJobs();
+  const now = new Date().toISOString();
+  const jobId =
+    args.job_id ||
+    args.jobId ||
+    `agent_job_${Date.now().toString(36)}_${randomBytes(5).toString("hex")}`;
+  const record = {
+    jobId,
+    status: "queued",
+    createdAt: now,
+    updatedAt: now,
+    startedAt: null,
+    completedAt: null,
+    failedAt: null,
+    agentId: agent.id || args.agent_id || args.agentId || null,
+    activeAgentId: agent.id || args.agent_id || args.agentId || null,
+    codexInstallationId: args.codex_installation_id || defaultInstallationId,
+    conversationId: args.conversation_id || args.conversationId || null,
+    request: {
+      taskDigest: `sha256:${sha256Hex(String(args.task || ""))}`,
+      budgetCalls: args.budget_calls || args.budgetCalls || 1,
+      responseMode: args.response_mode || args.responseMode || null,
+    },
+    result: null,
+    error: null,
+  };
+  agentJobs.set(jobId, record);
+
+  Promise.resolve()
+    .then(async () => {
+      record.status = "running";
+      record.startedAt = new Date().toISOString();
+      record.updatedAt = record.startedAt;
+      writeGatewayLog("agent_job_started", {
+        jobId,
+        agentId: record.agentId,
+        conversationId: record.conversationId,
+      });
+      const result = await runProtectedAgent({
+        ...args,
+        agent_id: record.agentId,
+        async_job: false,
+        asyncJob: false,
+        wait_for_result: true,
+        waitForResult: true,
+      });
+      record.result = result;
+      record.status = "completed";
+      record.completedAt = new Date().toISOString();
+      record.updatedAt = record.completedAt;
+      record.activeAgentId = result.activeAgentId || record.activeAgentId;
+      writeGatewayLog("agent_job_completed", {
+        jobId,
+        agentId: record.activeAgentId,
+        callId: result.callId,
+        conversationId: record.conversationId,
+      });
+    })
+    .catch((err) => {
+      record.status = "failed";
+      record.failedAt = new Date().toISOString();
+      record.updatedAt = record.failedAt;
+      record.error = publicError(err);
+      writeGatewayLog("agent_job_failed", {
+        jobId,
+        agentId: record.agentId,
+        conversationId: record.conversationId,
+        ...record.error,
+      });
+    });
+
+  return {
+    gatewayCall: true,
+    type: "hireme_agent_job",
+    status: record.status,
+    jobId,
+    job_id: jobId,
+    activeAgentId: record.activeAgentId,
+    codexInstallationId: record.codexInstallationId,
+    conversationId: record.conversationId,
+    asyncJob: true,
+    pollTool: "hireme_get_agent_result",
+    pollArgs: {
+      job_id: jobId,
+    },
+    message:
+      "Agent call accepted as an async job. Poll hireme_get_agent_result with this job_id until status is completed.",
+    job: publicProtectedAgentJob(record),
+  };
+}
+
+function getProtectedAgentJobResult(args = {}) {
+  pruneProtectedAgentJobs();
+  const jobId = args.job_id || args.jobId || args.id;
+  if (!jobId) {
+    throw Object.assign(new Error("job_id is required"), {
+      statusCode: 400,
+      code: "bad_job_id",
+    });
+  }
+  const record = agentJobs.get(jobId);
+  if (!record) {
+    throw Object.assign(new Error(`Unknown agent job: ${jobId}`), {
+      statusCode: 404,
+      code: "unknown_agent_job",
+    });
+  }
+
+  const job = publicProtectedAgentJob(record);
+  if (record.status === "completed" && record.result) {
+    return {
+      ...record.result,
+      gatewayCall: true,
+      type: "hireme_agent_job_result",
+      job,
+      jobId,
+      job_id: jobId,
+      jobStatus: record.status,
+      asyncJob: true,
+    };
+  }
+  if (record.status === "failed") {
+    return {
+      gatewayCall: true,
+      type: "hireme_agent_job_result",
+      status: record.status,
+      jobStatus: record.status,
+      jobId,
+      job_id: jobId,
+      asyncJob: true,
+      job,
+      error: record.error,
+    };
+  }
+  return {
+    gatewayCall: true,
+    type: "hireme_agent_job_result",
+    status: record.status,
+    jobStatus: record.status,
+    jobId,
+    job_id: jobId,
+    asyncJob: true,
+    job,
+    message: "Agent job is still running. Poll hireme_get_agent_result again.",
+  };
+}
+
+function publicProtectedAgentJob(record) {
+  return {
+    jobId: record.jobId,
+    job_id: record.jobId,
+    status: record.status,
+    activeAgentId: record.activeAgentId,
+    agentId: record.agentId,
+    codexInstallationId: record.codexInstallationId,
+    conversationId: record.conversationId,
+    createdAt: record.createdAt,
+    startedAt: record.startedAt,
+    completedAt: record.completedAt,
+    failedAt: record.failedAt,
+    updatedAt: record.updatedAt,
+    request: record.request,
+    error: record.error,
+    pollTool: "hireme_get_agent_result",
+    pollArgs: {
+      job_id: record.jobId,
+    },
+  };
+}
+
+function pruneProtectedAgentJobs() {
+  const cutoff = Date.now() - defaultAgentJobTtlMs;
+  for (const [jobId, record] of agentJobs) {
+    if (record.status === "queued" || record.status === "running") continue;
+    const updatedAt = Date.parse(record.updatedAt || record.createdAt || "");
+    if (Number.isFinite(updatedAt) && updatedAt < cutoff) {
+      agentJobs.delete(jobId);
+    }
+  }
+}
+
+function publicError(err) {
+  return {
+    code: err?.code || "agent_job_failed",
+    message: err?.message || String(err),
+    statusCode: err?.statusCode || 500,
+  };
+}
+
+function readOptionalBoolean(value) {
+  if (value === undefined || value === null || value === "") return null;
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value !== 0;
+  const text = String(value).trim().toLowerCase();
+  if (["1", "true", "yes", "y", "on"].includes(text)) return true;
+  if (["0", "false", "no", "n", "off"].includes(text)) return false;
+  return null;
 }
 
 async function runProtectedAgent(args = {}) {
@@ -9748,6 +10038,11 @@ async function hydrateAgentFromSupabase(agentId) {
     rating: readOptionalNumber(row.rating, 0),
     calls: Math.trunc(readOptionalNumber(row.historical_calls, 0)),
     latencyMs: Math.trunc(readOptionalNumber(row.median_latency_ms, 0)),
+    resultTitle: row.result_title || null,
+    resultSummary: row.result_summary || null,
+    resultSample: row.result_sample || null,
+    resultMediaUrl: row.result_media_url || null,
+    resultMediaType: row.result_media_type || null,
   };
 
   upsertLocalAgent(agent);

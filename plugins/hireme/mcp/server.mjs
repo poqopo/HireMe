@@ -453,8 +453,28 @@ const inputSchemas = {
         description:
           "Optional hirer identity. Defaults to HIREME_HIRER_ID or local-hirer.",
       },
+      async_job: {
+        type: "boolean",
+        description:
+          "When true, enqueue the Agent call and return a jobId immediately. Poll with hireme_get_agent_result.",
+      },
+      wait_for_result: {
+        type: "boolean",
+        description:
+          "When false, enqueue the Agent call and return a jobId immediately. When true, force a synchronous result.",
+      },
     },
     required: ["task"],
+  },
+  hireme_get_agent_result: {
+    type: "object",
+    properties: {
+      job_id: {
+        type: "string",
+        description: "Agent job id returned by hireme_call_agent.",
+      },
+    },
+    required: ["job_id"],
   },
   hireme_call_agent_loop: {
     type: "object",
@@ -1186,8 +1206,15 @@ const tools = [
     name: "hireme_call_agent",
     title: "Call a hired HireMe agent",
     description:
-      "Call an explicitly selected or session-active protected agent. Returns mock output and a ledger event in this demo.",
+      "Call an explicitly selected or session-active protected Agent through the HireMe gateway.",
     inputSchema: inputSchemas.hireme_call_agent,
+  },
+  {
+    name: "hireme_get_agent_result",
+    title: "Poll a HireMe agent job",
+    description:
+      "Return the status of an async protected Agent job and include the final result once it completes.",
+    inputSchema: inputSchemas.hireme_get_agent_result,
   },
   {
     name: "hireme_call_agent_loop",
@@ -2386,10 +2413,20 @@ async function callTool(name, args = {}) {
       });
     }
     case "hireme_call_agent": {
+      const wantsAsyncJob =
+        args.async_job === true ||
+        args.asyncJob === true ||
+        args.wait_for_result === false ||
+        args.waitForResult === false;
       const gateway = await callGateway("/v1/agent-call", {
         agent_id: args.agent_id || activeAgentId,
         hirer_id: args.hirer_id || defaultHirerId,
         ...args,
+      }, {
+        timeoutMs: Number(
+          process.env.HIREME_MCP_AGENT_CALL_TIMEOUT_MS ||
+            (wantsAsyncJob ? 10_000 : 120_000),
+        ),
       });
       if (gateway) {
         activeAgentId = gateway.activeAgentId || args.agent_id || activeAgentId;
@@ -2500,6 +2537,22 @@ async function callTool(name, args = {}) {
             outputTokens: estimateTokenCount(JSON.stringify(fallbackPayload)),
           }),
         },
+      });
+    }
+    case "hireme_get_agent_result": {
+      const gateway = await callGateway("/v1/agent-result", args, {
+        timeoutMs: Number(process.env.HIREME_MCP_AGENT_RESULT_TIMEOUT_MS || 10_000),
+      });
+      if (gateway) {
+        activeAgentId = gateway.activeAgentId || activeAgentId;
+        return textResult(gateway);
+      }
+      return textResult({
+        status: "gateway_required",
+        reason:
+          "Async protected Agent jobs are executed and stored by the HireMe gateway.",
+        runGateway: "npm run gateway:dev",
+        retryTool: "hireme_get_agent_result",
       });
     }
     case "hireme_call_agent_loop": {
