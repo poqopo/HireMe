@@ -5,7 +5,7 @@ import { createHash } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
@@ -1428,7 +1428,15 @@ function collectResultAttachments(value) {
       if (!attachment || typeof attachment !== "object") continue;
       const blob =
         readStringField(attachment, ["data", "base64", "contentBase64", "blob"]);
-      if (!blob) continue;
+      if (
+        !blob &&
+        !attachment.digest &&
+        !attachment.uri &&
+        !attachment.filename &&
+        !attachment.name
+      ) {
+        continue;
+      }
       const key =
         attachment.digest ||
         attachment.uri ||
@@ -1446,7 +1454,10 @@ function collectResultAttachments(value) {
 function attachmentToMcpContentItems(attachment) {
   const imageContent = attachmentToMcpImageContent(attachment);
   const resourceContent = attachmentToMcpResourceContent(attachment);
-  return imageContent ? [imageContent, resourceContent] : [resourceContent];
+  if (imageContent && resourceContent) return [imageContent, resourceContent];
+  if (imageContent) return [imageContent];
+  if (resourceContent) return [resourceContent];
+  return [];
 }
 
 function attachmentToMcpImageContent(attachment) {
@@ -1465,13 +1476,17 @@ function attachmentToMcpResourceContent(attachment) {
   const filename = safeAttachmentFilename(
     attachment.filename || attachment.name || "agent-result",
   );
+  const data = readStringField(attachment, ["data", "base64", "contentBase64", "blob"]);
+  const uri = attachment.uri || `hireme-result://attached/${encodeURIComponent(filename)}`;
+  if (!data && !uri) return null;
+  const resource = {
+    uri,
+    mimeType: attachment.mimeType || "application/octet-stream",
+  };
+  if (data) resource.blob = data;
   return {
     type: "resource",
-    resource: {
-      uri: attachment.uri || `hireme-result://attached/${encodeURIComponent(filename)}`,
-      mimeType: attachment.mimeType || "application/octet-stream",
-      blob: readStringField(attachment, ["data", "base64", "contentBase64", "blob"]),
-    },
+    resource,
   };
 }
 
@@ -1506,7 +1521,7 @@ function materializeResultAttachment(attachment, resultValue, index) {
       readStringField(resultValue?.jsonOutput?.payload, ["callId", "call_id", "id"]) ||
       "latest";
     const resultDir = join(
-      resolve(process.env.HIREME_MCP_RESULT_DIR || ".hireme/mcp-results"),
+      resolve(process.env.HIREME_MCP_RESULT_DIR || "hireme-results"),
       safeAttachmentFilename(`${resultId}-${digest.slice(0, 12)}`),
     );
     mkdirSync(resultDir, { recursive: true });
@@ -1515,6 +1530,7 @@ function materializeResultAttachment(attachment, resultValue, index) {
     return {
       filename,
       path: filePath,
+      relativePath: relative(process.cwd(), filePath) || filename,
       mimeType: attachment.mimeType || "application/octet-stream",
       sizeBytes: bytes.byteLength,
     };
@@ -1528,7 +1544,7 @@ function materializeResultAttachment(attachment, resultValue, index) {
 
 function formatMaterializedAttachments(attachments) {
   if (!attachments.length) return "";
-  const lines = ["", "", "Output files saved locally:"];
+  const lines = ["", "", "Output files saved to the working directory:"];
   for (const attachment of attachments) {
     if (attachment.path) {
       const sizeText =
@@ -1536,7 +1552,7 @@ function formatMaterializedAttachments(attachments) {
           ? `, ${attachment.sizeBytes} bytes`
           : "";
       lines.push(
-        `- [${attachment.filename}](${markdownFileTarget(attachment.path)}) (${attachment.mimeType}${sizeText})`,
+        `- [${attachment.relativePath || attachment.filename}](${markdownFileTarget(attachment.path)}) (${attachment.mimeType}${sizeText})`,
       );
       continue;
     }

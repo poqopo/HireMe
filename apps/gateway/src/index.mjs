@@ -4569,6 +4569,7 @@ async function runProtectedAgent(args = {}) {
       exposedPluginCode: false,
       exposedHarnessInternals: false,
     },
+    resultAttachments: resultAttachmentResolution.attachments,
     result: safeResult,
     jsonOutput,
     platformValidation: protectedTaskResult?.validation || null,
@@ -6752,6 +6753,7 @@ function parseAgentResultFileRoots(value) {
   return Array.from(new Set(roots.length ? roots : [
     resolve(".hireme/gateway/results"),
     resolve("output"),
+    resolve("outputs"),
   ]));
 }
 
