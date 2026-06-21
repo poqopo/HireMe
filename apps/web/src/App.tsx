@@ -306,6 +306,7 @@ type CreatedAgentRecord = {
   id: string;
   creatorId: string;
   creatorEmail: string;
+  creatorInfoUrl?: string;
   agentName: string;
   agentSlug: string;
   headline?: string;
@@ -383,10 +384,12 @@ type GatewayPublicAgent = {
   name?: string;
   handle?: string;
   creator?: string;
+  creatorInfoUrl?: string;
   category?: Agent["category"];
   status?: Agent["status"];
   headline?: string;
   publicSummary?: string;
+  howToUse?: string;
   publicSkills?: string[];
   publicContract?: string;
   memwalPolicy?: string;
@@ -974,6 +977,7 @@ async function createAgentWithGatewayUpload({
     agentName: string;
     headline: string;
     description: string;
+    creatorInfoUrl: string;
     howToUse: string;
     sampleInput: string;
   };
@@ -990,15 +994,18 @@ async function createAgentWithGatewayUpload({
 }): Promise<GatewayAgentRegistrationResult> {
   const creator =
     user?.displayName || user?.email || user?.wallet || "Web creator";
+  const creatorInfoUrl = normalizeCreatorInfoUrl(draft.creatorInfoUrl);
   const metadata = {
     agent_id: agentSlug,
     name: draft.agentName,
     handle: `@agents/${agentSlug}`,
     creator,
+    creator_info_url: creatorInfoUrl || null,
     category: draft.category || "Code",
     status: "Available",
     headline: draft.headline,
     public_summary: draft.description || draft.headline,
+    how_to_use: draft.howToUse,
     public_mcp_contract: publicCapability,
     memwal_policy:
       "Hirer-visible results are stored in hirer-scoped memWal records. Creator private files stay behind the gateway.",
@@ -1021,6 +1028,7 @@ async function createAgentWithGatewayUpload({
     result_media_type: typicalOutputUpload?.type,
     metadata: {
       source: "web_create_agent",
+      creatorInfoUrl: creatorInfoUrl || null,
       howToUse: draft.howToUse,
       sampleInput: draft.sampleInput,
       typicalOutputMediaPath: typicalOutputUpload?.path,
@@ -1062,10 +1070,12 @@ async function updateAgentWithGatewayUpload({
     name: agent.name,
     handle: agent.handle,
     creator,
+    creator_info_url: agent.creatorInfoUrl || null,
     category: agent.category,
     status: agent.status,
     headline: agent.headline,
     public_summary: agent.publicSummary || agent.headline,
+    how_to_use: agent.howToUse || null,
     public_mcp_contract:
       agent.publicContract || `${agent.id}(task, context, budget_calls)`,
     memwal_policy: agent.memwalPolicy,
@@ -1086,6 +1096,8 @@ async function updateAgentWithGatewayUpload({
     result_media_type: agent.resultPreview.mediaType,
     metadata: {
       source: "web_update_agent",
+      creatorInfoUrl: agent.creatorInfoUrl || null,
+      howToUse: agent.howToUse || null,
       updatedBy:
         user?.email || user?.wallet || user?.displayName || "anonymous-web-user",
     },
@@ -1423,6 +1435,7 @@ function mapGatewayPublicAgentToAgent(agent: GatewayPublicAgent | undefined): Ag
     name: agent?.name || id,
     handle: agent?.handle || `@agents/${id}`,
     creator: agent?.creator || "Unknown creator",
+    creatorInfoUrl: agent?.creatorInfoUrl,
     team: {
       id,
       name: `${agent?.name || id} Team`,
@@ -1447,6 +1460,7 @@ function mapGatewayPublicAgentToAgent(agent: GatewayPublicAgent | undefined): Ag
     status: agent?.status || "Available",
     headline,
     publicSummary: agent?.publicSummary || headline,
+    howToUse: agent?.howToUse,
     publicContract: agent?.publicContract || "hireme_agent(task)",
     memwalPolicy: agent?.memwalPolicy || "Gateway-managed protected Agent.",
     skills,
@@ -3663,28 +3677,11 @@ function AgentDetailPage({
   const estimatedRunPrice = estimatedRunCost
     ? `${estimatedRunCost.toFixed(estimatedRunCost >= 0.1 ? 2 : 3)} SUI`
     : "Calculated at run time";
-  const useCases = agent.skills.slice(0, 3).map((skill) =>
-    `${skill} work that needs a repeatable process, clear output, and built-in review.`,
-  );
-  const privateItems = Array.from(
-    new Set([
-      "AGENTS.md",
-      "Private prompts",
-      "Private skills",
-      "Examples",
-      "Rubrics",
-      "Workflow rules",
-      "Hidden checks",
-      ...agent.protectedAssets,
-    ]),
-  );
-  const clientDeliverables = [
-    "Ready-to-run Agent access",
-    "Result output",
-    "MCP and tool access",
-    "Protected execution",
-    "Usage record and execution receipt",
-  ];
+  const creatorInfoUrl = normalizeCreatorInfoUrl(agent.creatorInfoUrl);
+  const howToUseCopy =
+    agent.howToUse ||
+    agent.resultPreview.summary ||
+    "Send a clear task, include the desired output format, and add any constraints the Agent should follow.";
 
   return (
     <main className="min-h-screen bg-[#f6f9fc]">
@@ -3713,6 +3710,16 @@ function AgentDetailPage({
               </div>
               <p className="pretty-text mt-7 max-w-3xl text-xl font-light leading-8 text-[#1c1e54] md:text-2xl">{agent.headline}</p>
               <p className="pretty-text mt-3 max-w-3xl text-sm leading-6 text-[#4e5d77] md:text-base">{agent.publicSummary}</p>
+              {creatorInfoUrl ? (
+                <a
+                  className="mt-3 inline-flex text-sm font-semibold text-[#533afd] underline-offset-4 transition hover:underline"
+                  href={creatorInfoUrl}
+                  rel="noreferrer"
+                  target="_blank"
+                >
+                  Creator information
+                </a>
+              ) : null}
               <div className="mt-5 flex flex-wrap gap-x-6 gap-y-2 text-sm text-[#494556]">
                 <span><strong className="number-cell text-[#171452]">{agent.rating ? agent.rating.toFixed(1) : "New"}</strong> rating</span>
                 <span><strong className="number-cell text-[#171452]">{formatRuns(agent.calls)}</strong> completed runs</span>
@@ -3742,44 +3749,55 @@ function AgentDetailPage({
         <div className="mx-auto grid max-w-7xl gap-6 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start">
           <div className="space-y-6">
             <Card>
-              <CardHeader><CardTitle>What this Agent does</CardTitle><CardDescription>A prepared specialist for repeatable work—not a blank chatbot that needs every rule explained again.</CardDescription></CardHeader>
-              <CardContent>
-                <p className="text-sm leading-6 text-[#273951]">{agent.publicSummary} Its private Harness applies the creator’s standards, workflow rules, examples, and review checks on every run.</p>
-                <div className="mt-5 grid gap-3 sm:grid-cols-3">
-                  {useCases.map((useCase, index) => <div className="rounded-xl border border-[#dedbea] bg-[#fbfaff] p-4" key={useCase}><div className="text-xs font-semibold uppercase text-[#6b6580]">Use case {index + 1}</div><p className="mt-2 text-sm leading-6 text-[#273951]">{useCase}</p></div>)}
+              <CardHeader>
+                <CardTitle>How to use</CardTitle>
+              </CardHeader>
+              <CardContent className="grid gap-4">
+                <div className="rounded-xl border border-[#dedbea] bg-[#f8f7fb] p-4">
+                  <div className="text-xs font-semibold uppercase text-[#6b6580]">
+                    Usage guide
+                  </div>
+                  <p className="mt-3 text-sm leading-6 text-[#273951]">
+                    {howToUseCopy}
+                  </p>
+                </div>
+                <div className="grid gap-4">
+                  <div className="rounded-xl border border-[#dedbea] bg-white p-4">
+                    <div className="text-xs font-semibold uppercase text-[#6b6580]">
+                      Sample Input
+                    </div>
+                    <p className="mt-3 text-sm leading-6 text-[#273951]">
+                      {agent.resultPreview.sample}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-[#d8d4e2] bg-[#f3f1f8] p-4">
+                    <div className="text-xs font-semibold uppercase text-[#6b6580]">
+                      Result Image
+                    </div>
+                    {agent.resultPreview.mediaUrl ? (
+                      <div className="mt-3 overflow-hidden rounded-lg border border-[#d8d4e2] bg-white">
+                        {agent.resultPreview.mediaType === "video" ? (
+                          <video
+                            className="aspect-video w-full bg-[#171452] object-contain"
+                            controls
+                            src={agent.resultPreview.mediaUrl}
+                          />
+                        ) : (
+                          <img
+                            alt={`${agent.name} result preview`}
+                            className="aspect-video w-full object-cover"
+                            src={agent.resultPreview.mediaUrl}
+                          />
+                        )}
+                      </div>
+                    ) : (
+                      <p className="mt-3 text-sm leading-6 text-[#273951]">
+                        {agent.resultPreview.summary}
+                      </p>
+                    )}
+                  </div>
                 </div>
               </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader><CardTitle>Sample Input / Result Image or Video</CardTitle><CardDescription>Check the expected Client request and result media before you try the Agent.</CardDescription></CardHeader>
-              <CardContent>
-                <div className="grid gap-4 md:grid-cols-2">
-                  <div className="rounded-xl border border-[#dedbea] bg-[#f8f7fb] p-4"><div className="text-xs font-semibold uppercase text-[#6b6580]">Sample Input</div><p className="mt-3 text-sm leading-6 text-[#273951]">{agent.resultPreview.sample}</p></div>
-                  <div className="rounded-xl border border-[#d8d4e2] bg-[#f3f1f8] p-4"><div className="text-xs font-semibold uppercase text-[#6b6580]">Result Image / Video</div>{agent.resultPreview.mediaUrl ? <div className="mt-3 overflow-hidden rounded-lg border border-[#d8d4e2] bg-white">{agent.resultPreview.mediaType === "video" ? <video className="aspect-video w-full bg-[#171452] object-contain" controls src={agent.resultPreview.mediaUrl} /> : <img alt={`${agent.name} result preview`} className="aspect-video w-full object-cover" src={agent.resultPreview.mediaUrl} />}</div> : <p className="mt-3 text-sm leading-6 text-[#273951]">{agent.resultPreview.summary}</p>}</div>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader><CardTitle>Public skills</CardTitle><CardDescription>Capabilities you can evaluate before hiring.</CardDescription></CardHeader>
-              <CardContent><div className="flex flex-wrap gap-2">{agent.skills.map((skill) => <span className="rounded-full border border-[#d8d4e2] bg-[#f8f7fb] px-3 py-1.5 text-xs font-medium text-[#494556]" key={skill}>{skill}</span>)}</div></CardContent>
-            </Card>
-
-            <div className="grid gap-6 md:grid-cols-2">
-              <Card>
-                <CardHeader><CardTitle>What stays private</CardTitle><CardDescription>The Client receives capability and results, never the creator’s private playbook.</CardDescription></CardHeader>
-                <CardContent><ul className="grid gap-2 text-sm text-[#273951]">{privateItems.map((item) => <li className="rounded-lg border border-[#dedbea] bg-[#f8f7fb] px-3 py-2" key={item}>{item}</li>)}</ul></CardContent>
-              </Card>
-              <Card>
-                <CardHeader><CardTitle>What you get</CardTitle><CardDescription>Everything needed to use the Agent without copying its Harness.</CardDescription></CardHeader>
-                <CardContent><ul className="grid gap-2 text-sm text-[#273951]">{clientDeliverables.map((item) => <li className="rounded-lg border border-[#d8d4e2] bg-[#f3f1f8] px-3 py-2" key={item}>{item}</li>)}</ul></CardContent>
-              </Card>
-            </div>
-
-            <Card className="border-[#d8d4e2] bg-gradient-to-br from-[#f8f5ff] to-white">
-              <CardHeader><CardTitle>Ready to work with {agent.name}?</CardTitle><CardDescription>Try the Agent first, then hire it when the result fits your workflow.</CardDescription></CardHeader>
-              <CardContent><div className="grid gap-3 sm:grid-cols-2"><Button className="w-full" disabled={Boolean(accessActionType) || (hasGatewayAccess && (isTrying || isHired))} onClick={() => void updateAgentAccess("trial")} type="button" variant="secondary"><Terminal /> Try Agent</Button><Button className="w-full" disabled={Boolean(accessActionType) || (hasGatewayAccess && isHired)} onClick={() => void updateAgentAccess("hired")} type="button"><PackageOpen /> Hire Agent</Button></div></CardContent>
             </Card>
           </div>
 
@@ -3847,13 +3865,69 @@ function AgentDetailPage({
                 </CardContent>
               </Card>
             ) : null}
-            <Card>
-              <CardHeader><CardTitle>Performance & usage</CardTitle><CardDescription>Marketplace averages from completed runs.</CardDescription></CardHeader>
-              <CardContent><dl className="grid gap-3 text-sm">{[["Average time", formatDuration(agent.latencyMs)], ["Average usage", formatTokens(averageTokens)], ["Last updated", "Current release"], ["Version", "v1.0"], ["Completed runs", formatRuns(agent.calls)], ["Rating", agent.rating ? `${agent.rating.toFixed(1)} / 5` : "New"]].map(([label, value]) => <div className="flex items-center justify-between gap-4 border-b border-border pb-3 last:border-0 last:pb-0" key={label}><dt className="text-muted-foreground">{label}</dt><dd className="number-cell font-medium text-[#171452]">{value}</dd></div>)}</dl></CardContent>
-            </Card>
             <Card className="border-[#d8d4e2] bg-[#fbfaff]">
-              <CardHeader><CardTitle>Pricing</CardTitle><CardDescription>Estimated from this Agent’s average usage.</CardDescription></CardHeader>
-              <CardContent><div className="number-cell text-2xl font-semibold text-[#171452]">From {estimatedRunPrice} / run</div><p className="mt-2 text-xs leading-5 text-muted-foreground">Actual cost varies with input and output length. Token rate: {formatAgentPrice(tokenPrice)}.</p><div className="mt-5 grid gap-2"><Button className="w-full" disabled={Boolean(accessActionType) || (hasGatewayAccess && isHired)} onClick={() => void updateAgentAccess("hired")} type="button"><PackageOpen /> Hire Agent</Button><Button className="w-full" disabled={Boolean(accessActionType) || (hasGatewayAccess && (isTrying || isHired))} onClick={() => void updateAgentAccess("trial")} type="button" variant="secondary"><Terminal /> Try Agent</Button></div></CardContent>
+              <CardHeader>
+                <CardTitle>Pricing</CardTitle>
+                <CardDescription>
+                  Estimated from this Agent’s average usage.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="number-cell text-2xl font-semibold text-[#171452]">
+                  From {estimatedRunPrice} / run
+                </div>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                  Actual cost varies with input and output length. Token rate:{" "}
+                  {formatAgentPrice(tokenPrice)}.
+                </p>
+                <div className="mt-5 grid gap-2">
+                  <Button
+                    className="w-full"
+                    disabled={Boolean(accessActionType) || (hasGatewayAccess && isHired)}
+                    onClick={() => void updateAgentAccess("hired")}
+                    type="button"
+                  >
+                    <PackageOpen /> Hire Agent
+                  </Button>
+                  <Button
+                    className="w-full"
+                    disabled={
+                      Boolean(accessActionType) ||
+                      (hasGatewayAccess && (isTrying || isHired))
+                    }
+                    onClick={() => void updateAgentAccess("trial")}
+                    type="button"
+                    variant="secondary"
+                  >
+                    <Terminal /> Try Agent
+                  </Button>
+                </div>
+                <div className="mt-6 border-t border-[#dedbea] pt-5">
+                  <div className="text-sm font-semibold text-[#171452]">
+                    Performance & usage
+                  </div>
+                  <dl className="mt-3 grid gap-3 text-sm">
+                    {[
+                      ["Average time", formatDuration(agent.latencyMs)],
+                      ["Average usage", formatTokens(averageTokens)],
+                      ["Last updated", "Current release"],
+                      ["Version", "v1.0"],
+                      ["Completed runs", formatRuns(agent.calls)],
+                      ["Rating", agent.rating ? `${agent.rating.toFixed(1)} / 5` : "New"],
+                    ].map(([label, value]) => (
+                      <div
+                        className="flex items-center justify-between gap-4 border-b border-border pb-3 last:border-0 last:pb-0"
+                        key={label}
+                      >
+                        <dt className="text-muted-foreground">{label}</dt>
+                        <dd className="number-cell font-medium text-[#171452]">
+                          {value}
+                        </dd>
+                      </div>
+                    ))}
+                  </dl>
+                </div>
+              </CardContent>
             </Card>
           </aside>
         </div>
@@ -5030,6 +5104,21 @@ function formatFileSize(size: number) {
   return `${size} B`;
 }
 
+function normalizeCreatorInfoUrl(value: string | undefined) {
+  const trimmed = value?.trim();
+  if (!trimmed) return "";
+  const candidate = /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)
+    ? trimmed
+    : `https://${trimmed}`;
+  try {
+    const url = new URL(candidate);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return "";
+    return url.href;
+  } catch {
+    return "";
+  }
+}
+
 function formatAccessDate(value: string | null) {
   if (!value) return "No expiry";
   const date = new Date(value);
@@ -5168,6 +5257,7 @@ function CreateAgentPage({ user }: { user: AuthUser | null }) {
     agentName: "",
     headline: "",
     description: "",
+    creatorInfoUrl: "",
     howToUse: "",
     sampleInput: "",
     creatorFeeUsd: "",
@@ -5248,6 +5338,9 @@ function CreateAgentPage({ user }: { user: AuthUser | null }) {
         if (!draft.agentName.trim()) return "Add an agent name before continuing.";
         if (!draft.headline.trim()) return "Add a one-line description before continuing.";
         if (!draft.description.trim()) return "Add a description before continuing.";
+        if (draft.creatorInfoUrl.trim() && !normalizeCreatorInfoUrl(draft.creatorInfoUrl)) {
+          return "Add a valid creator info link or leave it empty.";
+        }
         return null;
       }
       case 1: {
@@ -5385,6 +5478,7 @@ function CreateAgentPage({ user }: { user: AuthUser | null }) {
         id: record.id,
         creatorId: user ? creatorIdFor(user) : "local-anonymous",
         creatorEmail: user?.email || "",
+        creatorInfoUrl: normalizeCreatorInfoUrl(draft.creatorInfoUrl) || undefined,
         agentName: draft.agentName,
         agentSlug,
         headline: draft.headline,
@@ -5612,7 +5706,7 @@ function CreateAgentPage({ user }: { user: AuthUser | null }) {
                           *
                         </span>
                       </div>
-                      <div className="-mx-1 flex w-full max-w-full gap-2 overflow-x-auto px-1 pb-1" data-category-row>
+                      <div className="grid w-full grid-cols-2 gap-2 sm:grid-cols-4" data-category-row>
                         {topicFilters.map((category) => {
                           const categoryMeta = categoryPricing[category];
                           const CategoryIcon = categoryMeta.Icon;
@@ -5620,7 +5714,7 @@ function CreateAgentPage({ user }: { user: AuthUser | null }) {
                           return (
                             <button
                               aria-pressed={selected}
-                              className={`flex h-14 min-w-[9.6rem] shrink-0 items-center gap-2 rounded-2xl border px-3 py-2 text-left transition ${
+                              className={`flex h-14 w-full min-w-0 items-center gap-2 rounded-2xl border px-3 py-2 text-left transition ${
                                 selected
                                   ? "border-[#533afd]/45 bg-[#f7f4ff] shadow-[0_12px_28px_rgba(83,58,253,0.12)]"
                                   : "border-[#dbe3ef] bg-white hover:border-[#cfc6ff] hover:bg-[#fbfaff]"
@@ -5669,6 +5763,15 @@ function CreateAgentPage({ user }: { user: AuthUser | null }) {
                         className="min-h-20 w-full rounded-md border border-input bg-white px-3 py-2 text-sm text-foreground shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
                         onChange={updateDraft("description")}
                         value={draft.description}
+                      />
+                    </Field>
+                    <Field className="md:col-span-2" label="creator_info link">
+                      <Input
+                        inputMode="url"
+                        placeholder="https://example.com/creator"
+                        type="url"
+                        value={draft.creatorInfoUrl}
+                        onChange={updateDraft("creatorInfoUrl")}
                       />
                     </Field>
                   </div>

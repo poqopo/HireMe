@@ -18,6 +18,7 @@ export type Database = {
           handle: string;
           creator_id: string;
           creator_name: string | null;
+          creator_info_url: string | null;
           team_role: string | null;
           listed_individually: boolean | null;
           team_id: string | null;
@@ -39,6 +40,7 @@ export type Database = {
           status: Database["public"]["Enums"]["agent_status"];
           headline: string;
           public_summary: string;
+          how_to_use: string | null;
           public_skills: string[];
           public_mcp_contract: string;
           current_version_id: string | null;

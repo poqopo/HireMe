@@ -34,6 +34,7 @@ export type Agent = {
   name: string;
   handle: string;
   creator: string;
+  creatorInfoUrl?: string;
   team: AgentTeam;
   teamRole: string;
   listedIndividually: boolean;
@@ -42,6 +43,7 @@ export type Agent = {
   status: AgentStatus;
   headline: string;
   publicSummary: string;
+  howToUse?: string;
   publicContract: string;
   memwalPolicy: string;
   skills: string[];

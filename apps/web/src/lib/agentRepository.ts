@@ -101,6 +101,7 @@ function mapMarketplaceCardToAgent(row: MarketplaceCardRow): Agent {
     name: row.name,
     handle: row.handle,
     creator: row.creator_name || "Unknown creator",
+    creatorInfoUrl: row.creator_info_url || undefined,
     team: {
       id: row.team_slug || slug,
       name: row.team_name || `${row.name} Team`,
@@ -130,6 +131,7 @@ function mapMarketplaceCardToAgent(row: MarketplaceCardRow): Agent {
     status: statusLabels[row.status],
     headline: row.headline,
     publicSummary: row.public_summary,
+    howToUse: row.how_to_use || row.result_summary || undefined,
     publicContract: row.public_mcp_contract,
     memwalPolicy:
       "Protected Skills, Harness logic, private prompts, and memory artifacts stay behind the MCP gateway.",

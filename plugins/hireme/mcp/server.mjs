@@ -809,6 +809,8 @@ const inputSchemas = {
         items: { type: "string" },
         description: "Public labels such as AGENTS.md, skills/**, harness/**.",
       },
+      creator_info_url: { type: "string" },
+      how_to_use: { type: "string" },
       memwal_policy: { type: "string" },
       team_id: { type: "string" },
       team_name: { type: "string" },
@@ -918,6 +920,8 @@ const inputSchemas = {
         items: { type: "string" },
         description: "Public labels such as AGENTS.md, skills/**, harness/**.",
       },
+      creator_info_url: { type: "string" },
+      how_to_use: { type: "string" },
       memwal_policy: { type: "string" },
       price_per_1m_tokens_sui: {
         type: "number",
@@ -1003,6 +1007,8 @@ const inputSchemas = {
         items: { type: "string" },
         description: "Public labels such as AGENTS.md, skills/**, harness/**.",
       },
+      creator_info_url: { type: "string" },
+      how_to_use: { type: "string" },
       memwal_policy: { type: "string" },
       price_per_1m_tokens_sui: {
         type: "number",
@@ -1356,10 +1362,12 @@ function publicAgent(agent) {
     name: agent.name,
     handle: agent.handle,
     creator: agent.creator,
+    creatorInfoUrl: agent.creatorInfoUrl || null,
     category: agent.category,
     status: agent.status,
     headline: agent.headline,
     publicSummary: agent.publicSummary,
+    howToUse: agent.howToUse || null,
     publicSkills: agent.skills,
     publicContract: agent.harnessSummary,
     memwalPolicy: agent.memwalPolicy,
@@ -2896,10 +2904,15 @@ function registerAgentLocally(args = {}) {
     name: String(args.name).trim(),
     handle: normalizeHandle(args.handle, agentId),
     creator: String(args.creator).trim(),
+    creatorInfoUrl:
+      String(args.creator_info_url || args.creatorInfoUrl || "").trim() || null,
     category: normalizeDisplayCategory(args.category),
     status: normalizeDisplayStatus(args.status),
     headline: String(args.headline).trim(),
     publicSummary: String(args.public_summary).trim(),
+    howToUse:
+      String(args.how_to_use || args.howToUse || args.metadata?.howToUse || "").trim() ||
+      null,
     harnessSummary: String(args.public_mcp_contract).trim(),
     memwalPolicy:
       String(args.memwal_policy || "").trim() ||
