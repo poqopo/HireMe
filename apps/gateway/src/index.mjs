@@ -3316,6 +3316,11 @@ function listAgents(args = {}) {
       headline: agent.headline,
       pricePerCallUsd: agent.pricePerCallUsd,
       pricePer1MTokensSui: readAgentTokenPriceSui(agent),
+      historicalCalls: agent.calls,
+      medianLatencyMs: agent.latencyMs,
+      avgInputTokens: agent.avgInputTokens || null,
+      avgOutputTokens: agent.avgOutputTokens || null,
+      activeUsers: agent.activeUsers || 0,
       publicSkills: agent.skills,
       memwalPolicy: agent.memwalPolicy,
       sealedHarness: protectedArtifacts.get(agent.id),
@@ -3352,6 +3357,9 @@ function publicAgent(agent) {
     rating: agent.rating,
     historicalCalls: agent.calls,
     medianLatencyMs: agent.latencyMs,
+    avgInputTokens: agent.avgInputTokens || null,
+    avgOutputTokens: agent.avgOutputTokens || null,
+    activeUsers: agent.activeUsers || 0,
     resultPreview:
       agent.resultMediaUrl || agent.resultMediaType || agent.resultTitle || agent.resultSummary
         ? {
@@ -4145,6 +4153,7 @@ function readOptionalBoolean(value) {
 }
 
 async function runProtectedAgent(args = {}) {
+  const callStartedAt = Date.now();
   const installationId = args.codex_installation_id || defaultInstallationId;
   const agentId = args.agent_id || sessions.get(installationId) || "walrus-researcher";
   const agent = await findOrHydrateAgent(agentId);
@@ -4287,10 +4296,7 @@ async function runProtectedAgent(args = {}) {
       : protectedTaskResult
         ? "trusted-gateway-protected-artifact"
         : "local-mock";
-  const latencyMs =
-    executorExecution.status === "completed"
-      ? executorExecution.latencyMs
-      : agent.latencyMs;
+  const latencyMs = Math.max(0, Date.now() - callStartedAt);
   const platformEncryption =
     protectedTaskResult?.platformEncryption ||
     protectedTaskResult?.sealEncryption || {
@@ -9589,6 +9595,7 @@ async function persistMcpCallLedgerAndStats({
     }
 
     const stats = await refreshAgentUsageStats(admin, agentRow.id);
+    applyAgentUsageStats(agent, stats);
     return {
       status: "recorded",
       agentRowId: agentRow.id,
@@ -9604,6 +9611,7 @@ async function persistMcpCallLedgerAndStats({
 }
 
 async function resolveLedgerHirerProfile(admin, { hirerId, email }) {
+  const normalizedHirerId = normalizeHirerId(hirerId);
   if (isUuid(hirerId)) {
     const { data } = await admin
       .from("profiles")
@@ -9613,17 +9621,102 @@ async function resolveLedgerHirerProfile(admin, { hirerId, email }) {
     if (data) return data;
   }
 
-  const lookupEmail = String(email || (String(hirerId).includes("@") ? hirerId : "")).trim();
-  if (!lookupEmail) return null;
-  const user = await findGatewayUserByEmail(admin, lookupEmail);
-  if (!user?.id) return null;
+  const lookupEmail = String(
+    email || (String(normalizedHirerId).includes("@") ? normalizedHirerId : ""),
+  )
+    .trim()
+    .toLowerCase();
+  if (lookupEmail) {
+    const user = await findGatewayUserByEmail(admin, lookupEmail);
+    if (user?.id) {
+      return ensureGatewayProfileForUser(admin, {
+        userId: user.id,
+        displayName: lookupEmail,
+        usernameSeed: lookupEmail,
+      });
+    }
+  }
 
-  const { data } = await admin
+  return findOrCreateGatewayHirerProfile(admin, {
+    hirerId: normalizedHirerId,
+    email: lookupEmail,
+  });
+}
+
+async function findOrCreateGatewayHirerProfile(admin, { hirerId, email }) {
+  const normalizedHirerId = normalizeHirerId(hirerId);
+  const emailHash = sha256Hex(normalizedHirerId).slice(0, 16);
+  const syntheticEmail = `hirer-${emailHash}@hireme.mcp`;
+  const existing = await findGatewayUserByEmail(admin, syntheticEmail);
+  const user =
+    existing ||
+    (await createGatewayAuthUser(admin, {
+      email: syntheticEmail,
+      displayName: email || normalizedHirerId,
+      metadata: {
+        role: "ledger_hirer",
+        hirerId: normalizedHirerId,
+        sourceEmail: email || null,
+      },
+    }));
+
+  return ensureGatewayProfileForUser(admin, {
+    userId: user.id,
+    displayName: email || normalizedHirerId,
+    usernameSeed: `hirer-${normalizedHirerId}`,
+  });
+}
+
+async function createGatewayAuthUser(admin, { email, displayName, metadata = {} }) {
+  const { data, error } = await admin.auth.admin.createUser({
+    email,
+    email_confirm: true,
+    user_metadata: {
+      name: displayName,
+      ...metadata,
+    },
+  });
+
+  if (error) {
+    const retryExisting = await findGatewayUserByEmail(admin, email);
+    if (retryExisting) return retryExisting;
+    throw new Error(`create auth user for ${email}: ${error.message}`);
+  }
+
+  return data.user;
+}
+
+async function ensureGatewayProfileForUser(admin, { userId, displayName, usernameSeed }) {
+  const { data: existing, error: readError } = await admin
     .from("profiles")
     .select("id")
-    .eq("id", user.id)
+    .eq("id", userId)
     .maybeSingle();
-  return data || { id: user.id };
+  if (readError) {
+    throw new Error(`read profile for ledger user: ${readError.message}`);
+  }
+  if (existing?.id) return existing;
+
+  const usernameBase = normalizeSlug(usernameSeed || displayName || userId, "hireme-user");
+  const username = `${usernameBase.slice(0, 44)}-${sha256Hex(userId).slice(0, 12)}`;
+  const { data, error } = await admin
+    .from("profiles")
+    .upsert(
+      {
+        id: userId,
+        display_name: String(displayName || "HireMe hirer").slice(0, 120),
+        username,
+        avatar_url: null,
+      },
+      { onConflict: "id" },
+    )
+    .select("id")
+    .single();
+
+  if (error) {
+    throw new Error(`upsert profile for ledger user: ${error.message}`);
+  }
+  return data;
 }
 
 async function refreshAgentUsageStats(admin, agentRowId) {
@@ -9681,6 +9774,28 @@ async function refreshAgentUsageStats(admin, agentRowId) {
     avgOutputTokens,
     activeUserCount,
   };
+}
+
+function applyAgentUsageStats(agent, stats = {}) {
+  if (!agent?.id || stats.status !== "updated") return;
+  const patch = {
+    calls: Math.max(0, Math.trunc(readOptionalNumber(stats.historicalCalls, agent.calls || 0))),
+    latencyMs: Math.max(0, Math.trunc(readOptionalNumber(stats.medianLatencyMs, agent.latencyMs || 0))),
+    avgInputTokens: Math.max(
+      0,
+      Math.trunc(readOptionalNumber(stats.avgInputTokens, agent.avgInputTokens || 0)),
+    ),
+    avgOutputTokens: Math.max(
+      0,
+      Math.trunc(readOptionalNumber(stats.avgOutputTokens, agent.avgOutputTokens || 0)),
+    ),
+    activeUsers: Math.max(
+      0,
+      Math.trunc(readOptionalNumber(stats.activeUserCount, agent.activeUsers || 0)),
+    ),
+  };
+  Object.assign(agent, patch);
+  upsertLocalAgent({ ...agent, ...patch });
 }
 
 function isUuid(value) {
@@ -10042,6 +10157,9 @@ async function hydrateAgentFromSupabase(agentId) {
     rating: readOptionalNumber(row.rating, 0),
     calls: Math.trunc(readOptionalNumber(row.historical_calls, 0)),
     latencyMs: Math.trunc(readOptionalNumber(row.median_latency_ms, 0)),
+    avgInputTokens: Math.trunc(readOptionalNumber(row.avg_input_tokens, 0)),
+    avgOutputTokens: Math.trunc(readOptionalNumber(row.avg_output_tokens, 0)),
+    activeUsers: Math.trunc(readOptionalNumber(row.active_user_count, 0)),
     resultTitle: row.result_title || null,
     resultSummary: row.result_summary || null,
     resultSample: row.result_sample || null,
