@@ -1,0 +1,2 @@
+MemWal turns hired Agent sessions into
+portable memory.

@@ -1,0 +1,1 @@
+Its value lives in the private Harness behind it: prompts, skills, rubrics, tools, memory rules, and review habits.

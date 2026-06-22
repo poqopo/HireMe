@@ -1,0 +1,1 @@
+Walrus stores the encrypted Agent artifact as durable proof.

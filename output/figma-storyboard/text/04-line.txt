@@ -1,0 +1,2 @@
+The web flow shows a client choosing a specialized Agent and
+receiving a generated character PNG.

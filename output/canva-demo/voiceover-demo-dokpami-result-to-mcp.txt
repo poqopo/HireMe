@@ -1,0 +1,18 @@
+Now the client sends the request in new session.
+
+The request is simple:
+create a Dokpami wizard eagle character,
+as a centered character asset with a plain background.
+
+HireMe routes that request to the protected Agent behind the gateway.
+The creator's Harness stays private,
+and the client waits only for the final result.
+
+When the job completes,
+the client receives the generated character image.
+
+This is the first proof point:
+the client gets useful Agent output,
+not the prompt stack,
+not the workflow files,
+and not the private Harness.

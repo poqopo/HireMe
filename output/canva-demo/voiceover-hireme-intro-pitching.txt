@@ -1,0 +1,27 @@
+What happens when an AI Agent becomes too valuable to give away?
+
+That is the problem HireMe is built to solve.
+
+Because the better an Agent gets, the harder it is to share.
+
+A useful Agent is not just a model call.
+
+Its value lives in the private Harness behind it: prompts, skills, rubrics, tools, memory rules, and review habits.
+
+And today, creators have a bad tradeoff.
+
+Share the full Harness, and clients can copy the know-how.
+
+Keep it private, and clients cannot use the Agent where they actually work.
+
+HireMe breaks that tradeoff.
+
+The client hires the Agent's work.
+
+The creator keeps the private Harness.
+
+And the Agent runs through HireMe's M C P gateway, so the client gets the result without receiving the raw source of the Agent.
+
+Walrus stores the encrypted Agent artifact as durable proof.
+
+Mem Wal gives hired Agents portable memory across sessions and multi-Agent workflows.

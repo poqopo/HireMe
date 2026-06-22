@@ -1,0 +1,2 @@
+REPLACE WITH: MCP terminal clip showing hireme_call_agent and
+get result polling.

@@ -1,0 +1,3 @@
+- Prepared publish flow
+- Protected metadata
+- No full upload wizard

@@ -63,6 +63,9 @@ export type Database = {
           max_budget_calls: number | null;
           created_at: string | null;
           updated_at: string | null;
+          artifact_network: string | null;
+          walrus_blob_id: string | null;
+          walrus_sui_object_id: string | null;
         };
         Insert: never;
         Update: never;

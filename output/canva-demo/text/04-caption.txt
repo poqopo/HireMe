@@ -1,0 +1,2 @@
+The client receives a generated PNG, not
+the private Harness.

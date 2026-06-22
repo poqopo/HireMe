@@ -143,10 +143,10 @@ function mapMarketplaceCardToAgent(row: MarketplaceCardRow): Agent {
       "harness internals",
     ],
     sealedHarness: {
-      network: "walrus-testnet",
+      network: normalizeArtifactNetwork(row.artifact_network),
       sealPolicyId: `platform:agent:${slug}`,
-      walrusBlobId: `gateway-managed:${slug}`,
-      suiObjectId: row.current_version_id || "pending",
+      walrusBlobId: row.walrus_blob_id || `gateway-managed:${slug}`,
+      suiObjectId: row.walrus_sui_object_id || row.current_version_id || "pending",
       ciphertextDigest: "registered-with-protected-artifacts",
       visibility:
         "Marketplace cards expose capability, price, and safe metadata. Protected artifact details are resolved by the gateway at call time.",
@@ -200,6 +200,12 @@ function agentTimestampMs(agent: Agent) {
 function normalizeLegacyTokenPrice(value: number | null) {
   if (!value) return 0;
   return value < 1 ? value * 1000 : value;
+}
+
+function normalizeArtifactNetwork(
+  value: string | null,
+): Agent["sealedHarness"]["network"] {
+  return value?.includes("mainnet") ? "walrus-mainnet" : "walrus-testnet";
 }
 
 function mapTeamBillingUnit(value: string | null): AgentTeamBillingUnit {

@@ -40,6 +40,7 @@ import {
   CircleDollarSign,
   Clock3,
   Copy,
+  ExternalLink,
   ImageIcon,
   LockKeyhole,
   LogIn,
@@ -330,6 +331,17 @@ type CreatedAgentRecord = {
   gatewayError?: string;
 };
 
+type AgentDraft = {
+  category: Agent["category"] | "";
+  agentName: string;
+  headline: string;
+  description: string;
+  creatorInfoUrl: string;
+  howToUse: string;
+  sampleInput: string;
+  creatorFeeUsd: string;
+};
+
 type GatewayAgentRegistrationResult = {
   status?: string;
   registeredAt?: string;
@@ -448,6 +460,43 @@ type GatewaySuiPaymentActivityPayload = {
   effectStatus?: string | null;
   failureReason?: string | null;
   createdAt?: string;
+};
+
+type GatewayWalletAgentStatPayload = {
+  agentId: string;
+  agentUuid?: string | null;
+  name?: string;
+  owned?: boolean;
+  totalEarnedSui?: string;
+  myEarnedSui?: string;
+  claimableSui?: string;
+  mySpentSui?: string;
+  totalCallCount?: number;
+  earnedCallCount?: number;
+  spentCallCount?: number;
+  lastEarnedAt?: string | null;
+  lastChargedAt?: string | null;
+};
+
+type GatewayWalletSummaryPayload = {
+  status?: string;
+  reason?: string;
+  balance?: {
+    availableSui?: string;
+    netBalanceSui?: string;
+    claimableEarningsSui?: string;
+    topUpSui?: string;
+    spentSui?: string;
+    earnedSui?: string;
+    claimedSui?: string;
+  };
+  agents?: GatewayWalletAgentStatPayload[];
+  ledger?: {
+    spendCallCount?: number;
+    earningCallCount?: number;
+    ownedAgentCount?: number;
+  };
+  source?: string;
 };
 
 function isMarketplaceAgentVisible(agent: Agent) {
@@ -635,6 +684,10 @@ function AppShell({
         <Route
           path="/agents/create"
           element={<CreateAgentPage user={authUser} />}
+        />
+        <Route
+          path="/agents/:agentId/edit"
+          element={<EditAgentPage user={authUser} />}
         />
         <Route
           path="/agents/:agentId"
@@ -1119,6 +1172,69 @@ async function updateAgentWithGatewayUpload({
   return (await response.json()) as GatewayAgentRegistrationResult;
 }
 
+async function updateAgentMetadataWithGateway({
+  agent,
+  user,
+}: {
+  agent: Agent;
+  user: AuthUser | null;
+}): Promise<GatewayAgentRegistrationResult> {
+  const tokenPrice = agent.pricePer1MTokensSui ?? agent.pricePerCallUsd;
+  const payload = {
+    agent_id: agent.id,
+    name: agent.name,
+    handle: agent.handle,
+    creator:
+      agent.creator || user?.displayName || user?.email || user?.wallet || "Web creator",
+    creator_info_url: agent.creatorInfoUrl || null,
+    category: agent.category,
+    status: agent.status,
+    headline: agent.headline,
+    public_summary: agent.publicSummary || agent.headline,
+    how_to_use: agent.howToUse || null,
+    public_mcp_contract:
+      agent.publicContract || `${agent.id}(task, context, budget_calls)`,
+    memwal_policy: agent.memwalPolicy,
+    skills: agent.skills?.length ? agent.skills : ["Protected Harness", "Codex MCP"],
+    protected_asset_classes: agent.protectedAssets?.length
+      ? agent.protectedAssets
+      : ["AGENTS.md", "skills/**", "private prompts"],
+    price_per_1m_tokens_sui: tokenPrice,
+    price_per_1m_tokens_usd: tokenPrice,
+    price_per_call_usd: tokenPrice,
+    free_calls: agent.freeCalls,
+    storage_network: agent.sealedHarness.network,
+    seal_policy_id: agent.sealedHarness.sealPolicyId,
+    walrus_blob_id: agent.sealedHarness.walrusBlobId,
+    sui_object_id: agent.sealedHarness.suiObjectId,
+    ciphertext_digest: agent.sealedHarness.ciphertextDigest,
+    result_title: agent.resultPreview.title,
+    result_summary: agent.resultPreview.summary,
+    result_sample: agent.resultPreview.sample,
+    result_media_url: agent.resultPreview.mediaUrl,
+    result_media_type: agent.resultPreview.mediaType,
+    metadata: {
+      source: "web_edit_agent_metadata",
+      creatorInfoUrl: agent.creatorInfoUrl || null,
+      howToUse: agent.howToUse || null,
+      updatedBy:
+        user?.email || user?.wallet || user?.displayName || "anonymous-web-user",
+    },
+  };
+
+  const response = await fetch(`${gatewayUrl}/v1/agents/register`, {
+    method: "POST",
+    headers: gatewayRequestHeaders(),
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Gateway ${response.status}: ${await response.text()}`);
+  }
+
+  return (await response.json()) as GatewayAgentRegistrationResult;
+}
+
 function readAllAgentAccess() {
   try {
     const raw = window.localStorage.getItem(accessStorageKey);
@@ -1397,6 +1513,60 @@ async function loadGatewayMyPaymentActivity(user: AuthUser) {
   return result.results || [];
 }
 
+async function loadGatewayWalletSummary(user: AuthUser) {
+  const response = await fetch(`${gatewayUrl}/v1/my/wallet-summary`, {
+    method: "POST",
+    headers: gatewayRequestHeaders(),
+    body: JSON.stringify(walletRequestPayload(user)),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Gateway ${response.status}: ${await response.text()}`);
+  }
+
+  return (await response.json()) as GatewayWalletSummaryPayload;
+}
+
+async function topUpGatewayWallet(user: AuthUser, amountSui = "1") {
+  const response = await fetch(`${gatewayUrl}/v1/my/wallet/top-up`, {
+    method: "POST",
+    headers: gatewayRequestHeaders(),
+    body: JSON.stringify({
+      ...walletRequestPayload(user),
+      amount_sui: amountSui,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Gateway ${response.status}: ${await response.text()}`);
+  }
+
+  return (await response.json()) as GatewayWalletSummaryPayload;
+}
+
+async function claimGatewayWalletEarnings(user: AuthUser) {
+  const response = await fetch(`${gatewayUrl}/v1/my/wallet/claim`, {
+    method: "POST",
+    headers: gatewayRequestHeaders(),
+    body: JSON.stringify(walletRequestPayload(user)),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Gateway ${response.status}: ${await response.text()}`);
+  }
+
+  return (await response.json()) as GatewayWalletSummaryPayload;
+}
+
+function walletRequestPayload(user: AuthUser) {
+  return {
+    hirer_id: hirerIdFor(user),
+    wallet_address: user.wallet,
+    email: user.email,
+    display_name: displayNameFor(user),
+  };
+}
+
 function mapGatewayAccessRecord(
   access: GatewayAccessPayload | undefined,
   agent: Agent,
@@ -1493,6 +1663,162 @@ function mapGatewayPublicAgentToAgent(agent: GatewayPublicAgent | undefined): Ag
     mcpPackage: `mcp://hireme/${id}`,
     accent: "from-[#533afd] to-[#6ee7f9]",
   };
+}
+
+function createdAgentRecordToAgent(record: CreatedAgentRecord, user?: AuthUser | null): Agent {
+  const category = inferAgentCategory(record.agentSlug, record.headline || record.description);
+  const tokenPrice = record.pricePerCallUsd;
+  const creator =
+    user?.displayName?.trim() ||
+    record.creatorEmail ||
+    record.creatorId ||
+    "Web creator";
+
+  return {
+    id: record.agentSlug,
+    name: record.agentName,
+    handle: `@agents/${record.agentSlug}`,
+    creator,
+    creatorInfoUrl: record.creatorInfoUrl,
+    team: {
+      id: record.agentSlug,
+      name: `${record.agentName} Team`,
+      handle: `@teams/${record.agentSlug}`,
+      owner: creator,
+      headline: record.headline || record.description,
+      publicSummary: record.description,
+      agentCount: 1,
+      accent: "from-[#533afd] to-[#6ee7f9]",
+      billing: {
+        unit: "per_agent",
+        basePriceUsd: tokenPrice,
+        includedCalls: trialCallAllowance,
+        overagePricePerCallUsd: tokenPrice,
+        note: `${formatAgentPrice(tokenPrice)} through the executing agent ledger.`,
+      },
+    },
+    teamRole: "Specialist",
+    listedIndividually: true,
+    category,
+    categories: [category],
+    status: "Available",
+    headline: record.headline || record.description,
+    publicSummary: record.description,
+    howToUse: record.howToUse,
+    publicContract: `${record.agentSlug}(task, context, budget_calls)`,
+    memwalPolicy:
+      "Hirer-visible results are stored in hirer-scoped memWal records. Creator private files stay behind the gateway.",
+    skills: ["Protected Harness", "Codex MCP"],
+    protectedAssets: ["Agent Harness archive", "AGENTS.md", "skills/**"],
+    sealedHarness: {
+      network: "walrus-testnet",
+      sealPolicyId: `platform:agent:${record.agentSlug}`,
+      walrusBlobId: record.walrusBlobId,
+      suiObjectId: record.suiObjectId,
+      ciphertextDigest: record.ciphertextDigest,
+      visibility:
+        "Protected artifact details are resolved by the gateway at call time.",
+    },
+    pricePerCallUsd: tokenPrice,
+    pricePer1MTokensSui: tokenPrice,
+    freeCalls: trialCallAllowance,
+    rating: 0,
+    calls: 0,
+    latencyMs: record.avgLatencyMs || 0,
+    avgInputTokens: record.avgTokenCount || 0,
+    avgOutputTokens: 0,
+    activeUsers: record.activeUsers,
+    createdAt: record.createdAt,
+    updatedAt: record.createdAt,
+    resultPreview: {
+      title: "Sample Input",
+      summary: record.typicalOutputSample || record.description,
+      sample: record.typicalOutputSample || "",
+      mediaUrl: record.typicalOutputMediaUrl,
+      mediaType: record.typicalOutputMediaType,
+    },
+    mcpPackage: `mcp://hireme/${record.agentSlug}`,
+    accent: "from-[#533afd] to-[#6ee7f9]",
+  };
+}
+
+function inferAgentCategory(agentId: string, text = ""): Agent["category"] {
+  const haystack = `${agentId} ${text}`.toLowerCase();
+  if (haystack.includes("image") || haystack.includes("character") || haystack.includes("png")) {
+    return "Image";
+  }
+  if (haystack.includes("data") || haystack.includes("ledger")) return "Data";
+  if (haystack.includes("research")) return "Research";
+  return "Code";
+}
+
+function defaultAgentDraft(): AgentDraft {
+  return {
+    category: "",
+    agentName: "",
+    headline: "",
+    description: "",
+    creatorInfoUrl: "",
+    howToUse: "",
+    sampleInput: "",
+    creatorFeeUsd: "",
+  };
+}
+
+function agentDraftFromAgent(agent: Agent): AgentDraft {
+  const basePrice = categoryPricing[agent.category]?.basePriceUsd ?? 0;
+  const tokenPrice = agent.pricePer1MTokensSui ?? agent.pricePerCallUsd;
+  const creatorFee = Math.max(0, tokenPrice - basePrice);
+  return {
+    category: agent.category,
+    agentName: agent.name,
+    headline: agent.headline,
+    description: agent.publicSummary || agent.headline,
+    creatorInfoUrl: agent.creatorInfoUrl || "",
+    howToUse: agent.howToUse || "",
+    sampleInput: agent.resultPreview.sample || "",
+    creatorFeeUsd: creatorFee ? formatDraftNumber(creatorFee) : "",
+  };
+}
+
+function agentFromDraft({
+  baseAgent,
+  draft,
+  media,
+  pricePerCallUsd,
+}: {
+  baseAgent: Agent;
+  draft: AgentDraft;
+  media?: {
+    type?: "image" | "video";
+    url?: string;
+  } | null;
+  pricePerCallUsd: number;
+}): Agent {
+  return {
+    ...baseAgent,
+    name: draft.agentName.trim() || baseAgent.name,
+    creatorInfoUrl: normalizeCreatorInfoUrl(draft.creatorInfoUrl) || undefined,
+    category: draft.category || baseAgent.category,
+    categories: [draft.category || baseAgent.category],
+    headline: draft.headline.trim() || baseAgent.headline,
+    publicSummary:
+      draft.description.trim() || draft.headline.trim() || baseAgent.publicSummary,
+    howToUse: draft.howToUse.trim() || undefined,
+    pricePerCallUsd,
+    pricePer1MTokensSui: pricePerCallUsd,
+    resultPreview: {
+      ...baseAgent.resultPreview,
+      sample: draft.sampleInput.trim() || baseAgent.resultPreview.sample,
+      mediaUrl: media?.url || baseAgent.resultPreview.mediaUrl,
+      mediaType: media?.type || baseAgent.resultPreview.mediaType,
+    },
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+function formatDraftNumber(value: number) {
+  return value.toFixed(6).replace(/0+$/, "").replace(/\.$/, "");
 }
 
 function mergeAgentCatalog(current: Agent[], incoming: Agent[]) {
@@ -3682,6 +4008,7 @@ function AgentDetailPage({
     agent.howToUse ||
     agent.resultPreview.summary ||
     "Send a clear task, include the desired output format, and add any constraints the Agent should follow.";
+  const resultArtifacts = getResultArtifactExplorers(agent);
 
   return (
     <main className="min-h-screen bg-[#f6f9fc]">
@@ -3796,6 +4123,42 @@ function AgentDetailPage({
                       </p>
                     )}
                   </div>
+                  {resultArtifacts.length ? (
+                    <div className="rounded-xl border border-[#d8d4e2] bg-white p-4">
+                      <div className="text-xs font-semibold uppercase text-[#6b6580]">
+                        Additional Information
+                      </div>
+                      <div className="mt-3 grid gap-2">
+                        {resultArtifacts.map((artifact) => (
+                          <div
+                            className="flex min-w-0 items-center gap-3 rounded-lg border border-[#d8d4e2] bg-[#f8f7fb] px-3 py-2.5"
+                            key={artifact.label}
+                          >
+                            <div className="min-w-0 flex-1">
+                              <div className="text-[11px] font-semibold uppercase text-[#6b6580]">
+                                {artifact.label}
+                              </div>
+                              <div
+                                className="mt-1 truncate font-mono text-xs text-[#1c1e54]"
+                                title={artifact.value}
+                              >
+                                {artifact.value}
+                              </div>
+                            </div>
+                            <a
+                              className="inline-flex shrink-0 items-center gap-1 rounded-full border border-[#d8d4e2] bg-white px-3 py-1.5 text-xs font-semibold text-[#533afd] transition hover:border-[#bcb2ff] hover:bg-[#f2efff]"
+                              href={artifact.href}
+                              rel="noreferrer"
+                              target="_blank"
+                            >
+                              viewMore
+                              <ExternalLink className="size-3.5" />
+                            </a>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
               </CardContent>
             </Card>
@@ -3936,6 +4299,116 @@ function AgentDetailPage({
   );
 }
 
+function EditAgentPage({ user }: { user: AuthUser | null }) {
+  const { agentId = "" } = useParams();
+  const [marketplaceAgents, setMarketplaceAgents] = useState<Agent[]>([]);
+  const [catalogLoaded, setCatalogLoaded] = useState(false);
+  const createdRecords = useMemo(
+    () => (user ? readUserCreatedAgents(user) : []),
+    [user],
+  );
+
+  useEffect(() => {
+    let isCurrent = true;
+    void loadMarketplaceAgents()
+      .then((result) => {
+        if (!isCurrent) return;
+        setMarketplaceAgents(result.agents);
+      })
+      .finally(() => {
+        if (isCurrent) setCatalogLoaded(true);
+      });
+    return () => {
+      isCurrent = false;
+    };
+  }, []);
+
+  if (!user) {
+    return (
+      <main className="min-h-screen bg-[#f6f9fc] px-4 py-16 md:px-8">
+        <section className="mx-auto max-w-2xl rounded-xl border border-border bg-white p-6 app-shadow">
+          <h1 className="text-3xl font-light text-[#1c1e54]">Edit Agent</h1>
+          <p className="mt-3 text-sm leading-6 text-muted-foreground">
+            Login to edit your registered Agents.
+          </p>
+          <Button asChild className="mt-5" type="button">
+            <Link to="/login">
+              <LogIn /> Login
+            </Link>
+          </Button>
+        </section>
+      </main>
+    );
+  }
+
+  const localRecord = createdRecords.find(
+    (record) => record.agentSlug === agentId || record.id === agentId,
+  );
+  const localAgent = localRecord
+    ? createdAgentRecordToAgent(localRecord, user)
+    : null;
+  const marketplaceAgent = marketplaceAgents.find(
+    (agent) => agent.id === agentId && isAgentEditableByUser(agent, user),
+  );
+  const agent = localAgent || marketplaceAgent || null;
+
+  if (!agent && !catalogLoaded) {
+    return <EmptyResult label="Loading Agent..." />;
+  }
+
+  if (!agent) {
+    return (
+      <main className="min-h-screen bg-[#f6f9fc] px-4 py-16 md:px-8">
+        <section className="mx-auto max-w-2xl rounded-xl border border-border bg-white p-6 app-shadow">
+          <h1 className="text-3xl font-light text-[#1c1e54]">Agent not found</h1>
+          <p className="mt-3 text-sm leading-6 text-muted-foreground">
+            This Agent is not in your registered Agents list.
+          </p>
+          <Button asChild className="mt-5" type="button" variant="secondary">
+            <Link to="/my">
+              <ArrowLeft /> Back to My Agents
+            </Link>
+          </Button>
+        </section>
+      </main>
+    );
+  }
+
+  return (
+    <CreateAgentPage
+      editingAgent={agent}
+      editingRecord={localRecord}
+      initialDraft={agentDraftFromAgent(agent)}
+      key={agent.id}
+      mode="edit"
+      user={user}
+    />
+  );
+}
+
+function isAgentEditableByUser(agent: Agent, user: AuthUser) {
+  const keys = creatorKeysForUser(user);
+  return [agent.creator, agent.team.owner, agent.handle, agent.id].some((value) =>
+    keys.has(value.trim().toLowerCase()),
+  );
+}
+
+function creatorKeysForUser(user: AuthUser) {
+  return new Set(
+    [
+      user.email,
+      user.email.split("@")[0],
+      user.displayName,
+      user.wallet,
+    ]
+      .map((value) => value?.trim().toLowerCase())
+      .filter(
+        (value): value is string =>
+          Boolean(value) && value !== "set display name",
+      ),
+  );
+}
+
 function MyAgentsPage({
   user,
   onLogout,
@@ -3954,11 +4427,15 @@ function MyAgentsPage({
   const [paymentActivities, setPaymentActivities] = useState<
     GatewaySuiPaymentActivityPayload[]
   >([]);
+  const [walletSummary, setWalletSummary] =
+    useState<GatewayWalletSummaryPayload | null>(null);
   const [accessError, setAccessError] = useState<string | null>(null);
   const [memWalError, setMemWalError] = useState<string | null>(null);
   const [paymentActivityError, setPaymentActivityError] = useState<string | null>(
     null,
   );
+  const [walletError, setWalletError] = useState<string | null>(null);
+  const [walletAction, setWalletAction] = useState<"top-up" | "claim" | null>(null);
   const [createdRecordsVersion, setCreatedRecordsVersion] = useState(0);
   const [activeTab, setActiveTab] = useState<MyPageTab>("registered");
   const createdRecords = useMemo(
@@ -4071,6 +4548,33 @@ function MyAgentsPage({
   }, [user]);
 
   useEffect(() => {
+    let isCurrent = true;
+    if (!user) return () => {
+      isCurrent = false;
+    };
+
+    void loadGatewayWalletSummary(user)
+      .then((summary) => {
+        if (!isCurrent) return;
+        setWalletError(null);
+        setWalletSummary(summary);
+      })
+      .catch((error) => {
+        if (!isCurrent) return;
+        setWalletError(
+          error instanceof Error
+            ? error.message
+            : "Gateway wallet summary request failed",
+        );
+        setWalletSummary(null);
+      });
+
+    return () => {
+      isCurrent = false;
+    };
+  }, [user]);
+
+  useEffect(() => {
     const refreshCreatedRecords = () => {
       setCreatedRecordsVersion((version) => version + 1);
     };
@@ -4115,6 +4619,38 @@ function MyAgentsPage({
     );
   }
 
+  async function handleWalletTopUp() {
+    if (!user) return;
+    setWalletAction("top-up");
+    try {
+      const summary = await topUpGatewayWallet(user, "1");
+      setWalletSummary(summary);
+      setWalletError(null);
+    } catch (error) {
+      setWalletError(
+        error instanceof Error ? error.message : "Wallet top-up failed",
+      );
+    } finally {
+      setWalletAction(null);
+    }
+  }
+
+  async function handleWalletClaim() {
+    if (!user) return;
+    setWalletAction("claim");
+    try {
+      const summary = await claimGatewayWalletEarnings(user);
+      setWalletSummary(summary);
+      setWalletError(null);
+    } catch (error) {
+      setWalletError(
+        error instanceof Error ? error.message : "Wallet claim failed",
+      );
+    } finally {
+      setWalletAction(null);
+    }
+  }
+
   const hirerId = hirerIdFor(user);
   const activeRecords = accessRecords.filter(
     (record) => record.status === "active",
@@ -4145,6 +4681,11 @@ function MyAgentsPage({
       creatorKeys.has(value.trim().toLowerCase()),
     ),
   );
+  const walletStatsByAgentId = new Map<string, GatewayWalletAgentStatPayload>();
+  for (const stat of walletSummary?.agents || []) {
+    walletStatsByAgentId.set(stat.agentId, stat);
+    if (stat.agentUuid) walletStatsByAgentId.set(stat.agentUuid, stat);
+  }
   const activityItems: MyActivityItem[] = [
     ...createdRecords.map((record) => ({
       id: `created-${record.id}`,
@@ -4289,8 +4830,22 @@ function MyAgentsPage({
               <div className="mt-1 font-mono text-xs">{paymentActivityError}</div>
             </div>
           ) : null}
+          {walletError ? (
+            <div className="mb-4 rounded-xl border border-[#f59e0b]/20 bg-[#fffaf0] p-4 text-sm leading-6 text-[#92400e]">
+              Gateway wallet summary failed. Balance may omit recent spend or
+              creator earnings.
+              <div className="mt-1 font-mono text-xs">{walletError}</div>
+            </div>
+          ) : null}
 
-          <div className="grid gap-4 md:grid-cols-3">
+          <WalletOverviewPanel
+            action={walletAction}
+            onClaim={() => void handleWalletClaim()}
+            onTopUp={() => void handleWalletTopUp()}
+            summary={walletSummary}
+          />
+
+          <div className="mt-4 grid gap-4 md:grid-cols-3">
             <DashboardSummaryCard
               icon={PackageOpen}
               label="Registered"
@@ -4335,12 +4890,20 @@ function MyAgentsPage({
             registeredCount ? (
               <div className="mt-5 grid gap-4 lg:grid-cols-2">
                 {createdRecords.map((record) => (
-                  <CreatedAgentCard key={record.id} record={record} />
+                  <RegisteredAgentCard
+                    agent={createdAgentRecordToAgent(record, user)}
+                    key={record.id}
+                    walletStat={
+                      walletStatsByAgentId.get(record.agentSlug) ||
+                      walletStatsByAgentId.get(record.id)
+                    }
+                  />
                 ))}
                 {registeredMarketplaceAgents.map((agent) => (
-                  <RegisteredMarketplaceAgentCard
+                  <RegisteredAgentCard
                     agent={agent}
                     key={agent.id}
+                    walletStat={walletStatsByAgentId.get(agent.id)}
                   />
                 ))}
               </div>
@@ -4378,6 +4941,7 @@ function MyAgentsPage({
                       hirerId={hirerId}
                       key={record.id}
                       record={record}
+                      walletStat={walletStatsByAgentId.get(agent.id)}
                     />
                   );
                 })}
@@ -4421,6 +4985,147 @@ function MyAgentsPage({
   );
 }
 
+function WalletOverviewPanel({
+  action,
+  onClaim,
+  onTopUp,
+  summary,
+}: {
+  action: "top-up" | "claim" | null;
+  onClaim: () => void;
+  onTopUp: () => void;
+  summary: GatewayWalletSummaryPayload | null;
+}) {
+  const balance = summary?.balance;
+  const claimable = readSuiNumber(balance?.claimableEarningsSui);
+  const sourceLabel =
+    summary?.source === "ledger_only"
+      ? "Ledger only"
+      : summary?.source === "account_wallet_events"
+        ? "Wallet ledger"
+        : "Syncing";
+
+  return (
+    <section className="rounded-xl border border-border bg-white p-5 app-shadow">
+      <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+        <div>
+          <div className="flex items-center gap-2 text-sm font-medium text-[#1c1e54]">
+            <WalletCards className="size-4 text-primary" />
+            Available balance
+          </div>
+          <div className="number-cell mt-2 text-4xl font-light leading-tight text-[#1c1e54] md:text-5xl">
+            {formatSuiBalance(balance?.availableSui)}
+          </div>
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
+            Hired Agent calls spend from this balance. Creator earnings add to it
+            as your Agents complete work.
+          </p>
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-3 lg:w-[520px]">
+          <WalletMiniMetric
+            label="Earned"
+            value={formatSuiBalance(balance?.earnedSui)}
+          />
+          <WalletMiniMetric
+            label="Spent"
+            value={formatSuiBalance(balance?.spentSui)}
+          />
+          <WalletMiniMetric
+            label="Claimable"
+            value={formatSuiBalance(balance?.claimableEarningsSui)}
+          />
+        </div>
+      </div>
+
+      <div className="mt-5 flex flex-col gap-3 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="text-xs leading-5 text-muted-foreground">
+          {sourceLabel} · Top-ups {formatSuiBalance(balance?.topUpSui)} ·
+          Claimed {formatSuiBalance(balance?.claimedSui)}
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            disabled={Boolean(action)}
+            onClick={onTopUp}
+            size="sm"
+            type="button"
+            variant="secondary"
+          >
+            <ArrowUp /> {action === "top-up" ? "Charging..." : "Charge 1 SUI"}
+          </Button>
+          <Button
+            disabled={Boolean(action) || claimable <= 0}
+            onClick={onClaim}
+            size="sm"
+            type="button"
+          >
+            <CircleDollarSign /> {action === "claim" ? "Claiming..." : "Claim"}
+          </Button>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function WalletMiniMetric({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="rounded-lg border border-border bg-secondary px-3 py-3">
+      <div className="text-xs text-muted-foreground">{label}</div>
+      <div className="number-cell mt-1 text-lg font-medium text-[#1c1e54]">
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function AgentMoneySummary({
+  className = "",
+  mode,
+  stat,
+}: {
+  className?: string;
+  mode: "creator" | "hirer";
+  stat?: GatewayWalletAgentStatPayload;
+}) {
+  const items =
+    mode === "creator"
+      ? [
+          ["Agent total", formatSuiBalance(stat?.totalEarnedSui)],
+          ["My earnings", formatSuiBalance(stat?.myEarnedSui)],
+          ["Claimable", formatSuiBalance(stat?.claimableSui)],
+        ]
+      : [
+          ["Spent by me", formatSuiBalance(stat?.mySpentSui)],
+          ["Paid runs", (stat?.spentCallCount || 0).toString()],
+          [
+            "Last charge",
+            stat?.lastChargedAt ? formatAccessDate(stat.lastChargedAt) : "No calls",
+          ],
+        ];
+
+  return (
+    <div className={`grid gap-3 sm:grid-cols-3 ${className}`}>
+      {items.map(([label, value]) => (
+        <div
+          className="rounded-lg border border-border bg-[#f8fafc] px-3 py-3"
+          key={label}
+        >
+          <div className="text-xs text-muted-foreground">{label}</div>
+          <div className="number-cell mt-1 text-sm font-semibold text-[#1c1e54]">
+            {value}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function EmptyResult({ label }: { label: string }) {
   return (
     <div className="rounded-xl border border-border bg-white p-6 text-sm text-muted-foreground app-shadow">
@@ -4458,133 +5163,152 @@ function DashboardSummaryCard({
   );
 }
 
-function CreatedAgentCard({ record }: { record: CreatedAgentRecord }) {
-  const initials = record.agentName
-    .split(" ")
-    .map((word) => word[0])
-    .join("")
-    .slice(0, 2);
+function RegisteredAgentCard({
+  agent,
+  walletStat,
+}: {
+  agent: Agent;
+  walletStat?: GatewayWalletAgentStatPayload;
+}) {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const navigate = useNavigate();
+  const editPath = `/agents/${agent.id}/edit`;
 
   return (
-    <Card>
-      <CardHeader>
+    <Card
+      aria-label={`Edit ${agent.name}`}
+      className="interactive-card clickable-card self-start cursor-pointer transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8f82e8]/35 focus-visible:ring-offset-2"
+      onClick={(event) => {
+        const target = event.target;
+        if (
+          target instanceof Element &&
+          target.closest("button, a, input, textarea, select, [role='button']")
+        ) {
+          return;
+        }
+        navigate(editPath);
+      }}
+      onKeyDown={(event) => {
+        if (
+          event.target === event.currentTarget &&
+          (event.key === "Enter" || event.key === " ")
+        ) {
+          event.preventDefault();
+          navigate(editPath);
+        }
+      }}
+      role="link"
+      tabIndex={0}
+    >
+      <CardHeader className="pb-2.5">
         <div className="flex items-start justify-between gap-4">
           <div className="flex min-w-0 items-center gap-3">
-            <Avatar className="size-12">
-              <AvatarFallback className="bg-gradient-to-br from-[#533afd] to-[#00b7a8] text-white">
-                {initials || "AG"}
+            <Avatar className="size-11 shrink-0">
+              <AvatarFallback className="bg-gradient-to-br from-[#533afd] to-[#7c6cf6] text-white">
+                {agent.name
+                  .split(" ")
+                  .map((word) => word[0])
+                  .join("")}
               </AvatarFallback>
             </Avatar>
             <div className="min-w-0">
-              <CardTitle className="truncate text-xl">
-                {record.agentName}
-              </CardTitle>
-              <CardDescription>@agents/{record.agentSlug}</CardDescription>
+              <div className="flex flex-wrap items-center gap-2">
+                <CardTitle className="truncate text-base">{agent.name}</CardTitle>
+                <span className="number-cell inline-flex items-center gap-1 text-xs font-medium text-[#494556]">
+                  <Star className="size-3 fill-[#533afd] text-[#533afd]" />
+                  {agent.rating ? agent.rating.toFixed(1) : "New"}
+                </span>
+              </div>
+              <CardDescription className="truncate">by {agent.creator}</CardDescription>
             </div>
           </div>
-          <span className="shrink-0 rounded-full border border-[#533afd]/25 bg-secondary px-3 py-1 text-xs font-medium text-[#1c1e54]">
-            {record.status}
-          </span>
         </div>
       </CardHeader>
 
       <CardContent>
-        <p className="text-sm leading-6 text-[#273951]">
-          {record.description}
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <span className="rounded-full border border-[#d8d4e2] bg-[#f3f1f8] px-2 py-0.5 text-[10px] font-semibold uppercase text-[#494556]">
+            {agent.category}
+          </span>
+          <span>{formatRuns(agent.calls)} runs</span>
+        </div>
+
+        <p className="mt-3 truncate text-sm leading-5 text-[#273951]">
+          {agent.headline}
         </p>
 
-        {record.typicalOutputMediaUrl ? (
-          <div className="mt-5 overflow-hidden rounded-xl border border-border bg-secondary">
-            {record.typicalOutputMediaType === "video" ? (
-              <video
-                className="aspect-video w-full bg-black object-contain"
-                controls
-                src={record.typicalOutputMediaUrl}
-              />
-            ) : (
-              <img
-                alt={`${record.agentName} result preview`}
-                className="aspect-video w-full object-cover"
-                src={record.typicalOutputMediaUrl}
-              />
-            )}
+        <div className="mt-3 border-t border-border pt-3">
+          <div className="number-cell text-sm font-semibold text-[#0d253d]">
+            {formatAgentPriceShort(agent.pricePer1MTokensSui ?? agent.pricePerCallUsd)}
+            <span className="text-[11px] font-normal text-muted-foreground">
+              {" "}
+              / 1M tokens
+            </span>
+          </div>
+        </div>
+        <AgentMoneySummary
+          className="mt-3"
+          mode="creator"
+          stat={walletStat}
+        />
+
+        <div className="mt-3 grid grid-cols-[1fr_auto] gap-2">
+          <Button
+            className="w-full"
+            onClick={(event) => {
+              event.stopPropagation();
+              navigate(editPath);
+            }}
+            size="sm"
+            type="button"
+          >
+            <Braces /> Edit Agent
+          </Button>
+          <Button
+            aria-expanded={isExpanded}
+            className="px-3"
+            onClick={(event) => {
+              event.stopPropagation();
+              setIsExpanded((value) => !value);
+            }}
+            size="sm"
+            type="button"
+            variant="ghost"
+          >
+            <ChevronDown className={`transition ${isExpanded ? "rotate-180" : ""}`} />
+            Details
+          </Button>
+        </div>
+
+        {isExpanded ? (
+          <div
+            className="mt-3 rounded-xl border border-[#d8d4e2] bg-[#f8f7fb] p-4"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="text-sm font-semibold text-[#171452]">{agent.name}</div>
+            <p className="mt-2 text-sm leading-5 text-[#273951]">{agent.publicSummary}</p>
+            <dl className="mt-4 grid gap-2 border-t border-[#d8d4e2] pt-4 text-xs">
+              <div className="flex items-center justify-between gap-3">
+                <dt className="text-muted-foreground">Completed runs</dt>
+                <dd className="number-cell font-medium text-[#171452]">
+                  {formatRuns(agent.calls)}
+                </dd>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <dt className="text-muted-foreground">Average time</dt>
+                <dd className="number-cell font-medium text-[#171452]">
+                  {formatDuration(agent.latencyMs)}
+                </dd>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <dt className="text-muted-foreground">Price</dt>
+                <dd className="number-cell font-medium text-[#171452]">
+                  {formatAgentPrice(agent.pricePer1MTokensSui ?? agent.pricePerCallUsd)}
+                </dd>
+              </div>
+            </dl>
           </div>
         ) : null}
-
-        <div className="mt-5 grid gap-3 sm:grid-cols-2">
-          <Metric
-            icon={CircleDollarSign}
-            label="Token fee"
-            value={formatAgentPriceShort(record.pricePerCallUsd)}
-          />
-          <Metric
-            icon={PackageOpen}
-            label="Files"
-            value={record.fileCount.toString()}
-          />
-        </div>
-
-        <div className="mt-5 grid gap-3 text-xs text-muted-foreground sm:grid-cols-2">
-          <div className="rounded-lg border border-border bg-secondary px-3 py-2">
-            Walrus blob:{" "}
-            <span className="font-mono text-[#273951]">
-              {record.walrusBlobId}
-            </span>
-          </div>
-          <div className="rounded-lg border border-border bg-secondary px-3 py-2">
-            Sui object:{" "}
-            <span className="font-mono text-[#273951]">
-              {record.suiObjectId}
-            </span>
-          </div>
-          <div className="rounded-lg border border-border bg-secondary px-3 py-2 sm:col-span-2">
-            Ciphertext digest:{" "}
-            <span className="font-mono text-[#273951]">
-              {record.ciphertextDigest}
-            </span>
-          </div>
-        </div>
-
-        <div className="mt-4 text-xs text-muted-foreground">
-          Created {formatAccessDate(record.createdAt)} · {record.source}
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-function RegisteredMarketplaceAgentCard({ agent }: { agent: Agent }) {
-  return (
-    <Card>
-      <CardHeader>
-        <div className="flex items-start gap-3">
-          <Avatar className="size-12">
-            <AvatarFallback
-              className={`bg-gradient-to-br ${agent.accent} text-white`}
-            >
-              {agent.name
-                .split(" ")
-                .map((word) => word[0])
-                .join("")}
-            </AvatarFallback>
-          </Avatar>
-          <div>
-            <CardTitle className="text-xl">{agent.name}</CardTitle>
-            <CardDescription>{agent.handle}</CardDescription>
-          </div>
-        </div>
-      </CardHeader>
-
-      <CardContent>
-        <p className="text-sm leading-6 text-[#273951]">{agent.headline}</p>
-        <div className="mt-5 grid gap-3 sm:grid-cols-3">
-          <Metric icon={CircleDollarSign} label="Token fee" value={formatAgentPriceShort(agent.pricePerCallUsd)} />
-          <Metric icon={Clock3} label="Time" value={formatDuration(agent.latencyMs)} />
-          <Metric icon={TrendingUp} label="Runs" value={formatRuns(agent.calls)} />
-        </div>
-        <div className="mt-4 rounded-lg border border-border bg-secondary px-3 py-2 text-xs text-muted-foreground">
-          Published catalog agent · {agent.category} · {agent.creator}
-        </div>
       </CardContent>
     </Card>
   );
@@ -4594,10 +5318,12 @@ function MyAgentAccessCard({
   agent,
   hirerId,
   record,
+  walletStat,
 }: {
   agent: Agent;
   hirerId: string;
   record: AgentAccessRecord;
+  walletStat?: GatewayWalletAgentStatPayload;
 }) {
   const callSnippet = `hireme_call_agent({\n  "agent_id": "${agent.id}",\n  "task": "<your task>",\n  "hirer_id": "${hirerId}",\n  "hire_receipt_object_id": "${record.receiptObjectId}"\n})`;
 
@@ -4651,6 +5377,11 @@ function MyAgentAccessCard({
             value={formatAccessDate(record.expiresAt)}
           />
         </div>
+        <AgentMoneySummary
+          className="mt-3"
+          mode="hirer"
+          stat={walletStat}
+        />
 
         <div className="mt-5 rounded-xl border border-border bg-secondary p-4">
           <div className="mb-2 flex items-center gap-2 text-sm font-medium text-[#1c1e54]">
@@ -5098,6 +5829,20 @@ function formatAgentPriceShort(price: number) {
   return `${displayPrice} SUI`;
 }
 
+function formatSuiBalance(value: string | number | null | undefined) {
+  const amount = readSuiNumber(value);
+  const displayPrice =
+    amount >= 1
+      ? amount.toFixed(3).replace(/0+$/, "").replace(/\.$/, "")
+      : amount.toFixed(6).replace(/0+$/, "").replace(/\.$/, "") || "0";
+  return `${displayPrice} SUI`;
+}
+
+function readSuiNumber(value: string | number | null | undefined) {
+  const amount = Number(value);
+  return Number.isFinite(amount) && amount > 0 ? amount : 0;
+}
+
 function formatFileSize(size: number) {
   if (size >= 1024 * 1024) return `${(size / 1024 / 1024).toFixed(1)} MB`;
   if (size >= 1024) return `${Math.round(size / 1024)} KB`;
@@ -5117,6 +5862,48 @@ function normalizeCreatorInfoUrl(value: string | undefined) {
   } catch {
     return "";
   }
+}
+
+function getResultArtifactExplorers(agent: Agent) {
+  const network = agent.sealedHarness.network;
+  const explorerNetwork = network === "walrus-mainnet" ? "mainnet" : "testnet";
+  const artifacts: Array<{ label: string; value: string; href: string }> = [];
+  const walrusBlobId = agent.sealedHarness.walrusBlobId?.trim();
+  if (walrusBlobId && isExplorerReadyWalrusBlobId(walrusBlobId)) {
+    artifacts.push({
+      label: "Walrus blob ID",
+      value: walrusBlobId,
+      href: `https://walruscan.com/${explorerNetwork}/blob/${encodeURIComponent(
+        walrusBlobId,
+      )}`,
+    });
+  }
+
+  const suiObjectId = agent.sealedHarness.suiObjectId?.trim();
+  if (suiObjectId && isSuiObjectId(suiObjectId)) {
+    artifacts.push({
+      label: "Sui object ID",
+      value: suiObjectId,
+      href: `https://suiexplorer.com/object/${encodeURIComponent(
+        suiObjectId,
+      )}?network=${explorerNetwork}`,
+    });
+  }
+
+  return artifacts;
+}
+
+function isExplorerReadyWalrusBlobId(value: string) {
+  return (
+    value.length > 8 &&
+    !value.startsWith("gateway-managed:") &&
+    !value.startsWith("local_walrus_") &&
+    !/\s/.test(value)
+  );
+}
+
+function isSuiObjectId(value: string) {
+  return /^0x[0-9a-f]{64}$/i.test(value);
 }
 
 function formatAccessDate(value: string | null) {
@@ -5218,8 +6005,21 @@ async function uploadTypicalOutputMedia({
 }
 
 
-function CreateAgentPage({ user }: { user: AuthUser | null }) {
+function CreateAgentPage({
+  editingAgent,
+  editingRecord,
+  initialDraft,
+  mode = "create",
+  user,
+}: {
+  editingAgent?: Agent;
+  editingRecord?: CreatedAgentRecord;
+  initialDraft?: AgentDraft;
+  mode?: "create" | "edit";
+  user: AuthUser | null;
+}) {
   const navigate = useNavigate();
+  const isEditMode = mode === "edit";
   const stepRefs = useRef<(HTMLElement | null)[]>([]);
   const stepNavRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const [activeStep, setActiveStep] = useState(0);
@@ -5252,16 +6052,10 @@ function CreateAgentPage({ user }: { user: AuthUser | null }) {
       description: "Confirm and publish.",
     },
   ] as const;
-  const [draft, setDraft] = useState({
-    category: "" as Agent["category"] | "",
-    agentName: "",
-    headline: "",
-    description: "",
-    creatorInfoUrl: "",
-    howToUse: "",
-    sampleInput: "",
-    creatorFeeUsd: "",
-  });
+  const [draft, setDraft] = useState<AgentDraft>(() => ({
+    ...defaultAgentDraft(),
+    ...(initialDraft || {}),
+  }));
   const [agentFiles, setAgentFiles] = useState<File[]>([]);
   const [typicalOutputMedia, setTypicalOutputMedia] = useState<File | null>(null);
   const [typicalOutputMediaPreviewUrl, setTypicalOutputMediaPreviewUrl] =
@@ -5270,7 +6064,15 @@ function CreateAgentPage({ user }: { user: AuthUser | null }) {
     path: string;
     type: "image" | "video";
     url: string;
-  } | null>(null);
+  } | null>(() =>
+    editingAgent?.resultPreview.mediaUrl
+      ? {
+          path: editingRecord?.typicalOutputMediaPath || "",
+          type: editingAgent.resultPreview.mediaType || "image",
+          url: editingAgent.resultPreview.mediaUrl,
+        }
+      : null,
+  );
   const [sealedRecord, setSealedRecord] = useState<SealedHarnessRecord>();
   const [isSealing, setIsSealing] = useState(false);
   const [publishProgressIndex, setPublishProgressIndex] = useState<number | null>(null);
@@ -5284,8 +6086,12 @@ function CreateAgentPage({ user }: { user: AuthUser | null }) {
     Number.parseFloat(draft.creatorFeeUsd) || 0,
   );
   const totalPricePerCallUsd = basePriceUsd + creatorFeeUsd;
-  const agentSlug = slugifyAgentName(draft.agentName) || "new-agent";
-  const publicCapability = `${agentSlug}(task, context, budget_calls)`;
+  const agentSlug =
+    isEditMode && editingAgent
+      ? editingAgent.id
+      : slugifyAgentName(draft.agentName) || "new-agent";
+  const publicCapability =
+    editingAgent?.publicContract || `${agentSlug}(task, context, budget_calls)`;
   const memWalScope = `agent:${agentSlug}`;
   const currentTypicalOutputMediaUrl =
     typicalOutputMediaPreviewUrl || uploadedTypicalOutputMedia?.url || "";
@@ -5353,7 +6159,9 @@ function CreateAgentPage({ user }: { user: AuthUser | null }) {
         return null;
       }
       case 2: {
-        if (!agentFiles[0]) return "Upload the private Harness before continuing.";
+        if (!isEditMode && !agentFiles[0]) {
+          return "Upload the private Harness before continuing.";
+        }
         return null;
       }
       case 3: {
@@ -5405,6 +6213,82 @@ function CreateAgentPage({ user }: { user: AuthUser | null }) {
     setPublishProgressIndex(0);
     try {
       const harnessFile = agentFiles[0];
+      if (isEditMode) {
+        if (!editingAgent) {
+          throw new Error("No Agent is loaded for editing.");
+        }
+
+        setPublishProgressIndex(1);
+        const typicalOutputUpload = typicalOutputMedia
+          ? await uploadTypicalOutputMedia({
+              agentSlug,
+              file: typicalOutputMedia,
+            })
+          : uploadedTypicalOutputMedia;
+        const nextAgent = agentFromDraft({
+          baseAgent: editingAgent,
+          draft,
+          media: typicalOutputUpload,
+          pricePerCallUsd: totalPricePerCallUsd,
+        });
+
+        setPublishProgressIndex(2);
+        const gatewayRegistration = harnessFile
+          ? await updateAgentWithGatewayUpload({
+              agent: nextAgent,
+              harnessFile,
+              releaseNotes: "Updated from the HireMe web edit page.",
+              user,
+            })
+          : await updateAgentMetadataWithGateway({
+              agent: nextAgent,
+              user,
+            });
+        const registeredArtifact =
+          gatewayRegistration.protectedArtifact || nextAgent.sealedHarness;
+
+        setPublishProgressIndex(3);
+        if (editingRecord) {
+          writeCreatedAgentRecord({
+            ...editingRecord,
+            creatorInfoUrl:
+              normalizeCreatorInfoUrl(draft.creatorInfoUrl) || undefined,
+            agentName: nextAgent.name,
+            headline: nextAgent.headline,
+            description: nextAgent.publicSummary,
+            howToUse: nextAgent.howToUse,
+            typicalOutputSample: nextAgent.resultPreview.sample,
+            typicalOutputMediaUrl: nextAgent.resultPreview.mediaUrl,
+            typicalOutputMediaPath:
+              typicalOutputUpload?.path || editingRecord.typicalOutputMediaPath,
+            typicalOutputMediaType: nextAgent.resultPreview.mediaType,
+            pricePerCallUsd: totalPricePerCallUsd,
+            walrusBlobId:
+              "walrusBlobId" in registeredArtifact
+                ? registeredArtifact.walrusBlobId || editingRecord.walrusBlobId
+                : editingRecord.walrusBlobId,
+            suiObjectId:
+              "suiObjectId" in registeredArtifact
+                ? registeredArtifact.suiObjectId || editingRecord.suiObjectId
+                : editingRecord.suiObjectId,
+            ciphertextDigest:
+              "ciphertextDigest" in registeredArtifact
+                ? registeredArtifact.ciphertextDigest || editingRecord.ciphertextDigest
+                : editingRecord.ciphertextDigest,
+            fileCount: harnessFile ? 1 : editingRecord.fileCount,
+            createdAt: editingRecord.createdAt,
+            status: "Published",
+            source: "gateway",
+          });
+        }
+        if (typicalOutputUpload) {
+          setUploadedTypicalOutputMedia(typicalOutputUpload);
+        }
+        setPublishProgressIndex(4);
+        navigate(`/agents/${agentSlug}`);
+        return;
+      }
+
       if (!harnessFile) {
         throw new Error("Upload a .zip or .tar.gz Agent Harness before creating.");
       }
@@ -5571,7 +6455,7 @@ function CreateAgentPage({ user }: { user: AuthUser | null }) {
     },
     {
       label: "Protection",
-      ready: Boolean(agentFiles[0]),
+      ready: isEditMode || Boolean(agentFiles[0]),
     },
     {
       label: "How to use",
@@ -5611,9 +6495,16 @@ function CreateAgentPage({ user }: { user: AuthUser | null }) {
         return (
           <div className="grid gap-1.5 text-sm text-[#4e5968]">
             <div className="font-medium text-[#191f28]">
-              {agentFiles[0]?.name || "No Harness uploaded yet"}
+              {agentFiles[0]?.name ||
+                (isEditMode
+                  ? "Current protected Harness"
+                  : "No Harness uploaded yet")}
             </div>
-            <div>Private files stay protected inside the runner.</div>
+            <div>
+              {isEditMode && !agentFiles[0]
+                ? "Upload a replacement only when the private Harness changed."
+                : "Private files stay protected inside the runner."}
+            </div>
           </div>
         );
       case 3:
@@ -5649,7 +6540,10 @@ function CreateAgentPage({ user }: { user: AuthUser | null }) {
     <main className="min-h-[calc(100vh-4.25rem)] bg-[#f6f9fc]">
       <section className="px-4 py-3 md:px-8 md:py-4">
         <div className="mx-auto max-w-5xl">
-          <Link className="mb-2 inline-flex items-center gap-1.5 text-xs font-medium text-[#6b7684] transition hover:text-[#191f28]" to="/agents">
+          <Link
+            className="mb-2 inline-flex items-center gap-1.5 text-xs font-medium text-[#6b7684] transition hover:text-[#191f28]"
+            to={isEditMode ? "/my" : "/agents"}
+          >
             <ArrowLeft className="size-3.5" />
             Back
           </Link>
@@ -5874,10 +6768,14 @@ function CreateAgentPage({ user }: { user: AuthUser | null }) {
                   <label className="flex min-h-36 cursor-pointer flex-col items-center justify-center rounded-[24px] border-2 border-dashed border-[#8f7dff] bg-white p-6 text-center transition hover:bg-[#f8f5ff]">
                     <UploadCloud className="size-7 text-primary" />
                     <span className="mt-3 text-sm font-semibold text-[#1c1e54]">
-                      Upload private Harness archive
+                      {isEditMode
+                        ? "Upload replacement Harness archive"
+                        : "Upload private Harness archive"}
                     </span>
                     <span className="mt-1 text-xs text-muted-foreground">
-                      ZIP, TAR.GZ, or GZ · prompts, skills, examples, rubrics
+                      {isEditMode
+                        ? "Leave empty to keep the current protected Harness"
+                        : "ZIP, TAR.GZ, or GZ · prompts, skills, examples, rubrics"}
                     </span>
                     <input
                       accept=".zip,.gz,.tgz,.tar.gz,application/zip,application/gzip"
@@ -5892,7 +6790,11 @@ function CreateAgentPage({ user }: { user: AuthUser | null }) {
                     ) : null}
                   </label>
                 }
-                description="Upload the protected Harness that stays private."
+                description={
+                  isEditMode
+                    ? "Keep the current Harness or upload a protected replacement."
+                    : "Upload the protected Harness that stays private."
+                }
                 footer={
                   <div className="flex flex-col gap-3 border-t border-[#ece8fb] pt-3 md:flex-row md:items-center md:justify-between">
                     <Button onClick={handleBack} size="lg" type="button" variant="secondary">
@@ -6090,7 +6992,13 @@ function CreateAgentPage({ user }: { user: AuthUser | null }) {
                       type="button"
                     >
                       <ShieldCheck />
-                      {isSealing ? "Publishing..." : "Publish Agent"}
+                      {isSealing
+                        ? isEditMode
+                          ? "Saving..."
+                          : "Publishing..."
+                        : isEditMode
+                          ? "Save Agent"
+                          : "Publish Agent"}
                     </Button>
                   </div>
                 }

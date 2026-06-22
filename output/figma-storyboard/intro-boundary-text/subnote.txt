@@ -1,0 +1,2 @@
+HireMe runs protected Agents through MCP, returning results without raw
+Agent source.

@@ -1,0 +1,3 @@
+- Replace with web clip
+- Zoom on Agent profile
+- Zoom on PNG result

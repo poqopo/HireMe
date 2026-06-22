@@ -40,6 +40,7 @@ const gateway = spawn("node", ["apps/gateway/src/index.mjs"], {
   env: {
     ...process.env,
     HIREME_GATEWAY_PORT: String(port),
+    HIREME_GATEWAY_PUBLIC_URL: gatewayUrl,
     HIREME_GATEWAY_API_KEY: gatewayKey,
     HIREME_ALLOW_LOCAL_WALRUS_FALLBACK: "1",
     HIREME_WALRUS_REQUIRED: "0",
@@ -99,7 +100,7 @@ try {
     budget_calls: 1,
     response_mode: "direct_answer",
   });
-  assertGatewayAttachment(directCall, "direct gateway");
+  await assertGatewayAttachment(directCall, "direct gateway");
 
   const mcpCall = await callPluginThroughMcp({
     agentId,
@@ -184,7 +185,7 @@ async function postJson(url, body) {
   return response.json();
 }
 
-function assertGatewayAttachment(callResult, label) {
+async function assertGatewayAttachment(callResult, label) {
   const attachments = callResult.result?.attachments || [];
   const textAttachment = attachments.find((attachment) =>
     /text\/plain/.test(attachment.mimeType || ""),
@@ -213,11 +214,32 @@ function assertGatewayAttachment(callResult, label) {
   if (!Buffer.from(pngAttachment.data || "", "base64").equals(fixturePngBytes)) {
     throw new Error(`${label} PNG attachment bytes did not round-trip`);
   }
+  await assertDownloadUrl(textAttachment, Buffer.from(fixtureFileText, "utf8"), label);
+  await assertDownloadUrl(pngAttachment, fixturePngBytes, label);
   if ((callResult.result?.outputFiles || []).some((file) => file?.data)) {
     throw new Error(`${label} outputFiles metadata leaked base64 data`);
   }
+  if ((callResult.result?.outputFiles || []).some((file) => !file?.downloadUrl)) {
+    throw new Error(`${label} outputFiles metadata did not include downloadUrl`);
+  }
   if (callResult.userMemWal?.safeSummary?.attachmentCount !== 2) {
     throw new Error(`${label} memWal safe summary did not count the attachments`);
+  }
+}
+
+async function assertDownloadUrl(attachment, expectedBytes, label) {
+  if (!attachment.downloadUrl?.startsWith(`${gatewayUrl}/v1/agent-results/`)) {
+    throw new Error(`${label} attachment did not include a gateway downloadUrl`);
+  }
+  const response = await fetch(attachment.downloadUrl);
+  if (!response.ok) {
+    throw new Error(
+      `${label} downloadUrl failed: ${response.status} ${await response.text()}`,
+    );
+  }
+  const downloaded = Buffer.from(await response.arrayBuffer());
+  if (!downloaded.equals(expectedBytes)) {
+    throw new Error(`${label} downloadUrl bytes did not round-trip`);
   }
 }
 
@@ -230,6 +252,7 @@ async function callPluginThroughMcp({ agentId, hirerId, task }) {
       HIREME_HIRER_ID: hirerId,
       HIREME_MCP_GATEWAY_REQUIRED: "1",
       HIREME_MCP_GATEWAY_TIMEOUT_MS: "60000",
+      HIREME_MCP_RESULT_DIR: join(agentFolder, "mcp-results"),
     },
     stdio: ["pipe", "pipe", "inherit"],
   });
@@ -328,7 +351,7 @@ async function assertMcpResource(response) {
   if (text.includes(Buffer.from(fixtureFileText, "utf8").toString("base64"))) {
     throw new Error("MCP text response leaked the base64 blob");
   }
-  if (!text.includes("Output files saved locally:")) {
+  if (!text.includes("Output files saved to the working directory:")) {
     throw new Error("MCP text response did not include a local saved-file section");
   }
   const savedPaths = extractMarkdownLinkPaths(text);

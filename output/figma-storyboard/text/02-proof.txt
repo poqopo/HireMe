@@ -1,0 +1,3 @@
+- Show product home
+- Short narration only
+- No login walkthrough

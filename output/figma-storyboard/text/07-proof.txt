@@ -1,0 +1,3 @@
+- Show blob ID
+- Show artifact reference
+- Skip wallet details

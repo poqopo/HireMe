@@ -1,0 +1,2 @@
+REPLACE WITH: prepared creator publish flow and protected
+artifact metadata.

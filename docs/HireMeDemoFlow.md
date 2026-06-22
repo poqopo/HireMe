@@ -91,6 +91,7 @@ They are asking a protected Agent to create the character and return the image r
 Use a prepared prompt:
 
 ```text
+Using Dokpami Maker,
 Create a Dokpami wizard eagle character.
 Make it a centered character asset with a simple plain background.
 ```

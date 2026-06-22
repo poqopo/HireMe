@@ -1,0 +1,2 @@
+Walrus stores protected Agent artifacts safely and verifiably
+while the public surface only shows safe metadata.

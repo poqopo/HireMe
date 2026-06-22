@@ -1,0 +1,3 @@
+- Profile fields
+- Protected package status
+- No upload wizard detour

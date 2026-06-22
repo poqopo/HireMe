@@ -1,0 +1,3 @@
+- Show blob/artifact reference
+- Avoid wallet funding details
+- Payload is not public source

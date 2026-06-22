@@ -1,0 +1,3 @@
+- Trusted gateway
+- MCP-native
+- Protected Agent result

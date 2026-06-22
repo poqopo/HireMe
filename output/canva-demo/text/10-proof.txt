@@ -1,0 +1,3 @@
+- Client task -> MCP call
+- Conversation -> MemWal recall
+- Encrypted memory blobs on Walrus

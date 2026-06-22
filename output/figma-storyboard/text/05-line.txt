@@ -1,0 +1,2 @@
+MCP turns the hired capability into a tool the client can call
+where they already work.

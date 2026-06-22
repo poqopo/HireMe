@@ -1,0 +1,1 @@
+Its value lives in private prompts, skills, tools, memory rules, and review habits.

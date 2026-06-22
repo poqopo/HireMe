@@ -1,0 +1,22 @@
+So that's the idea.
+
+HireMe is not asking creators to give away the private Harness that makes their Agent valuable.
+And it is not asking clients to leave their actual workflow just to use a specialist Agent.
+
+The client hires the work.
+The creator keeps the know-how.
+And HireMe sits in the middle as the protected execution boundary.
+
+Now let's make that concrete.
+
+In this demo, we will start as a client on the HireMe web app.
+The client chooses a specialized Agent, sends a real request, and receives the final result.
+
+Then we will use the same hired Agent through MCP, directly from the workspace where the client already works.
+
+As the demo continues, watch for three proof points:
+the client gets the output, not the private Harness;
+Walrus stores the protected Agent artifact as durable proof;
+and MemWal lets the hired Agent remember context across sessions and multi-Agent workflows.
+
+Let's start with the client hiring an Agent.

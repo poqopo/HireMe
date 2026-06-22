@@ -346,6 +346,7 @@ const sessions = new Map([[defaultInstallationId, "walrus-researcher"]]);
 const mcpConversationSessions = new Map();
 const ledger = [];
 const agentJobs = new Map();
+const agentResultAttachmentBlobs = new Map();
 const agentEntitlements = new Map();
 const suiPaymentIntents = new Map();
 const suiSettlementEvents = [];
@@ -359,6 +360,13 @@ const oauthScopes = ["hireme:agents", "hireme:call", "hireme:manage"];
 const defaultAgentJobTtlMs = Math.max(
   60_000,
   Math.trunc(Number(process.env.HIREME_AGENT_JOB_TTL_MS || "7200000") || 7_200_000),
+);
+const defaultAgentResultDownloadTtlMs = Math.max(
+  60_000,
+  Math.trunc(
+    Number(process.env.HIREME_AGENT_RESULT_DOWNLOAD_TTL_MS || defaultAgentJobTtlMs) ||
+      defaultAgentJobTtlMs,
+  ),
 );
 
 for (const agent of agents) {
@@ -452,6 +460,11 @@ const server = createServer(async (req, res) => {
         walrusPayerConfigured: isWalrusPayerConfigured(),
         suiNetwork: process.env.SUI_NETWORK || "testnet",
       });
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname.startsWith("/v1/agent-results/")) {
+      await sendAgentResultDownload(req, res, url);
       return;
     }
 
@@ -611,6 +624,21 @@ const server = createServer(async (req, res) => {
 
     if (req.method === "POST" && url.pathname === "/v1/my/payment-activity") {
       sendJson(res, 200, await listMySuiPaymentActivity(body));
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/v1/my/wallet-summary") {
+      sendJson(res, 200, await myWalletSummary(body));
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/v1/my/wallet/top-up") {
+      sendJson(res, 200, await topUpMyWallet(body));
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/v1/my/wallet/claim") {
+      sendJson(res, 200, await claimMyWalletEarnings(body));
       return;
     }
 
@@ -3877,6 +3905,557 @@ async function listMySuiPaymentActivity(args = {}) {
   };
 }
 
+async function myWalletSummary(args = {}) {
+  const admin = createSupabaseAdminClient();
+  if (!admin) {
+    return emptyMyWalletSummary(args, "SUPABASE_SERVICE_ROLE_KEY is not configured.");
+  }
+
+  const context = await resolveWalletAccountContext(admin, args);
+  const state = await buildWalletState(admin, context);
+  return publicMyWalletSummary(state);
+}
+
+async function topUpMyWallet(args = {}) {
+  const admin = createSupabaseAdminClient();
+  if (!admin) {
+    throw Object.assign(new Error("Supabase is required for wallet top-up."), {
+      statusCode: 503,
+      code: "wallet_storage_unavailable",
+    });
+  }
+
+  const amountMist = readWalletActionAmountMist(args, "1");
+  const context = await resolveWalletAccountContext(admin, args);
+  await persistAccountWalletEvent(admin, {
+    context,
+    eventType: "top_up",
+    amountMist,
+    txDigest: args.tx_digest || args.txDigest || null,
+    metadata: {
+      source: args.source || "web_my_agents",
+      memo: "App balance top-up",
+    },
+  });
+
+  const state = await buildWalletState(admin, context);
+  return {
+    ...publicMyWalletSummary(state),
+    action: {
+      type: "top_up",
+      amountMist: amountMist.toString(),
+      amountSui: formatMistAsSui(amountMist),
+    },
+  };
+}
+
+async function claimMyWalletEarnings(args = {}) {
+  const admin = createSupabaseAdminClient();
+  if (!admin) {
+    throw Object.assign(new Error("Supabase is required for wallet claim."), {
+      statusCode: 503,
+      code: "wallet_storage_unavailable",
+    });
+  }
+
+  const context = await resolveWalletAccountContext(admin, args);
+  const currentState = await buildWalletState(admin, context);
+  const amountMist = hasWalletActionAmount(args)
+    ? readWalletActionAmountMist(args, null)
+    : currentState.claimableEarningsMist;
+
+  if (amountMist <= 0n) {
+    throw Object.assign(new Error("No claimable creator earnings are available."), {
+      statusCode: 400,
+      code: "nothing_to_claim",
+    });
+  }
+  if (amountMist > currentState.claimableEarningsMist) {
+    throw Object.assign(new Error("Claim amount exceeds available creator earnings."), {
+      statusCode: 400,
+      code: "claim_amount_exceeds_available",
+    });
+  }
+
+  await persistAccountWalletEvent(admin, {
+    context,
+    eventType: "claim",
+    amountMist,
+    txDigest: args.tx_digest || args.txDigest || null,
+    metadata: {
+      source: args.source || "web_my_agents",
+      destinationAddress:
+        normalizeSuiAddress(
+          args.destination_address ||
+            args.destinationAddress ||
+            args.wallet_address ||
+            args.walletAddress,
+        ) || null,
+      memo: "Creator earnings claim",
+    },
+  });
+
+  const state = await buildWalletState(admin, context);
+  return {
+    ...publicMyWalletSummary(state),
+    action: {
+      type: "claim",
+      amountMist: amountMist.toString(),
+      amountSui: formatMistAsSui(amountMist),
+    },
+  };
+}
+
+function emptyMyWalletSummary(args = {}, reason = "wallet summary unavailable") {
+  const hirerId = readHirerId(args);
+  return {
+    gatewayCall: true,
+    status: "unavailable",
+    reason,
+    account: {
+      hirerId,
+      profileIds: [],
+      walletAddress: normalizeSuiAddress(args.wallet_address || args.walletAddress) || null,
+    },
+    balance: publicWalletBalance({
+      availableMist: 0n,
+      netBalanceMist: 0n,
+      claimableEarningsMist: 0n,
+      topUpMist: 0n,
+      spentMist: 0n,
+      earnedMist: 0n,
+      claimedMist: 0n,
+    }),
+    agents: [],
+    source: "unavailable",
+  };
+}
+
+async function resolveWalletAccountContext(admin, args = {}) {
+  const hirerId = readHirerId(args);
+  const email = String(args.email || args.hirer_email || args.hirerEmail || "")
+    .trim()
+    .toLowerCase();
+  const displayName = String(args.display_name || args.displayName || args.name || "").trim();
+  const walletAddress = normalizeSuiAddress(
+    args.wallet_address || args.walletAddress || args.wallet,
+  );
+  const profileRows = new Map();
+
+  const addProfile = (profile) => {
+    if (profile?.id) profileRows.set(profile.id, profile);
+  };
+
+  try {
+    addProfile(await resolveLedgerHirerProfile(admin, { hirerId, email }));
+  } catch {
+    // The remaining identity probes can still find existing wallet or creator profiles.
+  }
+  try {
+    addProfile(await findOrCreateGatewayHirerProfile(admin, { hirerId, email }));
+  } catch {
+    // Wallet summary should degrade to existing profiles instead of failing early.
+  }
+
+  for (const row of await listWalletIdentityProfiles(admin, {
+    hirerId,
+    email,
+    displayName,
+    walletAddress,
+  })) {
+    addProfile(row);
+  }
+
+  return {
+    hirerId,
+    email,
+    displayName,
+    walletAddress,
+    identityKeys: walletIdentityKeys({ hirerId, email, displayName, walletAddress }),
+    profileRows: Array.from(profileRows.values()),
+    profileIds: Array.from(profileRows.keys()),
+  };
+}
+
+async function buildWalletState(admin, context) {
+  const profileIds = context.profileIds;
+  const walletEvents = await listStoredAccountWalletEvents(admin, profileIds);
+  const ownedAgents = await listWalletOwnedAgents(admin, profileIds);
+  const ownedAgentIds = ownedAgents.map((agent) => agent.id);
+  const [spendingRows, earningRows, totalOwnedAgentRows] = await Promise.all([
+    listMcpLedgerRows(admin, { field: "hirer_id", values: profileIds }),
+    listMcpLedgerRows(admin, { field: "creator_id", values: profileIds }),
+    listMcpLedgerRows(admin, { field: "agent_id", values: ownedAgentIds }),
+  ]);
+
+  let topUpMist = 0n;
+  let claimedMist = 0n;
+  let adjustmentMist = 0n;
+  for (const event of walletEvents) {
+    const amountMist = parseMist(event.amount_mist);
+    if (event.event_type === "top_up") topUpMist += amountMist;
+    if (event.event_type === "claim") claimedMist += amountMist;
+    if (event.event_type === "adjustment") adjustmentMist += amountMist;
+  }
+
+  const spentMist = sumLedgerMist(spendingRows);
+  const earnedMist = sumLedgerMist(earningRows);
+  const netBalanceMist = topUpMist + adjustmentMist + earnedMist - spentMist - claimedMist;
+  const availableMist = netBalanceMist > 0n ? netBalanceMist : 0n;
+  const claimableEarningsMist =
+    earnedMist > claimedMist ? earnedMist - claimedMist : 0n;
+
+  const agentStats = new Map();
+  for (const agent of ownedAgents) {
+    ensureWalletAgentStat(agentStats, {
+      agentUuid: agent.id,
+      agentId: agent.slug,
+      name: agent.name,
+      owned: true,
+    });
+  }
+  for (const row of totalOwnedAgentRows) {
+    const stat = ensureWalletAgentStat(agentStats, ledgerRowAgentRef(row));
+    stat.totalEarnedMist += ledgerRowMist(row);
+    stat.totalCallCount += 1;
+  }
+  for (const row of earningRows) {
+    const stat = ensureWalletAgentStat(agentStats, ledgerRowAgentRef(row));
+    stat.myEarnedMist += ledgerRowMist(row);
+    stat.earnedCallCount += 1;
+    stat.lastEarnedAt = latestIso(stat.lastEarnedAt, row.created_at);
+  }
+  for (const row of spendingRows) {
+    const stat = ensureWalletAgentStat(agentStats, ledgerRowAgentRef(row));
+    stat.mySpentMist += ledgerRowMist(row);
+    stat.spentCallCount += 1;
+    stat.lastChargedAt = latestIso(stat.lastChargedAt, row.created_at);
+  }
+
+  return {
+    context,
+    walletEvents,
+    walletEventSource: walletEvents.length ? "account_wallet_events" : "ledger_only",
+    topUpMist,
+    claimedMist,
+    adjustmentMist,
+    spentMist,
+    earnedMist,
+    netBalanceMist,
+    availableMist,
+    claimableEarningsMist,
+    spendingRows,
+    earningRows,
+    ownedAgents,
+    agentStats: Array.from(agentStats.values()).sort((a, b) => {
+      const aScore = a.myEarnedMist + a.mySpentMist + a.totalEarnedMist;
+      const bScore = b.myEarnedMist + b.mySpentMist + b.totalEarnedMist;
+      if (bScore > aScore) return 1;
+      if (bScore < aScore) return -1;
+      return a.agentId.localeCompare(b.agentId);
+    }),
+  };
+}
+
+function publicMyWalletSummary(state) {
+  return {
+    gatewayCall: true,
+    status: "ready",
+    account: {
+      hirerId: state.context.hirerId,
+      email: state.context.email || null,
+      displayName: state.context.displayName || null,
+      walletAddress: state.context.walletAddress || null,
+      profileIds: state.context.profileIds,
+    },
+    balance: publicWalletBalance(state),
+    agents: state.agentStats.map((stat) =>
+      publicWalletAgentStat(stat, state.earnedMist, state.claimedMist),
+    ),
+    ledger: {
+      spendCallCount: state.spendingRows.length,
+      earningCallCount: state.earningRows.length,
+      ownedAgentCount: state.ownedAgents.length,
+    },
+    source: state.walletEventSource,
+  };
+}
+
+function publicWalletBalance(state) {
+  return {
+    availableMist: state.availableMist.toString(),
+    availableSui: formatMistAsSui(state.availableMist),
+    netBalanceMist: state.netBalanceMist.toString(),
+    netBalanceSui: formatMistAsSui(state.netBalanceMist > 0n ? state.netBalanceMist : 0n),
+    claimableEarningsMist: state.claimableEarningsMist.toString(),
+    claimableEarningsSui: formatMistAsSui(state.claimableEarningsMist),
+    topUpMist: state.topUpMist.toString(),
+    topUpSui: formatMistAsSui(state.topUpMist),
+    spentMist: state.spentMist.toString(),
+    spentSui: formatMistAsSui(state.spentMist),
+    earnedMist: state.earnedMist.toString(),
+    earnedSui: formatMistAsSui(state.earnedMist),
+    claimedMist: state.claimedMist.toString(),
+    claimedSui: formatMistAsSui(state.claimedMist),
+  };
+}
+
+function publicWalletAgentStat(stat, totalEarnedMist, claimedMist) {
+  const allocatedClaimMist =
+    totalEarnedMist > 0n ? (claimedMist * stat.myEarnedMist) / totalEarnedMist : 0n;
+  const claimableMist =
+    stat.myEarnedMist > allocatedClaimMist ? stat.myEarnedMist - allocatedClaimMist : 0n;
+  return {
+    agentId: stat.agentId,
+    agentUuid: stat.agentUuid || null,
+    name: stat.name || stat.agentId,
+    owned: stat.owned,
+    totalEarnedMist: stat.totalEarnedMist.toString(),
+    totalEarnedSui: formatMistAsSui(stat.totalEarnedMist),
+    myEarnedMist: stat.myEarnedMist.toString(),
+    myEarnedSui: formatMistAsSui(stat.myEarnedMist),
+    claimableMist: claimableMist.toString(),
+    claimableSui: formatMistAsSui(claimableMist),
+    mySpentMist: stat.mySpentMist.toString(),
+    mySpentSui: formatMistAsSui(stat.mySpentMist),
+    totalCallCount: stat.totalCallCount,
+    earnedCallCount: stat.earnedCallCount,
+    spentCallCount: stat.spentCallCount,
+    lastEarnedAt: stat.lastEarnedAt || null,
+    lastChargedAt: stat.lastChargedAt || null,
+  };
+}
+
+async function listWalletIdentityProfiles(admin, {
+  hirerId,
+  email,
+  displayName,
+  walletAddress,
+}) {
+  const keys = walletIdentityKeys({ hirerId, email, displayName, walletAddress });
+  try {
+    const { data, error } = await admin
+      .from("profiles")
+      .select("id, display_name, username, sui_address, payout_address")
+      .limit(2000);
+    if (error || !Array.isArray(data)) return [];
+    return data.filter((row) => {
+      const rowKeys = walletIdentityKeys({
+        hirerId: row.id,
+        email: "",
+        displayName: row.display_name || row.username || "",
+        walletAddress: row.sui_address || row.payout_address || "",
+      });
+      if (walletAddress) {
+        rowKeys.add(normalizeHirerId(walletAddress));
+      }
+      return Array.from(rowKeys).some((key) => keys.has(key));
+    });
+  } catch {
+    return [];
+  }
+}
+
+function walletIdentityKeys({
+  hirerId,
+  email,
+  displayName,
+  walletAddress,
+}) {
+  const values = [
+    hirerId,
+    email,
+    email && String(email).split("@")[0],
+    displayName,
+    walletAddress,
+  ];
+  const keys = new Set();
+  for (const value of values) {
+    const normalized = normalizeHirerId(value || "");
+    if (normalized && normalized !== "local-hirer") keys.add(normalized);
+  }
+  return keys;
+}
+
+async function listStoredAccountWalletEvents(admin, profileIds) {
+  if (!profileIds.length) return [];
+  try {
+    const { data, error } = await admin
+      .from("account_wallet_events")
+      .select("event_id, profile_id, event_type, amount_mist, amount_sui, status, created_at")
+      .in("profile_id", profileIds)
+      .eq("status", "completed")
+      .order("created_at", { ascending: false })
+      .limit(1000);
+    if (error || !Array.isArray(data)) return [];
+    return data;
+  } catch {
+    return [];
+  }
+}
+
+async function persistAccountWalletEvent(admin, {
+  context,
+  eventType,
+  amountMist,
+  txDigest,
+  metadata,
+}) {
+  const profileId = context.profileIds[0];
+  if (!profileId) {
+    throw Object.assign(new Error("No wallet profile is available for this account."), {
+      statusCode: 400,
+      code: "wallet_profile_missing",
+    });
+  }
+
+  const eventId = `wallet_${eventType}_${Date.now().toString(36)}_${randomBytes(5).toString("hex")}`;
+  const { error } = await admin.from("account_wallet_events").insert({
+    event_id: eventId,
+    profile_id: profileId,
+    event_type: eventType,
+    amount_mist: amountMist.toString(),
+    amount_sui: formatMistAsSui(amountMist),
+    currency: "SUI",
+    network: defaultSuiPaymentNetwork,
+    tx_digest: txDigest || null,
+    status: "completed",
+    metadata: {
+      ...(metadata || {}),
+      hirerId: context.hirerId,
+      walletAddress: context.walletAddress || null,
+    },
+  });
+  if (error) {
+    throw Object.assign(new Error(`Wallet event write failed: ${error.message}`), {
+      statusCode: 500,
+      code: "wallet_event_write_failed",
+    });
+  }
+  return eventId;
+}
+
+async function listWalletOwnedAgents(admin, profileIds) {
+  if (!profileIds.length) return [];
+  try {
+    const { data, error } = await admin
+      .from("agents")
+      .select("id, slug, name, creator_id")
+      .in("creator_id", profileIds)
+      .limit(500);
+    if (error || !Array.isArray(data)) return [];
+    return data;
+  } catch {
+    return [];
+  }
+}
+
+async function listMcpLedgerRows(admin, { field, values }) {
+  if (!values.length) return [];
+  if (!["hirer_id", "creator_id", "agent_id"].includes(field)) return [];
+  try {
+    const { data, error } = await admin
+      .from("mcp_call_ledger")
+      .select("agent_id, hirer_id, creator_id, amount_mist, amount_sui, input_tokens, output_tokens, created_at, agents(slug, name)")
+      .eq("status", "completed")
+      .in(field, values)
+      .order("created_at", { ascending: false })
+      .limit(5000);
+    if (error || !Array.isArray(data)) return [];
+    return data;
+  } catch {
+    return [];
+  }
+}
+
+function ensureWalletAgentStat(stats, {
+  agentUuid,
+  agentId,
+  name,
+  owned = false,
+}) {
+  const key = agentId || agentUuid || "unknown-agent";
+  if (!stats.has(key)) {
+    stats.set(key, {
+      agentId: key,
+      agentUuid: agentUuid || null,
+      name: name || key,
+      owned,
+      totalEarnedMist: 0n,
+      myEarnedMist: 0n,
+      mySpentMist: 0n,
+      totalCallCount: 0,
+      earnedCallCount: 0,
+      spentCallCount: 0,
+      lastEarnedAt: null,
+      lastChargedAt: null,
+    });
+  }
+  const stat = stats.get(key);
+  stat.owned = stat.owned || owned;
+  stat.name = stat.name || name || key;
+  stat.agentUuid = stat.agentUuid || agentUuid || null;
+  return stat;
+}
+
+function ledgerRowAgentRef(row) {
+  return {
+    agentUuid: row.agent_id,
+    agentId: row.agents?.slug || row.agent_id,
+    name: row.agents?.name || row.agents?.slug || row.agent_id,
+  };
+}
+
+function sumLedgerMist(rows) {
+  return rows.reduce((total, row) => total + ledgerRowMist(row), 0n);
+}
+
+function ledgerRowMist(row) {
+  return parseMist(row.amount_mist);
+}
+
+function latestIso(current, next) {
+  if (!next) return current || null;
+  if (!current) return next;
+  return String(next).localeCompare(String(current)) > 0 ? next : current;
+}
+
+function hasWalletActionAmount(args = {}) {
+  return (
+    args.amount_mist !== undefined ||
+    args.amountMist !== undefined ||
+    args.amount_sui !== undefined ||
+    args.amountSui !== undefined
+  );
+}
+
+function readWalletActionAmountMist(args = {}, defaultSui) {
+  const rawMist = args.amount_mist || args.amountMist;
+  if (rawMist !== undefined && rawMist !== null && rawMist !== "") {
+    const amountMist = parseMist(rawMist);
+    if (amountMist > 0n) return amountMist;
+    throw Object.assign(new Error("amount_mist must be positive"), {
+      statusCode: 400,
+      code: "bad_wallet_amount",
+    });
+  }
+  const rawSui = args.amount_sui || args.amountSui || defaultSui;
+  if (rawSui === null || rawSui === undefined || rawSui === "") {
+    throw Object.assign(new Error("amount_sui is required"), {
+      statusCode: 400,
+      code: "bad_wallet_amount",
+    });
+  }
+  const amountMist = parseSuiToMist(rawSui);
+  if (amountMist <= 0n) {
+    throw Object.assign(new Error("amount_sui must be positive"), {
+      statusCode: 400,
+      code: "bad_wallet_amount",
+    });
+  }
+  return amountMist;
+}
+
 function gatewayWhoami(args = {}) {
   const hirerId = readHirerId(args);
   return {
@@ -6580,6 +7159,19 @@ function buildAgentResultAttachment({
   }
   const safeName = safeUploadName(filename || `agent-result-${index + 1}`);
   const digest = `sha256:${sha256Hex(bytes)}`;
+  const downloadPath = buildAgentResultDownloadPath({
+    callId,
+    index: index + 1,
+    filename: safeName,
+  });
+  storeAgentResultAttachmentBlob({
+    callId,
+    index: index + 1,
+    filename: safeName,
+    mimeType: mimeType || guessMimeType(safeName),
+    digest,
+    bytes,
+  });
   return {
     type: "file",
     name: safeName,
@@ -6590,9 +7182,66 @@ function buildAgentResultAttachment({
     encoding: "base64",
     data: Buffer.from(bytes).toString("base64"),
     uri: `hireme-result://${callId}/${index + 1}/${encodeURIComponent(safeName)}`,
+    downloadPath,
+    downloadUrl: `${gatewayPublicBaseUrl()}${downloadPath}`,
     source,
     creatorSecretsReturned: false,
   };
+}
+
+function buildAgentResultDownloadPath({ callId, index, filename }) {
+  return `/v1/agent-results/${encodeURIComponent(safeUploadName(callId))}/${encodeURIComponent(
+    String(index),
+  )}/${encodeURIComponent(safeUploadName(filename))}`;
+}
+
+function gatewayPublicBaseUrl() {
+  return String(
+    process.env.HIREME_GATEWAY_PUBLIC_URL ||
+      process.env.HIREME_MCP_GATEWAY_URL ||
+      process.env.RENDER_EXTERNAL_URL ||
+      "https://hireme-gateway.onrender.com",
+  ).replace(/\/$/, "");
+}
+
+function storeAgentResultAttachmentBlob({
+  callId,
+  index,
+  filename,
+  mimeType,
+  digest,
+  bytes,
+}) {
+  pruneAgentResultAttachmentBlobs();
+  agentResultAttachmentBlobs.set(
+    agentResultAttachmentBlobKey({ callId, index, filename }),
+    {
+      callId: safeUploadName(callId),
+      index: Number(index),
+      filename: safeUploadName(filename),
+      mimeType,
+      digest,
+      bytes: Buffer.from(bytes),
+      createdAtMs: Date.now(),
+    },
+  );
+}
+
+function pruneAgentResultAttachmentBlobs() {
+  const cutoff = Date.now() - defaultAgentResultDownloadTtlMs;
+  for (const [key, entry] of agentResultAttachmentBlobs) {
+    if (!entry?.createdAtMs || entry.createdAtMs < cutoff) {
+      agentResultAttachmentBlobs.delete(key);
+    }
+  }
+}
+
+function agentResultAttachmentBlobKey({ callId, index, filename }) {
+  return [
+    safeUploadName(callId),
+    Number.parseInt(String(index), 10),
+    safeUploadName(filename),
+  ].join(":");
 }
 
 function readAttachmentPath(reference) {
@@ -7556,6 +8205,39 @@ async function persistRegisteredAgentToSupabase({ agent, artifact, args }) {
         { onConflict: "agent_version_id,kind" },
       ),
       `upsert protected artifact for ${agent.id}`,
+    );
+
+    await supabaseMust(
+      admin.from("walrus_agent_artifacts").upsert(
+        {
+          agent_id: agent.id,
+          folder_name: agent.id,
+          walrus_blob_id: artifact.walrusBlobId,
+          walrus_sui_object_id: artifact.suiObjectId,
+          archive_digest:
+            args.metadata?.plaintextArchiveDigest ||
+            artifact.ciphertextDigest ||
+            artifact.folderManifestDigest,
+          archive_size_bytes: Math.max(
+            1,
+            Math.trunc(
+              readOptionalNumber(args.metadata?.plaintextArchiveSizeBytes, 1),
+            ),
+          ),
+          archive_format: artifact.archiveFormat,
+          storage_provider: "walrus",
+          storage_network: artifact.network.replace(/^walrus-/, ""),
+          metadata: {
+            source: "protected_artifacts_public_registry",
+            agentVersionId: versionRow.id,
+            ciphertextDigest: artifact.ciphertextDigest,
+            folderManifestDigest: artifact.folderManifestDigest,
+            archiveFormat: artifact.archiveFormat,
+          },
+        },
+        { onConflict: "walrus_blob_id" },
+      ),
+      `upsert public walrus artifact registry for ${agent.id}`,
     );
 
     await supabaseMust(
@@ -10693,6 +11375,79 @@ function sendJson(res, statusCode, payload) {
   }
   res.setHeader("content-type", "application/json; charset=utf-8");
   res.end(JSON.stringify(payload));
+}
+
+async function sendAgentResultDownload(req, res, url) {
+  const parsed = parseAgentResultDownloadPath(url.pathname);
+  if (!parsed) {
+    sendJson(res, 404, { error: "not_found", path: url.pathname });
+    return;
+  }
+
+  pruneAgentResultAttachmentBlobs();
+  const key = agentResultAttachmentBlobKey(parsed);
+  const entry = agentResultAttachmentBlobs.get(key);
+  let bytes = entry?.bytes || null;
+  let mimeType = entry?.mimeType || guessMimeType(parsed.filename);
+
+  if (!bytes) {
+    const fallbackPath = resolve(
+      ".hireme/gateway/results",
+      parsed.callId,
+      parsed.filename,
+    );
+    try {
+      const allowedPath = await resolveAllowedAgentResultPath(fallbackPath);
+      bytes = await readFile(allowedPath);
+      mimeType = guessMimeType(allowedPath);
+    } catch {
+      bytes = null;
+    }
+  }
+
+  if (!bytes) {
+    sendJson(res, 404, {
+      error: "result_file_not_found",
+      path: url.pathname,
+      reason:
+        "This result file is no longer available from this gateway process. Poll the agent result again or rerun the Agent call.",
+    });
+    return;
+  }
+
+  res.statusCode = 200;
+  res.setHeader("access-control-allow-origin", "*");
+  res.setHeader("access-control-allow-methods", "GET,OPTIONS");
+  res.setHeader("access-control-allow-headers", "content-type,authorization,x-hireme-gateway-key");
+  res.setHeader("cache-control", "private, no-store");
+  res.setHeader("x-content-type-options", "nosniff");
+  res.setHeader("content-type", mimeType);
+  res.setHeader("content-length", String(bytes.byteLength));
+  res.setHeader(
+    "content-disposition",
+    `attachment; filename="${parsed.filename.replace(/"/g, "")}"`,
+  );
+  res.end(bytes);
+}
+
+function parseAgentResultDownloadPath(pathname) {
+  const parts = String(pathname || "").split("/").filter(Boolean);
+  if (parts.length < 5 || parts[0] !== "v1" || parts[1] !== "agent-results") {
+    return null;
+  }
+  const callId = safeUploadName(decodePathSegment(parts[2]));
+  const index = Number.parseInt(decodePathSegment(parts[3]), 10);
+  const filename = safeUploadName(decodePathSegment(parts.slice(4).join("/")));
+  if (!callId || !Number.isFinite(index) || index <= 0 || !filename) return null;
+  return { callId, index, filename };
+}
+
+function decodePathSegment(value) {
+  try {
+    return decodeURIComponent(String(value || ""));
+  } catch {
+    return "";
+  }
 }
 
 function sendWebSessionJson(req, res, statusCode, payload) {

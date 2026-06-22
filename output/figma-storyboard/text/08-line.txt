@@ -1,0 +1,2 @@
+MCP conversations remember context across sessions and agents, so
+the next call can continue from prior work.
