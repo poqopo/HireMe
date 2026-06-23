@@ -644,8 +644,17 @@ function App() {
     }
 
     void applySession();
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
       if (!session) {
+        const localUser = readStoredAuthUser();
+        if (
+          event !== "SIGNED_OUT" &&
+          typeof localUser?.provider === "string" &&
+          localUser.provider.startsWith("local")
+        ) {
+          setAuthUser(localUser);
+          return;
+        }
         setAuthUser(null);
         writeStoredAuthUser(null);
         return;
@@ -2197,7 +2206,7 @@ function relativeGatewayUrl(path: string) {
 
 function walrusExplorerBlobUrl(blobId?: string | null) {
   if (!blobId) return null;
-  return `https://walruscan.com/mainnet/blob/${encodeURIComponent(blobId)}`;
+  return `https://walruscan.com/testnet/blob/${encodeURIComponent(blobId)}`;
 }
 
 function buildTryCodexSnippet({
@@ -5939,6 +5948,7 @@ function TryAgentChatPanel({
   }, [conversationContext]);
 
   useEffect(() => {
+    isMountedRef.current = true;
     return () => {
       isMountedRef.current = false;
     };
