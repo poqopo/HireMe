@@ -277,7 +277,8 @@ if (
   !streamResult?.result?.content?.[0]?.text?.includes(
     '"type": "hireme_agent_call_stream"',
   ) ||
-  !streamResult?.result?.content?.[0]?.text?.includes('"output_fast"')
+  !streamResult?.result?.content?.[0]?.text?.includes('"output_fast"') ||
+  !streamResult?.result?.content?.[0]?.text?.includes('"heartbeat"')
 ) {
   throw new Error("hireme_call_agent_stream did not return the expected stream descriptor");
 }

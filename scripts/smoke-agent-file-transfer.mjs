@@ -321,7 +321,8 @@ async function assertMcpStreamDescriptor(response) {
   if (
     !text.includes('"type": "hireme_agent_call_stream"') ||
     !text.includes("/v1/agent-call/stream") ||
-    !text.includes('"output_fast"')
+    !text.includes('"output_fast"') ||
+    !text.includes('"heartbeat"')
   ) {
     throw new Error(`MCP call did not return a stream descriptor: ${JSON.stringify(response)}`);
   }

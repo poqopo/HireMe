@@ -90,7 +90,9 @@ try {
   if (
     streamDescriptor.type !== "hireme_agent_call_stream" ||
     streamDescriptor.url !== `${gatewayUrl}/v1/agent-call/stream` ||
-    !streamDescriptor.events?.includes("output_fast")
+    !streamDescriptor.events?.includes("output_fast") ||
+    !streamDescriptor.events?.includes("heartbeat") ||
+    streamDescriptor.restApi?.heartbeatEvent !== "heartbeat"
   ) {
     throw new Error("Gateway REST call did not return the current stream descriptor");
   }
@@ -228,7 +230,8 @@ try {
   if (
     !httpMcpCallText.includes('"type": "hireme_agent_call_stream"') ||
     !httpMcpCallText.includes("/v1/agent-call/stream") ||
-    !httpMcpCallText.includes('"output_fast"')
+    !httpMcpCallText.includes('"output_fast"') ||
+    !httpMcpCallText.includes('"heartbeat"')
   ) {
     throw new Error("HTTP MCP OAuth flow did not return the Agent stream descriptor");
   }
@@ -254,7 +257,8 @@ try {
   if (
     !text.includes('"type": "hireme_agent_call_stream"') ||
     !text.includes("/v1/agent-call/stream") ||
-    !text.includes('"output_fast"')
+    !text.includes('"output_fast"') ||
+    !text.includes('"heartbeat"')
   ) {
     throw new Error("Plugin MCP call did not return the Agent stream descriptor");
   }

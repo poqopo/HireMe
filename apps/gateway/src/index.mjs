@@ -749,7 +749,7 @@ const server = createServer(async (req, res) => {
 
     if (req.method === "POST" && url.pathname === "/v1/agent-call") {
       if (shouldStreamCurrentRestAgentCall(req, body)) {
-        await streamProtectedAgentCall(body, res);
+        await streamProtectedAgentCall(body, req, res);
         return;
       }
       const deprecatedJobRequest = deprecatedAgentCallJobRequest(body);
@@ -767,7 +767,7 @@ const server = createServer(async (req, res) => {
     }
 
     if (req.method === "POST" && url.pathname === "/v1/agent-call/stream") {
-      await streamProtectedAgentCall(body, res);
+      await streamProtectedAgentCall(body, req, res);
       return;
     }
 
@@ -4865,11 +4865,16 @@ function getProtectedAgentJobResult(args = {}) {
   };
 }
 
-async function streamProtectedAgentCall(args = {}, res) {
-  const writeEvent = createSseWriter(res);
-  writeEvent("ready", {
+async function streamProtectedAgentCall(args = {}, req, res) {
+  if (!res && req?.writeHead) {
+    res = req;
+    req = null;
+  }
+  const stream = createSseWriter(req, res);
+  stream.writeEvent("ready", {
     ok: true,
     stream: "hireme.agent-call.v1",
+    heartbeatMs: stream.heartbeatMs,
     waitForMemory:
       readOptionalBoolean(args.wait_for_memory ?? args.waitForMemory) !== false,
   });
@@ -4883,9 +4888,10 @@ async function streamProtectedAgentCall(args = {}, res) {
         readOptionalBoolean(args.wait_for_memory ?? args.waitForMemory) ?? true,
       waitForMemory:
         readOptionalBoolean(args.wait_for_memory ?? args.waitForMemory) ?? true,
-      onEvent: ({ event, data }) => writeEvent(event, data),
+      abortSignal: stream.abortSignal,
+      onEvent: ({ event, data }) => stream.writeEvent(event, data),
     });
-    writeEvent("done", {
+    stream.writeEvent("done", {
       ok: true,
       callId: result.callId || null,
       activeAgentId: result.activeAgentId || null,
@@ -4893,34 +4899,135 @@ async function streamProtectedAgentCall(args = {}, res) {
       codexView: result.codexView || null,
     });
   } catch (err) {
-    writeEvent("error", {
-      ok: false,
-      code: err?.code || "agent_call_stream_failed",
-      statusCode: err?.statusCode || 500,
-      message: err?.message || String(err),
-    });
+    if (stream.closed) {
+      writeGatewayLog("agent_call_stream_error_after_close", {
+        streamId: stream.streamId,
+        code: err?.code || "agent_call_stream_failed",
+        message: err?.message || String(err),
+      });
+    } else {
+      stream.writeEvent("error", {
+        ok: false,
+        code: err?.code || "agent_call_stream_failed",
+        statusCode: err?.statusCode || 500,
+        message: err?.message || String(err),
+      });
+    }
   } finally {
-    res.end();
+    stream.close();
   }
 }
 
-function createSseWriter(res) {
+function createSseWriter(req, res) {
+  const streamId = `agent_stream_${Date.now().toString(36)}_${randomBytes(4).toString("hex")}`;
+  const abortController = new AbortController();
+  const heartbeatMs = readAgentStreamHeartbeatMs();
+  let closed = false;
+  let closeReason = null;
+  let ending = false;
+  let heartbeatTimer = null;
+
+  const closeTimer = () => {
+    if (heartbeatTimer) clearInterval(heartbeatTimer);
+    heartbeatTimer = null;
+  };
+  const markClosed = (reason, err = null) => {
+    if (closed) return;
+    closed = true;
+    closeReason = reason;
+    closeTimer();
+    if (!abortController.signal.aborted) {
+      abortController.abort(reason);
+    }
+    if (!ending) {
+      writeGatewayLog("agent_call_stream_closed", {
+        streamId,
+        reason,
+        code: err?.code || null,
+        message: err?.message || null,
+      });
+    }
+  };
+
   res.writeHead(200, {
     "Content-Type": "text/event-stream; charset=utf-8",
     "Cache-Control": "no-cache, no-transform",
     Connection: "keep-alive",
     "Access-Control-Allow-Origin": "*",
+    "X-Accel-Buffering": "no",
   });
   if (typeof res.flushHeaders === "function") {
     res.flushHeaders();
   }
-  return (event, data = {}) => {
-    res.write(`event: ${event}\n`);
-    res.write(`data: ${JSON.stringify({
-      ts: new Date().toISOString(),
-      ...data,
-    })}\n\n`);
+
+  req?.on?.("aborted", () => markClosed("request_aborted"));
+  res.on?.("close", () => {
+    if (!ending) markClosed("response_closed");
+  });
+  res.on?.("error", (err) => markClosed("response_error", err));
+
+  const writeEvent = (event, data = {}) => {
+    if (closed || res.destroyed || res.writableEnded) return false;
+    try {
+      const payload = JSON.stringify({
+        ts: new Date().toISOString(),
+        streamId,
+        ...data,
+      });
+      res.write(`event: ${event}\ndata: ${payload}\n\n`);
+      return true;
+    } catch (err) {
+      markClosed("write_failed", err);
+      return false;
+    }
   };
+
+  heartbeatTimer = setInterval(() => {
+    writeEvent("heartbeat", {
+      ok: true,
+      heartbeatMs,
+      stream: "hireme.agent-call.v1",
+    });
+  }, heartbeatMs);
+  heartbeatTimer.unref?.();
+
+  return {
+    abortSignal: abortController.signal,
+    close() {
+      if (closed) return;
+      ending = true;
+      closeTimer();
+      closed = true;
+      closeReason = "completed";
+      try {
+        if (!res.writableEnded && !res.destroyed) res.end();
+      } catch (err) {
+        writeGatewayLog("agent_call_stream_end_failed", {
+          streamId,
+          code: err?.code || "stream_end_failed",
+          message: err?.message || String(err),
+        });
+      }
+    },
+    get closed() {
+      return closed;
+    },
+    get closeReason() {
+      return closeReason;
+    },
+    heartbeatMs,
+    streamId,
+    writeEvent,
+  };
+}
+
+function readAgentStreamHeartbeatMs() {
+  const raw = Number.parseInt(
+    process.env.HIREME_AGENT_STREAM_HEARTBEAT_MS || "15000",
+    10,
+  );
+  if (!Number.isFinite(raw)) return 15000;
+  return Math.min(60000, Math.max(5000, raw));
 }
 
 function publicProtectedAgentJob(record) {
@@ -5501,7 +5608,8 @@ async function runProtectedAgent(args = {}) {
     waitForMemory,
   });
 
-  if (waitForMemory) {
+  const streamAbortedBeforeMemoryWait = args.abortSignal?.aborted === true;
+  if (waitForMemory && !streamAbortedBeforeMemoryWait) {
     emitAgentCallEvent(args, "memwal_wait_started", {
       callId,
       memoryJobId,
@@ -5523,6 +5631,15 @@ async function runProtectedAgent(args = {}) {
       supabaseLedgerStatus: memoryPersistence.supabaseLedger?.status || null,
     });
   } else {
+    if (waitForMemory && streamAbortedBeforeMemoryWait) {
+      writeGatewayLog("agent_call_memory_wait_skipped_after_stream_close", {
+        callId,
+        agentId: agent.id,
+        hirerId,
+        memoryJobId,
+        conversationId,
+      });
+    }
     memoryPersistencePromise
       .then((storedMemory) => {
         completeProtectedAgentMemoryJob(memoryJobId, storedMemory);
@@ -8306,10 +8423,13 @@ function buildAgentCallStreamDescriptor(args = {}) {
       jsonFallbackEndpoint: "/v1/agent-call",
       memoryStatusEndpoint: "/v1/agent-memory-status",
       outputEvent: "output_fast",
+      heartbeatEvent: "heartbeat",
+      heartbeatMs: readAgentStreamHeartbeatMs(),
     },
     body,
     events: [
       "ready",
+      "heartbeat",
       "authorized",
       "artifact_loaded",
       "output_fast",

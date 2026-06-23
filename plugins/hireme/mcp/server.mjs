@@ -1594,6 +1594,8 @@ function buildAgentCallStreamDescriptor(args = {}) {
       jsonFallbackEndpoint: "/v1/agent-call",
       memoryStatusEndpoint: "/v1/agent-memory-status",
       outputEvent: "output_fast",
+      heartbeatEvent: "heartbeat",
+      heartbeatMs: 15000,
     },
     headers: gatewayApiKey
       ? {
@@ -1604,6 +1606,7 @@ function buildAgentCallStreamDescriptor(args = {}) {
     body,
     events: [
       "ready",
+      "heartbeat",
       "authorized",
       "artifact_loaded",
       "output_fast",
