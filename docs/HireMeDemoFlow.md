@@ -176,7 +176,7 @@ memWalStored: true
 blobId: ...
 ```
 
-Before sending the second prompt, wait about 30 seconds or read the conversation until the first turn is visible. MemWal write/index can be asynchronous, so sending the follow-up immediately after the first image result may produce `previousTurnsLoaded: 0`.
+The gateway waits for the Agent call's MemWal conversation turn to be stored before returning the result. The response should include `mcpConversation.stored: true`, `mcpConversation.waitForStore: true`, and MemWal store latency fields, so the second prompt can be sent immediately after the first result returns.
 
 ### 6. Resume Session And Recall Memory
 

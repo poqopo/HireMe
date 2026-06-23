@@ -26,7 +26,7 @@ const defaultWalrusDir = ".hireme/local-walrus";
 export async function sealAgentFolder({
   folderPath,
   agentId,
-  epochs = 3,
+  epochs = 7,
   pricePerCallUsd = 0.028,
   outDir = defaultArtifactsDir,
   walrusDir = defaultWalrusDir,

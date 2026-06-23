@@ -14,7 +14,7 @@ const sealed = await sealAgentFolder({
   folderPath,
   agentId: publicProfile.agentId,
   pricePerCallUsd: publicProfile.pricePerCallUsd,
-  epochs: Number.parseInt(process.env.HIREME_EXAMPLE_STORAGE_EPOCHS || "3", 10),
+  epochs: Number.parseInt(process.env.HIREME_EXAMPLE_STORAGE_EPOCHS || "7", 10),
 });
 
 console.log(

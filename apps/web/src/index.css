@@ -522,16 +522,8 @@ select {
   color: #4e5968;
 }
 
-.docs-page-hero-title {
-  letter-spacing: -0.04em;
-  line-height: 1.12;
-  font-size: clamp(1.95rem, 3.35vw, 3.2rem);
-  font-weight: 700;
-  color: #191f28;
-}
-
 .docs-section-title {
-  letter-spacing: -0.03em;
+  letter-spacing: 0;
   line-height: 1.22;
   font-size: clamp(1.5rem, 2.4vw, 2.2rem);
   font-weight: 700;
@@ -539,7 +531,7 @@ select {
 }
 
 .docs-card-title {
-  letter-spacing: -0.03em;
+  letter-spacing: 0;
   line-height: 1.28;
   font-size: clamp(1.125rem, 1.4vw, 1.375rem);
   font-weight: 700;
@@ -547,14 +539,14 @@ select {
 }
 
 .docs-card-copy {
-  letter-spacing: -0.01em;
+  letter-spacing: 0;
   line-height: 1.6;
   font-size: 0.95rem;
   color: #6b7684;
 }
 
 .docs-summary-copy {
-  letter-spacing: -0.01em;
+  letter-spacing: 0;
   line-height: 1.58;
   font-size: 0.975rem;
   color: #4e5968;
@@ -853,9 +845,41 @@ select {
   text-wrap: pretty;
 }
 
+.try-agent-pending-bubble {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.86);
+}
+
+.try-agent-pending {
+  color: #1f334a;
+  font-weight: 600;
+}
+
+.try-agent-pending-text {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+}
+
+.try-agent-pending-letter {
+  display: inline-block;
+  animation: try-agent-letter-bounce 1.35s ease-in-out infinite;
+  will-change: transform;
+}
+
 .auth-callback-progress {
   animation: auth-callback-progress 1.25s ease-in-out infinite;
   width: 42%;
+}
+
+@keyframes try-agent-letter-bounce {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+
+  36% {
+    transform: translateY(-4px);
+  }
 }
 
 @keyframes auth-callback-progress {
@@ -869,5 +893,11 @@ select {
 
   100% {
     transform: translateX(240%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .try-agent-pending-letter {
+    animation: none;
   }
 }

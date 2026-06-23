@@ -5,6 +5,7 @@ import {
   useState,
   type CSSProperties,
   type ChangeEvent,
+  type FormEvent,
   type ReactNode,
   type RefObject,
 } from "react";
@@ -43,8 +44,10 @@ import {
   ExternalLink,
   ImageIcon,
   LockKeyhole,
+  LoaderCircle,
   LogIn,
   LogOut,
+  MessageCircle,
   PackageOpen,
   Search,
   ServerCog,
@@ -78,8 +81,11 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { CopyableCodeBlock } from "@/components/CopyableCodeBlock";
+import { DocsPage } from "../pages/DocsPage";
 
 const trialCallAllowance = 100;
+const defaultAgentStorageEpochs = 7;
 const hiremeGatewayOrigin = "https://hireme-gateway.onrender.com";
 const codexCreatorSetupCommand = [
   "# Install the HireMe Creator plugin",
@@ -135,29 +141,6 @@ const creatorIpLayers = [
     items: ["AGENTS.md", "Prompts", "Rubrics", "Examples", "Hidden checks"],
   },
 ];
-
-const docsToc = [
-  { id: "meet", label: "Meet HireMe" },
-  { id: "why", label: "Why It Matters" },
-  {
-    id: "features",
-    label: "Features",
-    children: [
-      { id: "feature-harness", label: "Protected Harness" },
-      { id: "feature-mcp", label: "MCP-native hiring" },
-      { id: "feature-memory", label: "Shared memory" },
-      { id: "feature-payouts", label: "Creator payouts" },
-    ],
-  },
-  { id: "hire", label: "How to Hire" },
-  {
-    id: "publish",
-    label: "How to Publish",
-    children: [{ id: "publish-codex-setup", label: "Codex setup" }],
-  },
-  { id: "paid", label: "How to Get Paid" },
-  { id: "roadmap", label: "Roadmap" },
-] as const;
 
 function useScrollReveal(scopeRef: RefObject<HTMLElement | null>) {
   useEffect(() => {
@@ -223,6 +206,7 @@ function revealDelayStyle(delayMs: number): CSSProperties {
 const authStorageKey = "hireme-demo-auth-user";
 const accessStorageKey = "hireme-demo-agent-access-v1";
 const createdAgentsStorageKey = "hireme-demo-created-agents-v1";
+const tryChatTranscriptsStorageKey = "hireme-demo-try-chat-transcripts-v1";
 const typicalOutputStorageBucket =
   import.meta.env.VITE_HIREME_TYPICAL_OUTPUT_BUCKET || "hireme-agent-media";
 const gatewayUrl = (
@@ -359,9 +343,11 @@ type GatewayAgentRegistrationResult = {
     suiObjectId?: string;
     ciphertextDigest?: string;
     folderManifestDigest?: string;
+    storageEpochs?: number;
   };
   upload?: {
     storageProvider?: string;
+    storageEpochs?: number;
     ciphertextSizeBytes?: number;
     plaintextArchiveSizeBytes?: number;
     entryPreview?: string[];
@@ -421,6 +407,113 @@ type GatewayAccessPayload = Omit<Partial<AgentAccessRecord>, "source"> & {
   source?: string;
   storageSource?: string;
   agent?: GatewayPublicAgent;
+};
+
+type GatewayAgentCallResponse = {
+  activeAgentId?: string;
+  agentId?: string;
+  callId?: string;
+  attachments?: unknown[];
+  codexView?: unknown;
+  conversationId?: string | null;
+  error?: unknown;
+  message?: string;
+  memoryJobId?: string | null;
+  outputText?: string | null;
+  responseMode?: string;
+  resultAttachments?: unknown[];
+  status?: string;
+  result?: {
+    outputText?: string;
+    outputMode?: string;
+    type?: string;
+    attachments?: unknown[];
+    outputFiles?: unknown[];
+  };
+  jsonOutput?: {
+    responseMode?: string;
+    payload?: {
+      attachments?: unknown[];
+      outputText?: string;
+      outputFiles?: unknown[];
+      summary?: string;
+      [key: string]: unknown;
+    };
+    localCodex?: {
+      shouldAct?: boolean;
+      instruction?: string;
+      preferredSource?: string;
+    };
+  };
+  ledgerEvent?: {
+    mcpConversationId?: string | null;
+    responseDigest?: string;
+    status?: string;
+  };
+  memory?: {
+    status?: string;
+    jobId?: string;
+    waitForMemory?: boolean | null;
+    conversationStored?: boolean | null;
+  };
+  userMemWal?: {
+    stored?: boolean;
+    status?: string;
+    jobId?: string;
+    recordPath?: string;
+  };
+  mcpConversation?: {
+    stored?: boolean;
+    status?: string;
+    configured?: boolean;
+    conversationId?: string;
+    memoryJobId?: string | null;
+  };
+  authorization?: {
+    trialCallsRemaining?: number | null;
+  };
+};
+
+type GatewayAgentStreamEvent = {
+  data: GatewayAgentCallResponse;
+  event: string;
+};
+
+type TryChatMessage = {
+  id: string;
+  role: "user" | "assistant";
+  text: string;
+  attachments?: TryChatAttachment[];
+  createdAt: string;
+  pending?: boolean;
+  error?: boolean;
+  memWalStatus?: TryMemWalDisplayStatus | null;
+  responseMode?: string | null;
+};
+
+type TryChatAttachment = {
+  id: string;
+  type: "image";
+  url: string;
+  label: string;
+};
+
+type TryMemWalDisplayStatus = "pending" | "stored";
+
+type TryConversationContext = {
+  agentId: string;
+  conversationId: string;
+  memWalStatus: string;
+  conversationStored: boolean | null;
+  userMemWalStatus: string | null;
+  memoryJobId?: string | null;
+  waitForMemory?: boolean | null;
+};
+
+type TryChatTranscriptRecord = {
+  conversationContext: TryConversationContext | null;
+  messages: TryChatMessage[];
+  updatedAt: string;
 };
 
 type GatewayMemWalResultPayload = {
@@ -1074,6 +1167,7 @@ async function createAgentWithGatewayUpload({
     price_per_call_usd: totalPricePerCallUsd,
     free_calls: trialCallAllowance,
     storage_network: "walrus-testnet",
+    storage_epochs: defaultAgentStorageEpochs,
     result_title: "Sample Input",
     result_summary: "",
     result_sample: draft.sampleInput,
@@ -1141,6 +1235,7 @@ async function updateAgentWithGatewayUpload({
     price_per_call_usd: tokenPrice,
     free_calls: trialCallAllowance,
     storage_network: "walrus-testnet",
+    storage_epochs: defaultAgentStorageEpochs,
     release_notes: releaseNotes || "Updated from the HireMe web creator UI.",
     result_title: agent.resultPreview.title,
     result_summary: agent.resultPreview.summary,
@@ -1274,6 +1369,22 @@ function upsertAccessRecord(
   return [nextRecord, ...withoutCurrent].sort((a, b) =>
     b.updatedAt.localeCompare(a.updatedAt),
   );
+}
+
+function markAccessRecordUsed(record: AgentAccessRecord) {
+  if (
+    record.accessType !== "trial" ||
+    record.trialCallsRemaining === null ||
+    record.trialCallsRemaining === undefined
+  ) {
+    return { ...record, updatedAt: new Date().toISOString() };
+  }
+
+  return {
+    ...record,
+    trialCallsRemaining: Math.max(0, record.trialCallsRemaining - 1),
+    updatedAt: new Date().toISOString(),
+  };
 }
 
 function readAllCreatedAgents() {
@@ -1466,6 +1577,843 @@ async function loadGatewayMyAgentAccess(user: AuthUser) {
   });
 
   return { agents, records };
+}
+
+async function callTryAgent({
+  access,
+  agent,
+  conversationId,
+  onEvent,
+  task,
+  user,
+}: {
+  access: AgentAccessRecord;
+  agent: Agent;
+  conversationId: string;
+  onEvent?: (event: GatewayAgentStreamEvent) => void;
+  task: string;
+  user: AuthUser;
+}) {
+  const response = await fetch(`${gatewayUrl}/v1/agent-call/stream`, {
+    method: "POST",
+    headers: gatewayRequestHeaders(),
+    body: JSON.stringify({
+      agent_id: agent.id,
+      task,
+      hirer_id: access.hirerId || hirerIdFor(user),
+      hire_receipt_object_id: access.receiptObjectId,
+      wallet_address: user.wallet,
+      email: user.email,
+      response_mode: "direct_answer",
+      conversation_id: conversationId,
+      conversation_title: `${agent.name} Try`,
+      wait_for_memory: false,
+      waitForMemory: false,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Gateway ${response.status}: ${await response.text()}`);
+  }
+  if (!response.body) {
+    throw new Error("Gateway stream did not return a readable body.");
+  }
+
+  return readAgentCallStream(response.body, onEvent);
+}
+
+async function readAgentCallStream(
+  body: ReadableStream<Uint8Array>,
+  onEvent?: (event: GatewayAgentStreamEvent) => void,
+) {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let finalCall: GatewayAgentCallResponse | null = null;
+  let streamError: string | null = null;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (value) {
+      buffer += decoder.decode(value, { stream: !done });
+      const parts = buffer.split(/\n\n/);
+      buffer = parts.pop() || "";
+      for (const part of parts) {
+        const event = parseAgentStreamEvent(part);
+        if (!event) continue;
+        onEvent?.(event);
+        finalCall = mergeStreamEventIntoCall(finalCall, event);
+        if (event.event === "error") {
+          streamError =
+            typeof event.data.message === "string"
+              ? event.data.message
+              : "Agent stream failed.";
+        }
+      }
+    }
+    if (done) break;
+  }
+
+  if (buffer.trim()) {
+    const event = parseAgentStreamEvent(buffer);
+    if (event) {
+      onEvent?.(event);
+      finalCall = mergeStreamEventIntoCall(finalCall, event);
+      if (event.event === "error") {
+        streamError =
+          typeof event.data.message === "string"
+            ? event.data.message
+            : "Agent stream failed.";
+      }
+    }
+  }
+
+  if (streamError) throw new Error(streamError);
+  if (!finalCall) throw new Error("Agent stream ended without a result.");
+  return finalCall;
+}
+
+function parseAgentStreamEvent(raw: string): GatewayAgentStreamEvent | null {
+  const lines = raw.split(/\n/);
+  let event = "message";
+  const dataLines: string[] = [];
+
+  for (const line of lines) {
+    if (line.startsWith("event:")) {
+      event = line.slice("event:".length).trim();
+    } else if (line.startsWith("data:")) {
+      dataLines.push(line.slice("data:".length).trim());
+    }
+  }
+
+  if (!dataLines.length) return null;
+  try {
+    return {
+      data: JSON.parse(dataLines.join("\n")) as GatewayAgentCallResponse,
+      event,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function mergeStreamEventIntoCall(
+  current: GatewayAgentCallResponse | null,
+  streamEvent: GatewayAgentStreamEvent,
+): GatewayAgentCallResponse {
+  const data = streamEvent.data;
+  if (streamEvent.event === "memwal_pending") {
+    return {
+      ...(current || {}),
+      callId: data.callId || current?.callId,
+      conversationId: data.conversationId || current?.conversationId,
+      memory: {
+        ...(current?.memory || {}),
+        conversationStored: data.conversationId ? false : null,
+        jobId: data.memoryJobId || current?.memory?.jobId,
+        status: "pending",
+        waitForMemory: data.memory?.waitForMemory ?? null,
+      },
+      memoryJobId: data.memoryJobId || current?.memoryJobId,
+      userMemWal: {
+        ...(current?.userMemWal || {}),
+        jobId: data.memoryJobId || current?.userMemWal?.jobId,
+        status: "pending",
+        stored: false,
+      },
+    };
+  }
+  if (streamEvent.event === "memwal_stored") {
+    return {
+      ...(current || {}),
+      callId: data.callId || current?.callId,
+      conversationId:
+        data.mcpConversation?.conversationId ||
+        data.conversationId ||
+        current?.conversationId,
+      mcpConversation: data.mcpConversation || current?.mcpConversation,
+      memory: {
+        ...(current?.memory || {}),
+        conversationStored: data.mcpConversation?.stored ?? true,
+        status: "stored",
+      },
+      userMemWal: data.userMemWal || current?.userMemWal,
+    };
+  }
+  if (streamEvent.event === "done") {
+    return {
+      ...(current || {}),
+      ...data,
+      memory: data.memory || current?.memory,
+    };
+  }
+  if (streamEvent.event === "output_fast" || streamEvent.event === "result") {
+    return {
+      ...(current || {}),
+      ...data,
+      result: data.result || current?.result,
+      jsonOutput: data.jsonOutput || current?.jsonOutput,
+      outputText: data.outputText || current?.outputText,
+    };
+  }
+  return {
+    ...(current || {}),
+    ...data,
+  };
+}
+
+async function loadTryMemoryStatus(memoryJobId: string) {
+  const response = await fetch(`${gatewayUrl}/v1/agent-memory-status`, {
+    method: "POST",
+    headers: gatewayRequestHeaders(),
+    body: JSON.stringify({
+      memory_job_id: memoryJobId,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Gateway ${response.status}: ${await response.text()}`);
+  }
+
+  return (await response.json()) as GatewayAgentCallResponse;
+}
+
+function tryConversationId(
+  access: AgentAccessRecord,
+  agent: Agent,
+  user: AuthUser,
+) {
+  return `web-try-${access.hirerId || hirerIdFor(user)}-${agent.id}`;
+}
+
+function extractAgentCallText(call: GatewayAgentCallResponse) {
+  const candidates = [
+    call.outputText,
+    call.result?.outputText,
+    call.jsonOutput?.payload?.outputText,
+    call.jsonOutput?.payload?.summary,
+  ];
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim()) {
+      return candidate.trim();
+    }
+  }
+  if (call.jsonOutput?.payload) {
+    return JSON.stringify(call.jsonOutput.payload, null, 2);
+  }
+  if (call.result) {
+    return JSON.stringify(call.result, null, 2);
+  }
+  return "The Agent returned an empty response.";
+}
+
+function wait(ms: number) {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+}
+
+function initialTryChatMessages(agent: Agent): TryChatMessage[] {
+  return [
+    {
+      id: `assistant-${Date.now().toString(36)}`,
+      role: "assistant",
+      text: `Ask ${agent.name} a small test task. The private Harness stays behind the gateway.`,
+      createdAt: new Date().toISOString(),
+    },
+  ];
+}
+
+function tryChatTranscriptKey(
+  access: AgentAccessRecord,
+  agent: Agent,
+  user: AuthUser,
+) {
+  return `${access.hirerId || hirerIdFor(user)}:${agent.id}:${tryConversationId(
+    access,
+    agent,
+    user,
+  )}`;
+}
+
+function readTryChatTranscript(key: string): TryChatTranscriptRecord | null {
+  try {
+    const raw = window.localStorage.getItem(tryChatTranscriptsStorageKey);
+    if (!raw) return null;
+    const store = JSON.parse(raw) as Record<string, TryChatTranscriptRecord>;
+    const record = store[key];
+    if (!record || !Array.isArray(record.messages)) return null;
+    return {
+      conversationContext: record.conversationContext || null,
+      messages: record.messages.filter(isTryChatMessage).slice(-80),
+      updatedAt: record.updatedAt || new Date().toISOString(),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writeTryChatTranscript(key: string, record: TryChatTranscriptRecord) {
+  try {
+    const raw = window.localStorage.getItem(tryChatTranscriptsStorageKey);
+    const store = raw
+      ? (JSON.parse(raw) as Record<string, TryChatTranscriptRecord>)
+      : {};
+    store[key] = {
+      ...record,
+      messages: record.messages.map(sanitizeTryChatMessageForStorage).slice(-80),
+      updatedAt: new Date().toISOString(),
+    };
+    const entries = Object.entries(store)
+      .sort(
+        ([, left], [, right]) =>
+          Date.parse(right.updatedAt || "") - Date.parse(left.updatedAt || ""),
+      )
+      .slice(0, 40);
+    window.localStorage.setItem(
+      tryChatTranscriptsStorageKey,
+      JSON.stringify(Object.fromEntries(entries)),
+    );
+  } catch {
+    // Chat still works if browser storage is unavailable or full.
+  }
+}
+
+function isTryChatMessage(value: unknown): value is TryChatMessage {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Partial<TryChatMessage>;
+  return (
+    (candidate.role === "user" || candidate.role === "assistant") &&
+    typeof candidate.text === "string" &&
+    typeof candidate.id === "string"
+  );
+}
+
+function sanitizeTryChatMessageForStorage(message: TryChatMessage) {
+  return {
+    ...message,
+    attachments: message.attachments?.filter(
+      (attachment) => attachment.url.length < 200_000,
+    ),
+    pending: false,
+  };
+}
+
+function buildTryConversationContext({
+  agentId,
+  call,
+  conversationId,
+}: {
+  agentId: string;
+  call: GatewayAgentCallResponse;
+  conversationId: string;
+}): TryConversationContext {
+  return {
+    agentId,
+    conversationId:
+      call.mcpConversation?.conversationId ||
+      call.ledgerEvent?.mcpConversationId ||
+      call.conversationId ||
+      conversationId,
+    memWalStatus:
+      call.memory?.status ||
+      call.mcpConversation?.status ||
+      call.userMemWal?.status ||
+      call.ledgerEvent?.status ||
+      "unknown",
+    conversationStored:
+      typeof call.mcpConversation?.stored === "boolean"
+        ? call.mcpConversation.stored
+        : call.memory?.conversationStored ?? null,
+    userMemWalStatus: call.userMemWal?.status || null,
+    memoryJobId:
+      call.mcpConversation?.memoryJobId ||
+      call.userMemWal?.jobId ||
+      call.memory?.jobId ||
+      call.memoryJobId ||
+      null,
+    waitForMemory: call.memory?.waitForMemory ?? null,
+  };
+}
+
+function tryMemWalDisplayStatus(
+  conversation: TryConversationContext,
+): TryMemWalDisplayStatus | null {
+  if (
+    conversation.memWalStatus === "stored" ||
+    conversation.conversationStored === true ||
+    conversation.userMemWalStatus === "stored"
+  ) {
+    return "stored";
+  }
+  if (
+    conversation.memWalStatus === "pending" ||
+    conversation.conversationStored === false ||
+    conversation.userMemWalStatus === "pending"
+  ) {
+    return "pending";
+  }
+  return null;
+}
+
+function latestAssistantMessageId(messages: TryChatMessage[]) {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index].role === "assistant") return messages[index].id;
+  }
+  return null;
+}
+
+function extractTryImageAttachments(call: GatewayAgentCallResponse) {
+  const sources = [
+    call.resultAttachments,
+    call.attachments,
+    call.result?.attachments,
+    call.result?.outputFiles,
+    call.jsonOutput?.payload?.attachments,
+    call.jsonOutput?.payload?.outputFiles,
+  ];
+  const images: TryChatAttachment[] = [];
+  const seen = new Set<string>();
+
+  for (const source of sources) {
+    const values = Array.isArray(source) ? source : source ? [source] : [];
+    for (const value of values) {
+      const image = tryImageAttachmentFromValue(value, images.length);
+      if (!image || seen.has(image.url)) continue;
+      seen.add(image.url);
+      images.push(image);
+      if (images.length >= 6) return images;
+    }
+  }
+
+  return images;
+}
+
+function tryImageAttachmentFromValue(
+  value: unknown,
+  index: number,
+): TryChatAttachment | null {
+  if (typeof value === "string") {
+    if (!looksLikeBrowserImageUrl(value)) return null;
+    return {
+      id: `image-${index}`,
+      label: `Image ${index + 1}`,
+      type: "image",
+      url: value,
+    };
+  }
+  if (!isPlainRecord(value)) return null;
+
+  const mimeType =
+    readRecordString(value, ["mimeType", "mime_type", "contentType", "content_type"]) ||
+    guessImageMimeType(
+      readRecordString(value, ["filename", "fileName", "name", "path", "downloadUrl", "url"]) ||
+        "",
+    );
+  const url =
+    readRecordString(value, ["downloadUrl", "download_url", "url", "href", "src"]) ||
+    relativeGatewayUrl(readRecordString(value, ["downloadPath", "download_path"]));
+  if (url && (isImageMimeType(mimeType) || looksLikeBrowserImageUrl(url))) {
+    return {
+      id: `image-${index}`,
+      label:
+        readRecordString(value, ["filename", "fileName", "name", "title"]) ||
+        `Image ${index + 1}`,
+      type: "image",
+      url,
+    };
+  }
+
+  const data = readRecordString(value, ["data", "base64", "contentBase64", "blob"]);
+  if (!data) return null;
+  if (data.startsWith("data:image/")) {
+    return {
+      id: `image-${index}`,
+      label:
+        readRecordString(value, ["filename", "fileName", "name", "title"]) ||
+        `Image ${index + 1}`,
+      type: "image",
+      url: data,
+    };
+  }
+  if (!isImageMimeType(mimeType)) return null;
+  return {
+    id: `image-${index}`,
+    label:
+      readRecordString(value, ["filename", "fileName", "name", "title"]) ||
+      `Image ${index + 1}`,
+    type: "image",
+    url: `data:${mimeType};base64,${data.replace(/^data:[^;]+;base64,/i, "")}`,
+  };
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function readRecordString(
+  value: Record<string, unknown>,
+  keys: string[],
+): string {
+  for (const key of keys) {
+    const candidate = value[key];
+    if (typeof candidate === "string" && candidate.trim()) {
+      return candidate.trim();
+    }
+  }
+  return "";
+}
+
+function isImageMimeType(value: string) {
+  return value.toLowerCase().startsWith("image/");
+}
+
+function guessImageMimeType(value: string) {
+  const path = value.toLowerCase().split("?")[0];
+  if (path.endsWith(".png")) return "image/png";
+  if (path.endsWith(".jpg") || path.endsWith(".jpeg")) return "image/jpeg";
+  if (path.endsWith(".webp")) return "image/webp";
+  if (path.endsWith(".gif")) return "image/gif";
+  return "";
+}
+
+function looksLikeBrowserImageUrl(value: string) {
+  const trimmed = value.trim();
+  return (
+    trimmed.startsWith("data:image/") ||
+    /^https?:\/\//i.test(trimmed) ||
+    (trimmed.startsWith("/") && Boolean(guessImageMimeType(trimmed)))
+  );
+}
+
+function relativeGatewayUrl(path: string) {
+  if (!path) return "";
+  if (/^https?:\/\//i.test(path)) return path;
+  if (!path.startsWith("/")) return "";
+  return `${gatewayUrl}${path}`;
+}
+
+function formatNullableStoredStatus(value: boolean | null) {
+  if (value === true) return "stored";
+  if (value === false) return "pending";
+  return "not requested";
+}
+
+function buildTryCodexSnippet({
+  access,
+  agent,
+  conversation,
+  user,
+}: {
+  access: AgentAccessRecord;
+  agent: Agent;
+  conversation: TryConversationContext | null;
+  user: AuthUser;
+}) {
+  const hirerId = access.hirerId || hirerIdFor(user);
+  if (!conversation) {
+    return `hireme_call_agent_stream({\n  "agent_id": "${agent.id}",\n  "task": "<your task>",\n  "hirer_id": "${hirerId}",\n  "hire_receipt_object_id": "${access.receiptObjectId}",\n  "wait_for_memory": false\n})`;
+  }
+
+  const lines = [
+    `  "agent_id": "${conversation.agentId}"`,
+    `  "task": "<continue from the web chat>"`,
+    `  "hirer_id": "${hirerId}"`,
+    `  "hire_receipt_object_id": "${access.receiptObjectId}"`,
+    `  "conversation_id": "${conversation.conversationId}"`,
+    `  "wait_for_memory": false`,
+  ];
+  const notes = [
+    `// memWal: ${conversation.memWalStatus}`,
+    `// conversation: ${formatNullableStoredStatus(conversation.conversationStored)}`,
+    `// user memWal: ${conversation.userMemWalStatus || "unknown"}`,
+  ];
+  if (conversation.memoryJobId) {
+    notes.push(`// memory_job_id: ${conversation.memoryJobId}`);
+  }
+
+  return `hireme_call_agent_stream({\n${lines.join(",\n")}\n})\n\n${notes.join("\n")}`;
+}
+
+async function copyTextToClipboard(value: string) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value);
+    return;
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = value;
+  textarea.setAttribute("readonly", "true");
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  document.body.appendChild(textarea);
+  textarea.select();
+  document.execCommand("copy");
+  document.body.removeChild(textarea);
+}
+
+type MarkdownBlock =
+  | { type: "blockquote"; text: string }
+  | { type: "code"; code: string; language: string }
+  | { type: "heading"; depth: 1 | 2 | 3; text: string }
+  | { type: "list"; items: string[]; ordered: boolean }
+  | { type: "paragraph"; text: string };
+
+function TryChatMessageContent({ message }: { message: TryChatMessage }) {
+  if (message.role === "assistant" && message.pending && !message.error) {
+    return <TryPendingAgentActivity label={message.text} />;
+  }
+
+  if (message.role === "assistant" && !message.error) {
+    return <TryMarkdownContent text={message.text} />;
+  }
+
+  return <div className="whitespace-pre-wrap">{message.text}</div>;
+}
+
+function TryPendingAgentActivity({ label }: { label: string }) {
+  const cleanLabel = label.replace(/\.+$/, "");
+  const characters = Array.from(cleanLabel);
+
+  return (
+    <div aria-live="polite" className="try-agent-pending">
+      <span className="sr-only">{cleanLabel}</span>
+      <span aria-hidden="true" className="try-agent-pending-text">
+        {characters.map((character, index) => (
+          <span
+            className="try-agent-pending-letter"
+            key={`${character}-${index}`}
+            style={{ animationDelay: `${index * 34}ms` }}
+          >
+            {character === " " ? "\u00a0" : character}
+          </span>
+        ))}
+        <span
+          className="try-agent-pending-letter"
+          style={{ animationDelay: `${characters.length * 34}ms` }}
+        >
+          .
+        </span>
+        <span
+          className="try-agent-pending-letter"
+          style={{ animationDelay: `${(characters.length + 1) * 34}ms` }}
+        >
+          .
+        </span>
+        <span
+          className="try-agent-pending-letter"
+          style={{ animationDelay: `${(characters.length + 2) * 34}ms` }}
+        >
+          .
+        </span>
+      </span>
+    </div>
+  );
+}
+
+function TryMarkdownContent({ text }: { text: string }) {
+  const blocks = parseMarkdownBlocks(text);
+  return (
+    <div className="grid gap-2">
+      {blocks.map((block, index) => {
+        const key = `md-${index}`;
+        if (block.type === "heading") {
+          const className =
+            block.depth === 1
+              ? "text-base font-semibold leading-6"
+              : "text-sm font-semibold leading-6";
+          return (
+            <div className={className} key={key}>
+              {renderInlineMarkdown(block.text, key)}
+            </div>
+          );
+        }
+        if (block.type === "code") {
+          return (
+            <pre
+              className="max-h-72 overflow-auto rounded-md border border-border bg-white p-3 text-[11px] leading-5 text-[#1c1e54]"
+              key={key}
+            >
+              <code>{block.code}</code>
+            </pre>
+          );
+        }
+        if (block.type === "list") {
+          const ListTag = block.ordered ? "ol" : "ul";
+          return (
+            <ListTag
+              className={`grid gap-1 pl-5 ${
+                block.ordered ? "list-decimal" : "list-disc"
+              }`}
+              key={key}
+            >
+              {block.items.map((item, itemIndex) => (
+                <li key={`${key}-${itemIndex}`}>
+                  {renderInlineMarkdown(item, `${key}-${itemIndex}`)}
+                </li>
+              ))}
+            </ListTag>
+          );
+        }
+        if (block.type === "blockquote") {
+          return (
+            <blockquote
+              className="border-l-2 border-primary/30 pl-3 text-muted-foreground"
+              key={key}
+            >
+              {renderInlineMarkdown(block.text, key)}
+            </blockquote>
+          );
+        }
+        return (
+          <p className="whitespace-pre-wrap" key={key}>
+            {renderInlineMarkdown(block.text, key)}
+          </p>
+        );
+      })}
+    </div>
+  );
+}
+
+function parseMarkdownBlocks(text: string): MarkdownBlock[] {
+  const lines = text.replace(/\r\n/g, "\n").split("\n");
+  const blocks: MarkdownBlock[] = [];
+  let index = 0;
+
+  while (index < lines.length) {
+    const line = lines[index];
+    if (!line.trim()) {
+      index += 1;
+      continue;
+    }
+
+    const fence = /^```(\w+)?\s*$/.exec(line.trim());
+    if (fence) {
+      const code: string[] = [];
+      index += 1;
+      while (index < lines.length && !/^```\s*$/.test(lines[index].trim())) {
+        code.push(lines[index]);
+        index += 1;
+      }
+      if (index < lines.length) index += 1;
+      blocks.push({
+        code: code.join("\n"),
+        language: fence[1] || "",
+        type: "code",
+      });
+      continue;
+    }
+
+    const heading = /^(#{1,3})\s+(.+)$/.exec(line);
+    if (heading) {
+      blocks.push({
+        depth: heading[1].length as 1 | 2 | 3,
+        text: heading[2].trim(),
+        type: "heading",
+      });
+      index += 1;
+      continue;
+    }
+
+    const unordered = /^[-*]\s+(.+)$/.exec(line);
+    const ordered = /^\d+\.\s+(.+)$/.exec(line);
+    if (unordered || ordered) {
+      const items: string[] = [];
+      const orderedList = Boolean(ordered);
+      while (index < lines.length) {
+        const match = orderedList
+          ? /^\d+\.\s+(.+)$/.exec(lines[index])
+          : /^[-*]\s+(.+)$/.exec(lines[index]);
+        if (!match) break;
+        items.push(match[1].trim());
+        index += 1;
+      }
+      blocks.push({ items, ordered: orderedList, type: "list" });
+      continue;
+    }
+
+    const quote = /^>\s?(.+)$/.exec(line);
+    if (quote) {
+      const quotes: string[] = [];
+      while (index < lines.length) {
+        const match = /^>\s?(.+)$/.exec(lines[index]);
+        if (!match) break;
+        quotes.push(match[1].trim());
+        index += 1;
+      }
+      blocks.push({ text: quotes.join("\n"), type: "blockquote" });
+      continue;
+    }
+
+    const paragraph: string[] = [line];
+    index += 1;
+    while (
+      index < lines.length &&
+      lines[index].trim() &&
+      !/^```/.test(lines[index].trim()) &&
+      !/^(#{1,3})\s+/.test(lines[index]) &&
+      !/^[-*]\s+/.test(lines[index]) &&
+      !/^\d+\.\s+/.test(lines[index]) &&
+      !/^>\s?/.test(lines[index])
+    ) {
+      paragraph.push(lines[index]);
+      index += 1;
+    }
+    blocks.push({ text: paragraph.join("\n"), type: "paragraph" });
+  }
+
+  return blocks.length ? blocks : [{ text, type: "paragraph" }];
+}
+
+function renderInlineMarkdown(text: string, keyPrefix: string): ReactNode[] {
+  const nodes: ReactNode[] = [];
+  const pattern = /(`[^`]+`|\*\*[^*]+\*\*|\[[^\]]+\]\(https?:\/\/[^)\s]+\))/g;
+  let cursor = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = pattern.exec(text))) {
+    if (match.index > cursor) {
+      nodes.push(text.slice(cursor, match.index));
+    }
+    const token = match[0];
+    const key = `${keyPrefix}-${match.index}`;
+    if (token.startsWith("`")) {
+      nodes.push(
+        <code
+          className="rounded bg-white px-1 py-0.5 font-mono text-[0.92em] text-[#1c1e54]"
+          key={key}
+        >
+          {token.slice(1, -1)}
+        </code>,
+      );
+    } else if (token.startsWith("**")) {
+      nodes.push(<strong key={key}>{token.slice(2, -2)}</strong>);
+    } else {
+      const link = /^\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)$/.exec(token);
+      if (link) {
+        nodes.push(
+          <a
+            className="font-medium text-primary underline-offset-4 hover:underline"
+            href={link[2]}
+            key={key}
+            rel="noreferrer"
+            target="_blank"
+          >
+            {link[1]}
+          </a>,
+        );
+      } else {
+        nodes.push(token);
+      }
+    }
+    cursor = match.index + token.length;
+  }
+
+  if (cursor < text.length) {
+    nodes.push(text.slice(cursor));
+  }
+
+  return nodes;
 }
 
 async function loadGatewayMyMemWalResults(user: AuthUser) {
@@ -2633,89 +3581,6 @@ function ClientUseSection() {
   );
 }
 
-function CopyableCodeBlock({
-  code,
-  description,
-  label,
-}: {
-  code: string;
-  description?: string;
-  label: string;
-}) {
-  const [copied, setCopied] = useState(false);
-  const resetTimerRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    return () => {
-      if (resetTimerRef.current !== null) {
-        window.clearTimeout(resetTimerRef.current);
-      }
-    };
-  }, []);
-
-  async function handleCopy() {
-    await writeTextToClipboard(code);
-    setCopied(true);
-    if (resetTimerRef.current !== null) {
-      window.clearTimeout(resetTimerRef.current);
-    }
-    resetTimerRef.current = window.setTimeout(() => {
-      setCopied(false);
-      resetTimerRef.current = null;
-    }, 1600);
-  }
-
-  return (
-    <div className="overflow-hidden rounded-2xl border border-[#b7d7ff] bg-[#07162d] shadow-[0_16px_42px_rgba(8,27,61,0.16)]">
-      <div className="flex flex-col gap-3 border-b border-white/10 bg-white/[0.04] px-4 py-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2 text-sm font-semibold leading-5 text-white">
-            <Terminal className="size-4 text-[#8ec5ff]" />
-            <span>{label}</span>
-          </div>
-          {description ? (
-            <p className="mt-1 text-xs leading-5 text-white/62">
-              {description}
-            </p>
-          ) : null}
-        </div>
-        <button
-          aria-label={`Copy ${label}`}
-          className="inline-flex h-9 shrink-0 items-center justify-center gap-2 rounded-full border border-white/12 bg-white/10 px-3 text-xs font-semibold text-white transition hover:bg-white/16 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8ec5ff]/60 focus-visible:ring-offset-2 focus-visible:ring-offset-[#07162d]"
-          onClick={() => {
-            void handleCopy();
-          }}
-          type="button"
-        >
-          {copied ? <CheckCircle2 className="size-3.5" /> : <Copy className="size-3.5" />}
-          <span>{copied ? "Copied" : "Copy"}</span>
-        </button>
-      </div>
-      <pre className="m-0 max-h-[360px] overflow-x-auto p-4 text-left text-[0.78rem] leading-6 text-[#dbeafe] sm:text-[0.82rem]">
-        <code>{code}</code>
-      </pre>
-    </div>
-  );
-}
-
-async function writeTextToClipboard(text: string) {
-  if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(text);
-    return;
-  }
-
-  const textArea = document.createElement("textarea");
-  textArea.value = text;
-  textArea.setAttribute("readonly", "");
-  textArea.style.position = "fixed";
-  textArea.style.left = "-9999px";
-  textArea.style.top = "0";
-  document.body.appendChild(textArea);
-  textArea.select();
-  document.execCommand("copy");
-  document.body.removeChild(textArea);
-}
-
 function MakeAgentSection() {
   return (
     <section id="make-agent" className="relative isolate -mt-px overflow-hidden bg-[#f4fbf7] px-4 py-20 md:px-8 md:py-28 lg:flex lg:min-h-[100svh] lg:items-center lg:py-32">
@@ -2915,608 +3780,9 @@ function LandingFooter() {
   );
 }
 
-function DocsPage() {
-  return (
-    <main className="min-h-screen bg-gradient-to-b from-[#f9fafb] via-[#f6faff] to-[#e8f3ff]">
-      <div className="mx-auto grid page-shell gap-8 px-4 py-8 md:px-8 lg:grid-cols-[260px_1fr]">
-        <aside className="surface-card h-fit p-4 lg:sticky lg:top-24 lg:max-h-[calc(100vh-7rem)] lg:overflow-auto">
-          <div className="mb-3 text-xs font-semibold uppercase text-muted-foreground">
-            Contents
-          </div>
-          <nav className="grid gap-1.5">
-            {docsToc.map((item) => (
-              <div key={item.id}>
-                <a
-                  className="block rounded-lg px-3 py-2 text-sm font-medium text-[#273951] hover:bg-secondary hover:text-primary"
-                  href={`#${item.id}`}
-                >
-                  {item.label}
-                </a>
-                {"children" in item ? (
-                  <div className="ml-3 grid gap-0.5 border-l border-border pl-3">
-                    {item.children.map((child) => (
-                      <a
-                        className="block rounded-md px-2 py-1.5 text-xs font-medium text-[#5f6f85] hover:bg-secondary hover:text-primary"
-                        href={`#${child.id}`}
-                        key={child.id}
-                      >
-                        {child.label}
-                      </a>
-                    ))}
-                  </div>
-                ) : null}
-              </div>
-            ))}
-          </nav>
-        </aside>
-
-        <article className="surface-card-soft px-5 py-6 md:px-8 md:py-8">
-          <div className="mb-8 rounded-[32px] border border-[#dbeafe] bg-gradient-to-br from-[#f6faff] via-white to-[#eef5ff] p-5 md:p-7">
-            <div className="max-w-3xl">
-              <div className="eyebrow-label">
-                HireMe docs
-              </div>
-              <h1 className="docs-page-hero-title mt-3 max-w-[680px] text-[#191f28]">
-                Protected Agents, not prompts.
-              </h1>
-              <p className="docs-summary-copy mt-4 max-w-[680px]">
-                Creators keep the Harness. Clients hire the capability. HireMe runs the Agent between them.
-              </p>
-            </div>
-            <div className="mt-5 grid gap-4 lg:grid-cols-[1.1fr_0.9fr] lg:items-stretch">
-              <div className="surface-card p-5 md:p-6">
-                <div className="docs-card-title text-[#191f28]">
-                  How the product is framed
-                </div>
-                <div className="mt-4 grid gap-4">
-                  {[
-                    {
-                      title: "Agent = paid capability",
-                      copy: "Clients choose the packaged workflow, not an engine setting.",
-                    },
-                    {
-                      title: "Harness = working method",
-                      copy: "Private prompts, skills, examples, and rules make it repeatable.",
-                    },
-                    {
-                      title: "Gateway = secure runtime",
-                      copy: "HireMe runs the Agent through a protected execution layer.",
-                    },
-                  ].map((item, index) => (
-                    <div
-                      className={`grid gap-1.5 ${index > 0 ? "border-t border-[#dbeafe] pt-4" : ""}`}
-                      key={item.title}
-                    >
-                      <div className="docs-card-title text-[#191f28]">
-                        {item.title}
-                      </div>
-                      <p className="docs-card-copy">
-                        {item.copy}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-              <div className="grid gap-4">
-                <div className="surface-card p-5 md:p-6">
-                  <div className="docs-card-title text-[#191f28]">
-                    What Clients see
-                  </div>
-                  <ul className="mt-3 grid gap-2 docs-card-copy">
-                    <li>Agent name</li>
-                    <li>Public skills</li>
-                    <li>Price</li>
-                    <li>Sample input</li>
-                  </ul>
-                </div>
-                <div className="surface-card p-5 md:p-6">
-                  <div className="docs-card-title text-[#191f28]">
-                    What stays private
-                  </div>
-                  <ul className="mt-3 grid gap-2 docs-card-copy">
-                    <li>AGENTS.md</li>
-                    <li>Private prompts</li>
-                    <li>Rubrics</li>
-                    <li>Examples</li>
-                  </ul>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <DocsArticleSection
-            id="meet"
-            kicker="01 / Meet HireMe"
-            title="Hire Agents that already know the job"
-          >
-            <div className="grid gap-5 lg:grid-cols-[1.05fr_0.95fr]">
-              <div className="surface-card p-5 md:p-6">
-                <div className="docs-card-title text-[#191f28]">
-                  For creators and Clients
-                </div>
-                <div className="mt-4 grid gap-4 sm:grid-cols-2">
-                  <div className="rounded-2xl border border-[#dbeafe] bg-white p-4">
-                    <div className="docs-card-title text-[#191f28]">
-                      For creators
-                    </div>
-                    <p className="mt-2 docs-card-copy">
-                      Turn private know-how into a paid Agent.
-                    </p>
-                  </div>
-                  <div className="rounded-2xl border border-[#dbeafe] bg-[#fbfdff] p-4">
-                    <div className="docs-card-title text-[#191f28]">
-                      For Clients
-                    </div>
-                    <p className="mt-2 docs-card-copy">
-                      Use a ready Agent without rebuilding workflows.
-                    </p>
-                  </div>
-                </div>
-              </div>
-              <div className="grid gap-4">
-                <DocsMiniBlock
-                  id="meet-agent"
-                  title="What counts as an Agent?"
-                  copy="A private Harness, tool habits, memory rules, and a public contract."
-                />
-                <DocsMiniBlock
-                  id="meet-not-prompts"
-                  title="Not a prompt file"
-                  copy="HireMe sells protected execution, not copyable text."
-                />
-              </div>
-            </div>
-          </DocsArticleSection>
-
-          <DocsArticleSection
-            id="why"
-            kicker="02 / Why It Matters"
-            title="Your work and the creator's playbook stay separate"
-          >
-            <div className="grid gap-5 lg:grid-cols-[1.08fr_0.92fr]">
-              <div className="surface-card p-5 md:p-6">
-                <div className="docs-card-title text-[#191f28]">
-                  Clients
-                </div>
-                <p className="mt-3 docs-summary-copy max-w-[34rem]">
-                  Use prepared Agents without exposing private work.
-                </p>
-                <details className="group mt-4 rounded-2xl border border-[#dbeafe] bg-white/90 p-4">
-                  <summary className="flex cursor-pointer list-none items-center justify-between gap-3 docs-card-title text-[#191f28] [&::-webkit-details-marker]:hidden">
-                    Why it works
-                    <span className="text-lg text-primary transition group-open:rotate-45">+</span>
-                  </summary>
-                  <ul className="mt-3 grid gap-2 docs-card-copy">
-                    <li>Send work to HireMe, not directly to the creator.</li>
-                    <li>Get results from a protected Agent run.</li>
-                  </ul>
-                </details>
-                <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                  <div className="rounded-2xl border border-[#dbeafe] bg-[#f7fbff] p-4">
-                    <div className="docs-card-title text-[#191f28]">
-                      Private by default
-                    </div>
-                    <p className="mt-2 docs-card-copy">
-                      Input stays inside the run.
-                    </p>
-                  </div>
-                  <div className="rounded-2xl border border-[#dbeafe] bg-white p-4">
-                    <div className="docs-card-title text-[#191f28]">
-                      Outcome first
-                    </div>
-                    <p className="mt-2 docs-card-copy">
-                      Clients see result quality, not raw files.
-                    </p>
-                  </div>
-                </div>
-              </div>
-              <div className="grid gap-4">
-                <div className="surface-card p-5 md:p-6">
-                  <div className="docs-card-title text-[#191f28]">
-                    Creators
-                  </div>
-                  <p className="mt-3 docs-summary-copy max-w-[34rem]">
-                    Earn from Agents without revealing your private Harness.
-                  </p>
-                  <details className="group mt-4 rounded-2xl border border-[#dbeafe] bg-white/90 p-4">
-                    <summary className="flex cursor-pointer list-none items-center justify-between gap-3 docs-card-title text-[#191f28] [&::-webkit-details-marker]:hidden">
-                      What stays hidden
-                      <span className="text-lg text-primary transition group-open:rotate-45">+</span>
-                    </summary>
-                    <ul className="mt-3 grid gap-2 docs-card-copy">
-                      <li>AGENTS.md and Harness files stay hidden.</li>
-                      <li>Usage can still earn you money.</li>
-                    </ul>
-                  </details>
-                </div>
-                <div className="surface-card p-5 md:p-6">
-                  <div className="docs-card-title text-[#191f28]">
-                    Protected execution
-                  </div>
-                  <div className="mt-4 grid gap-3">
-                    {[
-                      "Client task",
-                      "Secure runner",
-                      "Private Harness",
-                      "Result",
-                    ].map((item, index) => (
-                      <div
-                        className="flex items-center gap-3 text-sm text-[#4e5968]"
-                        key={item}
-                      >
-                        <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-white text-xs font-semibold text-primary shadow-sm">
-                          {index + 1}
-                        </span>
-                        <span>{item}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </div>
-          </DocsArticleSection>
-
-          <DocsArticleSection
-            id="features"
-            kicker="03 / Features"
-            title="What Clients can see and what stays private"
-          >
-            <div className="grid gap-5 lg:grid-cols-[0.9fr_1.1fr]">
-              <div className="surface-card p-5 md:p-6">
-                <div className="docs-card-title text-[#191f28]">
-                  Clients can see
-                </div>
-                <ul className="mt-3 grid gap-2 docs-card-copy">
-                  <li>Skills</li>
-                  <li>Price</li>
-                  <li>Result media</li>
-                  <li>Version notes</li>
-                </ul>
-              </div>
-              <div className="grid gap-4">
-                <div className="surface-card p-5 md:p-6">
-                  <div className="docs-card-title text-[#191f28]">
-                    Clients can't see
-                  </div>
-                  <ul className="mt-3 grid gap-2 docs-card-copy">
-                    <li>AGENTS.md</li>
-                    <li>Prompts</li>
-                    <li>Rubrics</li>
-                    <li>Examples</li>
-                    <li>Hidden checks</li>
-                  </ul>
-                </div>
-                <div className="surface-card-soft p-5 md:p-6">
-                  <div className="docs-card-title text-[#191f28]">
-                    Walrus and Sui
-                  </div>
-                  <p className="mt-3 docs-card-copy">
-                    Walrus stores protected Agent artifacts and execution records.
-                    Sui tracks access, usage, and payout receipts.
-                  </p>
-                  <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                    {["Harness version record", "Execution receipt", "Access record", "Payout record"].map((item) => (
-                      <div className="rounded-2xl border border-[#dbeafe] bg-white p-4 docs-card-copy text-[#4e5968]" key={item}>
-                        {item}
-                      </div>
-                    ))}
-                  </div>
-                  <p className="mt-4 docs-card-copy">
-                    The proof trail shows that a specific Agent version produced a result.
-                  </p>
-                </div>
-              </div>
-            </div>
-          </DocsArticleSection>
-
-          <DocsArticleSection
-            id="hire"
-            kicker="04 / How to Hire"
-            title="Try it first. Hire it when it fits"
-          >
-            <div className="grid gap-5 lg:grid-cols-[1fr_1fr]">
-              <div className="surface-card p-5 md:p-6">
-                <div className="docs-card-title text-[#191f28]">
-                  For Clients
-                </div>
-                <div className="mt-4 grid gap-3">
-                  {[
-                    ["Browse", "Compare cards, price, and skills."],
-                    ["Try", "Test the Agent before paying."],
-                    ["Hire", "Unlock full access when it fits."],
-                    ["Run from Codex / MCP", "Use it in your workflow."],
-                  ].map(([title, copy], index) => (
-                    <div className="flex gap-3" key={title}>
-                      <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-[#eef5ff] text-xs font-semibold text-primary">
-                        {index + 1}
-                      </span>
-                      <div>
-                        <div className="docs-card-title text-[#191f28]">
-                          {title}
-                        </div>
-                        <div className="docs-card-copy">
-                          {copy}
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-              <div className="grid gap-4">
-                <div className="surface-card p-5 md:p-6">
-                  <div className="docs-card-title text-[#191f28]">
-                    For creators
-                  </div>
-                  <div className="mt-4 grid gap-3">
-                    {[
-                      ["Build Harness", "Package the working method."],
-                      ["Upload protected folder", "Keep private files encrypted."],
-                      ["Set price", "Choose what it should earn."],
-                      ["Earn from usage", "Get paid as it is used."],
-                    ].map(([title, copy], index) => (
-                      <div className="flex gap-3" key={title}>
-                        <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-[#eef5ff] text-xs font-semibold text-primary">
-                          {index + 1}
-                        </span>
-                        <div>
-                          <div className="docs-card-title text-[#191f28]">
-                            {title}
-                          </div>
-                          <div className="docs-card-copy">
-                            {copy}
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                <div className="rounded-[24px] border border-[#dbeafe] bg-[#f7fbff] p-5">
-                  <div className="docs-card-title text-[#191f28]">
-                    MCP hiring
-                  </div>
-                  <p className="mt-2 docs-card-copy">
-                    HireMe sits between the Client and the creator’s private Harness.
-                  </p>
-                </div>
-              </div>
-            </div>
-          </DocsArticleSection>
-
-          <DocsArticleSection
-            id="publish"
-            kicker="05 / How to Publish"
-            title="Publish from the web or from Codex through MCP"
-          >
-            <div className="grid gap-5 lg:grid-cols-[1fr_1fr]">
-              <DocsMiniBlock
-                id="publish-web"
-                title="Method 1: Web"
-                copy="Write the card, upload the Harness, set the fee, and publish."
-              />
-              <DocsMiniBlock
-                id="publish-mcp"
-                title="Method 2: MCP"
-                copy="Use the local hireme-creator plugin to build the folder, then publish through the Render gateway."
-              />
-            </div>
-            <div
-              className="scroll-mt-24 rounded-3xl border border-[#dbeafe] bg-[#f7fbff] p-5 md:p-6"
-              id="publish-codex-setup"
-            >
-              <div className="docs-card-title text-[#191f28]">
-                Start with a template from Codex
-              </div>
-              <p className="mt-2 docs-card-copy max-w-[680px]">
-                Run this once in your terminal. It installs the local creator
-                template plugin, connects the OAuth HTTP MCP server to the
-                Render gateway, then opens the HireMe login flow for Agent use.
-              </p>
-              <div className="mt-4">
-                <CopyableCodeBlock
-                  code={codexCreatorSetupCommand}
-                  description="Use this for the public website flow. Localhost is only for gateway development."
-                  label="Codex setup"
-                />
-              </div>
-              <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                <div className="rounded-2xl border border-[#dbeafe] bg-white p-4">
-                  <div className="docs-card-title text-[#191f28]">
-                    <code>hireme-creator</code>
-                  </div>
-                  <p className="mt-1.5 docs-card-copy">
-                    Local stdio plugin. Creates template folders and publishes
-                    local Harness folders.
-                  </p>
-                </div>
-                <div className="rounded-2xl border border-[#dbeafe] bg-white p-4">
-                  <div className="docs-card-title text-[#191f28]">
-                    <code>hireme</code>
-                  </div>
-                  <p className="mt-1.5 docs-card-copy">
-                    OAuth HTTP MCP server on Render. Lists access, runs hired
-                    Agents, and checks usage.
-                  </p>
-                </div>
-              </div>
-            </div>
-            <div className="rounded-3xl border border-[#dbeafe] bg-white p-5">
-              <div className="docs-card-title text-[#191f28]">
-                Details
-              </div>
-              <ul className="mt-2 grid gap-2 docs-card-copy">
-                <li>Clients see the Agent card, sample input, result media, price, and public MCP tools.</li>
-                <li>They do not receive AGENTS.md, private skills, prompts, examples, or work rules.</li>
-              </ul>
-            </div>
-          </DocsArticleSection>
-
-          <DocsArticleSection
-            id="paid"
-            kicker="06 / How to Get Paid"
-            title="If your Agent works well, it should earn for you"
-          >
-            <div className="surface-card p-5 md:p-6">
-              <div className="docs-card-title text-[#191f28]">
-                What Walrus and Sui track
-              </div>
-              <ul className="mt-3 grid gap-2 docs-card-copy">
-                <li>Harness version record</li>
-                <li>Execution receipt</li>
-                <li>Access record</li>
-                <li>Payout record</li>
-                <li>Proof that a specific Agent version produced a result</li>
-              </ul>
-            </div>
-            <div className="grid gap-4 md:grid-cols-3">
-              <DocsMiniBlock
-                id="paid-earnings"
-                title="Check earnings"
-                copy="My Page shows hires, usage, and available money."
-              />
-              <DocsMiniBlock
-                id="paid-redeem"
-                title="Redeem"
-                copy="When money is ready, press Redeem to send it to your wallet."
-              />
-              <DocsMiniBlock
-                id="paid-records"
-                title="Payment records"
-                copy="Payouts follow usage and payment records."
-              />
-            </div>
-          </DocsArticleSection>
-
-          <DocsArticleSection
-            id="roadmap"
-            kicker="07 / Trust & Roadmap"
-            title="The goal is a platform-free Agent hiring protocol"
-          >
-            <div className="grid gap-4 lg:grid-cols-[1fr_1fr_1fr]">
-              <div className="surface-card p-5 md:p-6">
-                <div className="docs-card-title text-[#191f28]">
-                  Final goal
-                </div>
-                <p className="mt-2 docs-card-copy">
-                  A platform-free hiring protocol where HireMe matters less over time.
-                </p>
-              </div>
-              <div className="surface-card p-5 md:p-6">
-                <div className="docs-card-title text-[#191f28]">
-                  Long-term privacy
-                </div>
-                <p className="mt-2 docs-card-copy">
-                  TEE, ICP, Seal, and similar systems can reduce what the platform can read.
-                </p>
-              </div>
-              <div className="surface-card p-5 md:p-6">
-                <div className="docs-card-title text-[#191f28]">
-                  Agent quality signals
-                </div>
-                <p className="mt-2 docs-card-copy">
-                  Task success, latency, repeats, feedback, reliability, and cost per result.
-                </p>
-              </div>
-            </div>
-          </DocsArticleSection>
-
-          <section className="scroll-mt-24 border-b border-border py-8 first:pt-0 last:border-b-0 last:pb-0" id="details">
-            <div className="eyebrow-label mb-4">
-              08 / Details
-            </div>
-            <h2 className="docs-section-title max-w-[680px] text-[#191f28]">
-              More detail lives here, not in the main path.
-            </h2>
-            <div className="mt-5 grid gap-4">
-              {[
-                {
-                  title: "What counts as an Agent?",
-                  copy: "A HireMe Agent is a packaged worker with private instructions, skills, examples, tool habits, memory rules, and a public execution contract.",
-                },
-                {
-                  title: "How does protected execution work?",
-                  copy: "Client input goes to the HireMe runner. The creator's Harness executes through a gateway-only run, and the Client gets the result back without seeing the private files.",
-                },
-                {
-                  title: "How does MCP hiring work?",
-                  copy: "Clients can call HireMe Agents from Codex and other MCP clients. HireMe is the hiring and execution layer, not a closed editor.",
-                },
-                {
-                  title: "How does team memory work with memWal?",
-                  copy: "Approved shared memory can move across Agents in a Team while each creator's private files stay hidden.",
-                },
-                {
-                  title: "How do payouts work?",
-                  copy: "Usage and payment records drive creator payouts. When funds are available, creators can redeem them to their wallet.",
-                },
-                {
-                  title: "What is the long-term protocol roadmap?",
-                  copy: "HireMe is moving toward a platform-free hiring protocol with stronger privacy, distributed access, and richer quality signals.",
-                },
-              ].map((item) => (
-                <details
-                  className="group rounded-3xl border border-[#dbeafe] bg-white p-5 shadow-[rgba(30,64,175,0.06)_0_10px_24px]"
-                  key={item.title}
-                >
-                  <summary className="flex cursor-pointer list-none items-center justify-between gap-4 docs-card-title text-[#191f28] [&::-webkit-details-marker]:hidden">
-                    <span>{item.title}</span>
-                    <span className="text-lg text-primary transition group-open:rotate-45">
-                      +
-                    </span>
-                  </summary>
-                  <p className="mt-3 docs-card-copy">
-                    {item.copy}
-                  </p>
-                </details>
-              ))}
-            </div>
-          </section>
-        </article>
-      </div>
-    </main>
-  );
-}
-
-function DocsArticleSection({
-  children,
-  id,
-  kicker,
-  title,
-}: {
-  children: ReactNode;
-  id: string;
-  kicker: string;
-  title: string;
-}) {
-  return (
-    <section className="scroll-mt-24 border-b border-border py-8 first:pt-0 last:border-b-0 last:pb-0" id={id}>
-      <div className="eyebrow-label mb-4">
-        {kicker}
-      </div>
-      <h2 className="docs-section-title max-w-[680px] text-[#191f28]">
-        {title}
-      </h2>
-      <div className="docs-summary-copy mt-4 grid gap-3 md:gap-4">
-        {children}
-      </div>
-    </section>
-  );
-}
-
-function DocsMiniBlock({
-  copy,
-  id,
-  title,
-}: {
-  copy: string;
-  id?: string;
-  title: string;
-}) {
-  return (
-    <div className="scroll-mt-24 border-l border-[#533afd]/30 pl-4" id={id}>
-      <h3 className="docs-card-title text-[#191f28]">{title}</h3>
-      <p className="mt-1.5 docs-card-copy">{copy}</p>
-    </div>
-  );
+function marketplaceSourceLabel(source: AgentDataSource) {
+  if (source === "supabase") return "Supabase live";
+  return "Local demo data";
 }
 
 function ExploreAgentsPage({
@@ -3537,9 +3803,13 @@ function ExploreAgentsPage({
   const [dataSource, setDataSource] = useState<{
     source: AgentDataSource;
     message?: string;
-  }>({ source: "mock", message: "Loading Supabase marketplace..." });
+  }>({ source: "mock", message: "Loading marketplace..." });
   const [accessActionError, setAccessActionError] = useState<string | null>(null);
   const [accessActionKey, setAccessActionKey] = useState<string | null>(null);
+  const [tryChat, setTryChat] = useState<{
+    agent: Agent;
+    access: AgentAccessRecord;
+  } | null>(null);
 
   useEffect(() => {
     let isCurrent = true;
@@ -3602,10 +3872,13 @@ function ExploreAgentsPage({
     setQuery("");
   }
 
-  async function updateAgentAccess(agent: Agent, accessType: AgentAccessType) {
+  async function updateAgentAccess(
+    agent: Agent,
+    accessType: AgentAccessType,
+  ): Promise<AgentAccessRecord | null> {
     if (!user) {
       onRequireLogin();
-      return;
+      return null;
     }
 
     setAccessActionError(null);
@@ -3626,10 +3899,12 @@ function ExploreAgentsPage({
       const nextRecords = upsertAccessRecord(readUserAgentAccess(user), record);
       writeUserAgentAccess(user, nextRecords);
       setAccessSnapshot(readAllAgentAccess());
+      return record;
     } catch (error) {
       setAccessActionError(
         error instanceof Error ? error.message : "Agent access request failed.",
       );
+      return null;
     } finally {
       setAccessActionKey(null);
     }
@@ -3638,6 +3913,37 @@ function ExploreAgentsPage({
   function accessFor(agent: Agent) {
     return accessRecords.find(
       (record) => record.agentId === agent.id && record.status === "active",
+    );
+  }
+
+  async function handleTryAgent(agent: Agent) {
+    if (!user) {
+      onRequireLogin();
+      return;
+    }
+
+    const existingAccess = accessFor(agent);
+    if (existingAccess) {
+      setTryChat({ agent, access: existingAccess });
+      return;
+    }
+
+    const record = await updateAgentAccess(agent, "trial");
+    if (record) {
+      setTryChat({ agent, access: record });
+    }
+  }
+
+  function handleTryChatAccessUpdated(record: AgentAccessRecord) {
+    if (!user) return;
+
+    const nextRecords = upsertAccessRecord(readUserAgentAccess(user), record);
+    writeUserAgentAccess(user, nextRecords);
+    setAccessSnapshot(readAllAgentAccess());
+    setTryChat((current) =>
+      current && current.agent.id === record.agentId
+        ? { ...current, access: record }
+        : current,
     );
   }
 
@@ -3736,7 +4042,7 @@ function ExploreAgentsPage({
                 </span>
                 <span className="text-muted-foreground">·</span>
                 <span className="font-medium text-[#1c1e54]">
-                  {dataSource.source === "supabase" ? "Supabase live" : "Local demo data"}
+                  {marketplaceSourceLabel(dataSource.source)}
                 </span>
                 {dataSource.message ? <span className="leading-5 text-muted-foreground">{dataSource.message}</span> : null}
               </div>
@@ -3775,7 +4081,7 @@ function ExploreAgentsPage({
                   isBusy={accessActionKey?.startsWith(`${agent.id}:`) || false}
                   key={agent.id}
                   onHire={() => void updateAgentAccess(agent, "hired")}
-                  onTry={() => void updateAgentAccess(agent, "trial")}
+                  onTry={() => void handleTryAgent(agent)}
                 />
               ))}
             </div>
@@ -3785,6 +4091,16 @@ function ExploreAgentsPage({
         </div>
       </section>
 
+      {tryChat && user ? (
+        <TryAgentChatPanel
+          access={tryChat.access}
+          agent={tryChat.agent}
+          key={`${tryChat.agent.id}:${tryChat.access.receiptObjectId}`}
+          onAccessUpdated={handleTryChatAccessUpdated}
+          onClose={() => setTryChat(null)}
+          user={user}
+        />
+      ) : null}
     </main>
   );
 }
@@ -3815,6 +4131,8 @@ function AgentDetailPage({
   const [updateAgentError, setUpdateAgentError] = useState<string | null>(null);
   const [updateAgentResult, setUpdateAgentResult] =
     useState<GatewayAgentRegistrationResult | null>(null);
+  const [tryChatAccess, setTryChatAccess] =
+    useState<AgentAccessRecord | null>(null);
 
   useEffect(() => {
     let isCurrent = true;
@@ -3886,11 +4204,13 @@ function AgentDetailPage({
       )
     : undefined;
 
-  async function updateAgentAccess(accessType: AgentAccessType) {
-    if (!agent) return;
+  async function updateAgentAccess(
+    accessType: AgentAccessType,
+  ): Promise<AgentAccessRecord | null> {
+    if (!agent) return null;
     if (!user) {
       onRequireLogin();
-      return;
+      return null;
     }
 
     setAccessActionError(null);
@@ -3911,13 +4231,42 @@ function AgentDetailPage({
       const nextRecords = upsertAccessRecord(readUserAgentAccess(user), record);
       writeUserAgentAccess(user, nextRecords);
       setAccessSnapshot(readAllAgentAccess());
+      return record;
     } catch (error) {
       setAccessActionError(
         error instanceof Error ? error.message : "Agent access request failed.",
       );
+      return null;
     } finally {
       setAccessActionType(null);
     }
+  }
+
+  async function openTryChat() {
+    if (!agent) return;
+    if (!user) {
+      onRequireLogin();
+      return;
+    }
+
+    if (access) {
+      setTryChatAccess(access);
+      return;
+    }
+
+    const record = await updateAgentAccess("trial");
+    if (record) {
+      setTryChatAccess(record);
+    }
+  }
+
+  function handleTryChatAccessUpdated(record: AgentAccessRecord) {
+    if (!user) return;
+
+    const nextRecords = upsertAccessRecord(readUserAgentAccess(user), record);
+    writeUserAgentAccess(user, nextRecords);
+    setAccessSnapshot(readAllAgentAccess());
+    setTryChatAccess(record);
   }
 
   async function updateAgentHarness() {
@@ -3995,7 +4344,6 @@ function AgentDetailPage({
   }
 
   const isHired = access?.accessType === "hired";
-  const isTrying = access?.accessType === "trial";
   const hasGatewayAccess = access?.source === "gateway";
   const tokenPrice = agent.pricePer1MTokensSui ?? agent.pricePerCallUsd;
   const averageTokens = totalAverageTokens(agent);
@@ -4061,7 +4409,7 @@ function AgentDetailPage({
               </CardHeader>
               <CardContent>
                 <div className="grid grid-cols-2 gap-3">
-                  <Button className="w-full" disabled={Boolean(accessActionType) || (hasGatewayAccess && (isTrying || isHired))} onClick={() => void updateAgentAccess("trial")} type="button" variant="secondary"><Terminal /> Try Agent</Button>
+                  <Button className="w-full" disabled={Boolean(accessActionType)} onClick={() => void openTryChat()} type="button" variant="secondary"><MessageCircle /> Try Agent</Button>
                   <Button className="w-full" disabled={Boolean(accessActionType) || (hasGatewayAccess && isHired)} onClick={() => void updateAgentAccess("hired")} type="button"><PackageOpen /> Hire Agent</Button>
                 </div>
                 {access ? <div className="mt-4 rounded-lg border border-[#d8d4e2] bg-white px-3 py-2 text-xs leading-5 text-muted-foreground">{access.source === "gateway" ? "Authorized for protected Codex execution." : "Saved locally. Connect the gateway to authorize Codex access."}</div> : null}
@@ -4254,15 +4602,12 @@ function AgentDetailPage({
                   </Button>
                   <Button
                     className="w-full"
-                    disabled={
-                      Boolean(accessActionType) ||
-                      (hasGatewayAccess && (isTrying || isHired))
-                    }
-                    onClick={() => void updateAgentAccess("trial")}
+                    disabled={Boolean(accessActionType)}
+                    onClick={() => void openTryChat()}
                     type="button"
                     variant="secondary"
                   >
-                    <Terminal /> Try Agent
+                    <MessageCircle /> Try Agent
                   </Button>
                 </div>
                 <div className="mt-6 border-t border-[#dedbea] pt-5">
@@ -4295,6 +4640,16 @@ function AgentDetailPage({
           </aside>
         </div>
       </section>
+      {tryChatAccess && user ? (
+        <TryAgentChatPanel
+          access={tryChatAccess}
+          agent={agent}
+          key={`${agent.id}:${tryChatAccess.receiptObjectId}`}
+          onAccessUpdated={handleTryChatAccessUpdated}
+          onClose={() => setTryChatAccess(null)}
+          user={user}
+        />
+      ) : null}
     </main>
   );
 }
@@ -5325,7 +5680,7 @@ function MyAgentAccessCard({
   record: AgentAccessRecord;
   walletStat?: GatewayWalletAgentStatPayload;
 }) {
-  const callSnippet = `hireme_call_agent({\n  "agent_id": "${agent.id}",\n  "task": "<your task>",\n  "hirer_id": "${hirerId}",\n  "hire_receipt_object_id": "${record.receiptObjectId}"\n})`;
+  const callSnippet = `hireme_call_agent_stream({\n  "agent_id": "${agent.id}",\n  "task": "<your task>",\n  "hirer_id": "${hirerId}",\n  "hire_receipt_object_id": "${record.receiptObjectId}",\n  "wait_for_memory": false\n})`;
 
   return (
     <Card>
@@ -5430,6 +5785,548 @@ function MyAgentAccessCard({
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+function TryAgentChatPanel({
+  access,
+  agent,
+  onAccessUpdated,
+  onClose,
+  user,
+}: {
+  access: AgentAccessRecord;
+  agent: Agent;
+  onAccessUpdated: (record: AgentAccessRecord) => void;
+  onClose: () => void;
+  user: AuthUser;
+}) {
+  const transcriptKey = tryChatTranscriptKey(access, agent, user);
+  const restoredTranscript = readTryChatTranscript(transcriptKey);
+  const [input, setInput] = useState("");
+  const [isCommandCopied, setIsCommandCopied] = useState(false);
+  const [isSending, setIsSending] = useState(false);
+  const [confirmPendingSend, setConfirmPendingSend] = useState(false);
+  const [sendNotice, setSendNotice] = useState<string | null>(null);
+  const [conversationContext, setConversationContext] =
+    useState<TryConversationContext | null>(
+      () => restoredTranscript?.conversationContext || null,
+    );
+  const [messages, setMessages] = useState<TryChatMessage[]>(
+    () => restoredTranscript?.messages || initialTryChatMessages(agent),
+  );
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  const isMountedRef = useRef(true);
+  const activeMemoryPollsRef = useRef(new Set<string>());
+  const transcriptRef = useRef<HTMLDivElement | null>(null);
+  const callSnippet = buildTryCodexSnippet({
+    access,
+    agent,
+    conversation: conversationContext,
+    user,
+  });
+
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    transcriptRef.current?.scrollTo({
+      top: transcriptRef.current.scrollHeight,
+      behavior: prefersReducedMotion() ? "auto" : "smooth",
+    });
+  }, [messages]);
+
+  useEffect(() => {
+    writeTryChatTranscript(transcriptKey, {
+      conversationContext,
+      messages,
+      updatedAt: new Date().toISOString(),
+    });
+  }, [conversationContext, messages, transcriptKey]);
+
+  useEffect(() => {
+    if (!conversationContext) return;
+    if (tryMemWalDisplayStatus(conversationContext) !== "pending") {
+      setConfirmPendingSend(false);
+      setSendNotice(null);
+    }
+  }, [conversationContext]);
+
+  async function pollTryMemWalStatus({
+    conversationId,
+    memoryJobId,
+    messageId,
+  }: {
+    conversationId: string;
+    memoryJobId: string;
+    messageId: string;
+  }) {
+    if (activeMemoryPollsRef.current.has(memoryJobId)) return;
+    activeMemoryPollsRef.current.add(memoryJobId);
+
+    try {
+      for (let attempt = 0; attempt < 8; attempt += 1) {
+        await wait(1500 + attempt * 500);
+        if (!isMountedRef.current) return;
+
+        try {
+          const result = await loadTryMemoryStatus(memoryJobId);
+          const nextConversationContext = buildTryConversationContext({
+            agentId: agent.id,
+            call: result,
+            conversationId,
+          });
+          const nextStatus = tryMemWalDisplayStatus(nextConversationContext);
+          setConversationContext(nextConversationContext);
+          if (nextStatus) {
+            setMessages((current) =>
+              current.map((message) => {
+                if (message.id === messageId) {
+                  return { ...message, memWalStatus: nextStatus };
+                }
+                if (nextStatus === "stored" && message.memWalStatus === "pending") {
+                  return { ...message, memWalStatus: "stored" };
+                }
+                return message;
+              }),
+            );
+          }
+          if (nextStatus === "stored" || result.status === "failed") return;
+        } catch {
+          return;
+        }
+      }
+    } finally {
+      activeMemoryPollsRef.current.delete(memoryJobId);
+    }
+  }
+
+  useEffect(() => {
+    if (!conversationContext?.memoryJobId) return;
+    if (tryMemWalDisplayStatus(conversationContext) !== "pending") return;
+
+    const messageId = latestAssistantMessageId(messages);
+    if (!messageId) return;
+
+    void pollTryMemWalStatus({
+      conversationId: conversationContext.conversationId,
+      memoryJobId: conversationContext.memoryJobId,
+      messageId,
+    });
+  }, [
+    conversationContext?.conversationId,
+    conversationContext?.conversationStored,
+    conversationContext?.memoryJobId,
+    conversationContext?.memWalStatus,
+    conversationContext?.userMemWalStatus,
+    messages,
+  ]);
+
+  async function handleCopyCallSnippet() {
+    await copyTextToClipboard(callSnippet);
+    if (!isMountedRef.current) return;
+    setIsCommandCopied(true);
+    window.setTimeout(() => {
+      if (!isMountedRef.current) return;
+      setIsCommandCopied(false);
+    }, 1500);
+  }
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const task = input.trim();
+    if (!task || isSending) return;
+
+    const currentMemWalStatus = conversationContext
+      ? tryMemWalDisplayStatus(conversationContext)
+      : null;
+    if (currentMemWalStatus === "pending" && !confirmPendingSend) {
+      setConfirmPendingSend(true);
+      setSendNotice(
+        "The previous chat has not been saved to memWal yet. Send anyway?",
+      );
+      return;
+    }
+
+    setConfirmPendingSend(false);
+    setSendNotice(null);
+
+    const userMessage: TryChatMessage = {
+      id: `user-${Date.now().toString(36)}`,
+      role: "user",
+      text: task,
+      createdAt: new Date().toISOString(),
+    };
+    const pendingId = `assistant-${Date.now().toString(36)}`;
+    const pendingMessage: TryChatMessage = {
+      id: pendingId,
+      role: "assistant",
+      text: "Running protected Agent...",
+      createdAt: new Date().toISOString(),
+      pending: true,
+    };
+
+    setMessages((current) => [...current, userMessage, pendingMessage]);
+    setInput("");
+    setIsSending(true);
+
+    try {
+      const conversationId =
+        conversationContext &&
+        tryMemWalDisplayStatus(conversationContext) === "stored"
+          ? conversationContext.conversationId
+          : tryConversationId(access, agent, user);
+      const updatePendingMessage = (patch: Partial<TryChatMessage>) => {
+        setMessages((current) =>
+          current.map((message) =>
+            message.id === pendingId ? { ...message, ...patch } : message,
+          ),
+        );
+      };
+      const applyStreamCall = (
+        call: GatewayAgentCallResponse,
+        options: { showText?: boolean } = {},
+      ) => {
+        const nextConversationContext = buildTryConversationContext({
+          agentId: agent.id,
+          call,
+          conversationId,
+        });
+        const memWalStatus = tryMemWalDisplayStatus(nextConversationContext);
+        setConversationContext(nextConversationContext);
+        updatePendingMessage({
+          ...(options.showText
+            ? {
+                attachments: extractTryImageAttachments(call),
+                pending: false,
+                responseMode:
+                  call.responseMode || call.jsonOutput?.responseMode || null,
+                text: extractAgentCallText(call),
+              }
+            : {}),
+          memWalStatus,
+        });
+        return { memWalStatus, nextConversationContext };
+      };
+
+      const result = await callTryAgent({
+        access,
+        agent,
+        conversationId,
+        onEvent: (streamEvent) => {
+          if (streamEvent.event === "authorized") {
+            updatePendingMessage({ text: "Authorizing protected Agent..." });
+            return;
+          }
+          if (streamEvent.event === "artifact_loaded") {
+            updatePendingMessage({ text: "Loading protected Harness..." });
+            return;
+          }
+          if (
+            streamEvent.event === "output_fast" ||
+            streamEvent.event === "result"
+          ) {
+            applyStreamCall(streamEvent.data, { showText: true });
+            return;
+          }
+          if (streamEvent.event === "memwal_pending") {
+            applyStreamCall(
+              {
+                conversationId: streamEvent.data.conversationId || conversationId,
+                memory: {
+                  conversationStored: Boolean(streamEvent.data.conversationId)
+                    ? false
+                    : null,
+                  jobId: streamEvent.data.memoryJobId ?? undefined,
+                  status: "pending",
+                  waitForMemory: false,
+                },
+                memoryJobId: streamEvent.data.memoryJobId || null,
+                userMemWal: {
+                  jobId: streamEvent.data.memoryJobId ?? undefined,
+                  status: "pending",
+                  stored: false,
+                },
+              },
+              { showText: false },
+            );
+            return;
+          }
+          if (streamEvent.event === "memwal_stored") {
+            applyStreamCall(
+              {
+                conversationId:
+                  streamEvent.data.mcpConversation?.conversationId ||
+                  streamEvent.data.conversationId ||
+                  conversationId,
+                mcpConversation: streamEvent.data.mcpConversation,
+                memory: {
+                  conversationStored:
+                    streamEvent.data.mcpConversation?.stored ?? true,
+                  status: "stored",
+                  waitForMemory: false,
+                },
+                userMemWal: streamEvent.data.userMemWal,
+              },
+              { showText: false },
+            );
+          }
+        },
+        task,
+        user,
+      });
+      const nextConversationContext = buildTryConversationContext({
+        agentId: agent.id,
+        call: result,
+        conversationId,
+      });
+      const memWalStatus = tryMemWalDisplayStatus(nextConversationContext);
+      setConversationContext(nextConversationContext);
+      let nextAccess = markAccessRecordUsed(access);
+      if (typeof result.authorization?.trialCallsRemaining === "number") {
+        nextAccess = {
+          ...nextAccess,
+          trialCallsRemaining: result.authorization.trialCallsRemaining,
+        };
+      }
+      onAccessUpdated(nextAccess);
+      setMessages((current) =>
+        current.map((message) =>
+          message.id === pendingId
+            ? {
+                ...message,
+                attachments: extractTryImageAttachments(result),
+                memWalStatus,
+                text: extractAgentCallText(result),
+                pending: false,
+                responseMode: result.responseMode || result.jsonOutput?.responseMode || null,
+              }
+            : message,
+        ),
+      );
+      if (memWalStatus === "pending" && nextConversationContext.memoryJobId) {
+        void pollTryMemWalStatus({
+          conversationId: nextConversationContext.conversationId,
+          memoryJobId: nextConversationContext.memoryJobId,
+          messageId: pendingId,
+        });
+      }
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Protected Agent call failed.";
+      setMessages((current) =>
+        current.map((item) =>
+          item.id === pendingId
+            ? {
+                ...item,
+                text:
+                  access.source === "local"
+                    ? `This Try access is saved locally, but the protected gateway is not reachable yet. Start the gateway or use the Codex MCP setup, then try again.\n\n${message}`
+                    : message,
+                pending: false,
+                error: true,
+              }
+            : item,
+        ),
+      );
+    } finally {
+      setIsSending(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 bg-[#0f172a]/28 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label={`Try ${agent.name}`}>
+      <div className="absolute inset-x-0 bottom-0 max-h-[92svh] overflow-hidden rounded-t-lg border border-[#dbeafe] bg-white shadow-[0_-18px_50px_rgba(15,52,96,0.18)] md:inset-y-4 md:right-4 md:left-auto md:flex md:w-[460px] md:max-w-[calc(100vw-2rem)] md:flex-col md:rounded-lg">
+        <div className="flex items-start justify-between gap-4 border-b border-border px-4 py-4">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.08em] text-primary">
+              <MessageCircle className="size-3.5" />
+              Try Agent
+            </div>
+            <h2 className="mt-1 truncate text-xl font-semibold leading-tight text-[#191f28]">
+              {agent.name}
+            </h2>
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">
+              {access.accessType === "trial"
+                ? `${access.trialCallsRemaining ?? 0} trial calls left`
+                : "Hired access active"}
+              {" "}· {access.source === "gateway" ? "Gateway" : "Local preview"}
+            </p>
+          </div>
+          <button
+            aria-label="Close Try chat"
+            className="inline-flex size-9 shrink-0 items-center justify-center rounded-md border border-border bg-white text-[#4e5968] transition hover:bg-secondary"
+            onClick={onClose}
+            type="button"
+          >
+            <X className="size-4" />
+          </button>
+        </div>
+
+        <div className="flex max-h-[calc(92svh-86px)] min-h-0 flex-col md:flex-1">
+          <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4" ref={transcriptRef}>
+            <div className="grid gap-3">
+              {messages.map((message) => (
+                <div
+                  className={`max-w-[92%] rounded-lg border px-3 py-2.5 text-sm leading-6 ${
+                    message.role === "user"
+                      ? "ml-auto border-primary/20 bg-primary text-white"
+                      : message.error
+                        ? "border-[#ea2261]/25 bg-[#fff8fb] text-[#9f1239]"
+                        : message.pending
+                          ? "try-agent-pending-bubble border-[#b8d5f6] bg-[#f8fbff] text-[#273951]"
+                          : "border-border bg-[#f8fafc] text-[#273951]"
+                  }`}
+                  key={message.id}
+                >
+                  <TryChatMessageContent message={message} />
+                  {message.attachments?.length ? (
+                    <div className="mt-3 grid gap-2">
+                      {message.attachments.map((attachment) => (
+                        <a
+                          className="block overflow-hidden rounded-lg border border-border bg-white"
+                          href={attachment.url}
+                          key={attachment.id}
+                          rel="noreferrer"
+                          target="_blank"
+                        >
+                          <img
+                            alt={attachment.label}
+                            className="max-h-72 w-full object-contain"
+                            src={attachment.url}
+                          />
+                        </a>
+                      ))}
+                    </div>
+                  ) : null}
+                  {message.responseMode || message.memWalStatus ? (
+                    <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] font-medium uppercase tracking-[0.08em] opacity-75">
+                      {message.responseMode ? <span>{message.responseMode}</span> : null}
+                      {message.memWalStatus ? (
+                        <TryMemWalMessageStatus status={message.memWalStatus} />
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="border-t border-border bg-white px-4 py-4">
+            <form className="grid gap-3" onSubmit={(event) => void handleSubmit(event)}>
+              <textarea
+                className="min-h-24 resize-none rounded-lg border border-input bg-white px-3 py-2 text-sm leading-6 text-foreground shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                onChange={(event) => {
+                  setInput(event.target.value);
+                  setConfirmPendingSend(false);
+                  setSendNotice(null);
+                }}
+                onKeyDown={(event) => {
+                  if (
+                    event.key === "Enter" &&
+                    !event.shiftKey &&
+                    !event.nativeEvent.isComposing
+                  ) {
+                    event.preventDefault();
+                    event.currentTarget.form?.requestSubmit();
+                  }
+                }}
+                placeholder="Ask this Agent a small test task..."
+                ref={inputRef}
+                value={input}
+              />
+              {sendNotice ? (
+                <div className="flex flex-col gap-2 rounded-md border border-[#f4c7d5] bg-[#fff8fb] px-3 py-2 text-xs leading-5 text-[#9f1239] sm:flex-row sm:items-center sm:justify-between">
+                  <span>{sendNotice}</span>
+                  {confirmPendingSend ? (
+                    <span className="flex shrink-0 items-center gap-2">
+                      <button
+                        className="rounded-md border border-[#f4c7d5] bg-white px-2.5 py-1 font-semibold text-[#9f1239] transition hover:bg-[#fff1f6]"
+                        onClick={() => {
+                          setConfirmPendingSend(false);
+                          setSendNotice(null);
+                        }}
+                        type="button"
+                      >
+                        Wait
+                      </button>
+                      <button
+                        className="rounded-md bg-[#9f1239] px-2.5 py-1 font-semibold text-white transition hover:bg-[#881337]"
+                        type="submit"
+                      >
+                        Send anyway
+                      </button>
+                    </span>
+                  ) : null}
+                </div>
+              ) : null}
+              <div className="flex items-center justify-between gap-3">
+                <details className="min-w-0 flex-1">
+                  <summary className="cursor-pointer list-none text-xs font-semibold text-primary [&::-webkit-details-marker]:hidden">
+                    Run in Codex
+                  </summary>
+                  <div className="relative mt-2 rounded-md border border-border bg-secondary">
+                    <code className="block whitespace-pre-wrap break-all py-2 pl-2 pr-10 text-[11px] leading-5 text-[#1c1e54]">
+                      {callSnippet}
+                    </code>
+                    <button
+                      aria-label="Copy hireme_call_agent_stream"
+                      className="absolute right-2 top-2 inline-flex size-7 items-center justify-center rounded-md border border-border bg-white text-[#273951] shadow-sm transition hover:bg-[#f8fafc]"
+                      onClick={() => void handleCopyCallSnippet()}
+                      title={
+                        isCommandCopied
+                          ? "Copied"
+                          : "Copy hireme_call_agent_stream"
+                      }
+                      type="button"
+                    >
+                      {isCommandCopied ? (
+                        <CheckCircle2 className="size-3.5 text-[#168a58]" />
+                      ) : (
+                        <Copy className="size-3.5" />
+                      )}
+                    </button>
+                  </div>
+                </details>
+                <Button disabled={!input.trim() || isSending} type="submit">
+                  <MessageCircle />
+                  {isSending ? "Running" : "Send"}
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TryMemWalMessageStatus({
+  status,
+}: {
+  status: TryMemWalDisplayStatus;
+}) {
+  if (status === "stored") {
+    return (
+      <span className="inline-flex items-center gap-1 text-[#168a58]" title="memWal saved">
+        <CheckCircle2 className="size-3.5" />
+        memWal
+      </span>
+    );
+  }
+
+  return (
+    <span className="inline-flex items-center gap-1 text-[#6b7280]" title="memWal saving">
+      <LoaderCircle className="size-3.5 animate-spin" />
+      memWal
+    </span>
   );
 }
 
@@ -5582,7 +6479,6 @@ function AgentMarketCard({
   onTry: () => void;
 }) {
   const isHired = access?.accessType === "hired";
-  const isTrying = access?.accessType === "trial";
   const hasGatewayAccess = access?.source === "gateway";
   const [isExpanded, setIsExpanded] = useState(false);
   const navigate = useNavigate();
@@ -5656,7 +6552,7 @@ function AgentMarketCard({
         <div className="mt-3 grid grid-cols-[1fr_1fr_auto] gap-2">
           <Button
             className="w-full"
-            disabled={isBusy || (hasGatewayAccess && (isTrying || isHired))}
+            disabled={isBusy}
             onClick={(event) => {
               event.stopPropagation();
               onTry();
@@ -5665,7 +6561,7 @@ function AgentMarketCard({
             type="button"
             variant="secondary"
           >
-            <Terminal /> Try
+            <MessageCircle /> Try
           </Button>
           <Button
             className="w-full"
@@ -5719,27 +6615,6 @@ function AgentMarketCard({
           </div>
         ) : null}
 
-        {access ? (
-          <div className="mt-3 rounded-lg border border-border bg-white px-3 py-2 text-xs leading-5 text-muted-foreground">
-            <div className="flex items-center justify-between gap-3">
-              <span>
-                {access.source === "local"
-                  ? "Saved locally. Start gateway and press again for Codex access."
-                  : isHired
-                    ? "Hired. Available from Codex through your hirer_id."
-                    : `Trial ready. ${access.trialCallsRemaining ?? 0} calls left.`}
-              </span>
-              <Link className="shrink-0 font-medium text-primary" to="/my">
-                My Agents
-              </Link>
-            </div>
-            {access.source === "local" && access.gatewayError ? (
-              <div className="mt-2 truncate font-mono text-[11px] text-[#9f1239]">
-                {access.gatewayError}
-              </div>
-            ) : null}
-          </div>
-        ) : null}
       </CardContent>
     </Card>
   );
@@ -6351,7 +7226,10 @@ function CreateAgentPage({
         entryPreview: gatewayRegistration.upload?.entryPreview || [
           harnessFile.name,
         ],
-        epochs: 3,
+        epochs:
+          gatewayRegistration.upload?.storageEpochs ||
+          registeredArtifact.storageEpochs ||
+          defaultAgentStorageEpochs,
         pricePerCallUsd: totalPricePerCallUsd,
         policyRule: `Caller must hold an active AgentHireReceipt. Results commit safe summaries and artifact digests to ${memWalScope}.`,
         createdAt: gatewayRegistration.registeredAt || new Date().toISOString(),

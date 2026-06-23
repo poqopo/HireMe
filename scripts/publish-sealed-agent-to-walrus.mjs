@@ -11,7 +11,7 @@ if (!folderPath) {
 }
 
 const publicProfile = JSON.parse(await readFile(join(folderPath, "public.json"), "utf8"));
-const epochs = Number.parseInt(process.env.HIREME_EXAMPLE_STORAGE_EPOCHS || "3", 10);
+const epochs = Number.parseInt(process.env.HIREME_EXAMPLE_STORAGE_EPOCHS || "7", 10);
 
 const sealed = await sealAgentFolder({
   folderPath,

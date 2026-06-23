@@ -3301,9 +3301,56 @@ function escapeRegExp(value) {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function listAgents(args = {}) {
+async function listAgents(args = {}) {
+  const supabaseAgents = await listSupabaseMarketplaceAgents(args);
+  if (supabaseAgents) return supabaseAgents;
+  return listLocalAgents(args);
+}
+
+async function listSupabaseMarketplaceAgents(args = {}) {
+  const admin = createSupabaseAdminClient();
+  if (!admin) return null;
+
+  try {
+    const { data, error } = await admin
+      .from("agent_marketplace_cards")
+      .select("*")
+      .order("created_at", { ascending: false, nullsFirst: false });
+    if (error) {
+      writeGatewayLog("supabase_agent_list_failed", {
+        code: error.code || "supabase_agent_list_failed",
+        message: error.message,
+      });
+      return null;
+    }
+
+    const hydratedAgents = [];
+    for (const row of data || []) {
+      const agent = await hydrateAgentFromSupabase(row.slug || row.id);
+      if (agent) hydratedAgents.push(agent);
+    }
+
+    return buildAgentListResponse({
+      agentsForList: hydratedAgents,
+      args,
+      source: "supabase",
+    });
+  } catch (err) {
+    writeGatewayLog("supabase_agent_list_failed", {
+      code: err?.code || "supabase_agent_list_failed",
+      message: err?.message || String(err),
+    });
+    return null;
+  }
+}
+
+function listLocalAgents(args = {}) {
+  return buildAgentListResponse({ agentsForList: agents, args, source: "local" });
+}
+
+function buildAgentListResponse({ agentsForList, args = {}, source }) {
   const query = args.query?.trim().toLowerCase();
-  const filtered = agents
+  const filtered = agentsForList
     .filter((agent) => !args.category || agent.category === args.category)
     .filter((agent) => {
       if (!query) return true;
@@ -3322,28 +3369,16 @@ function listAgents(args = {}) {
         .includes(query);
     })
     .map((agent) => ({
-      id: agent.id,
-      name: agent.name,
-      category: agent.category,
-      status: agent.status,
-      headline: agent.headline,
-      pricePerCallUsd: agent.pricePerCallUsd,
-      pricePer1MTokensSui: readAgentTokenPriceSui(agent),
-      historicalCalls: agent.calls,
-      medianLatencyMs: agent.latencyMs,
-      avgInputTokens: agent.avgInputTokens || null,
-      avgOutputTokens: agent.avgOutputTokens || null,
-      activeUsers: agent.activeUsers || 0,
-      publicSkills: agent.skills,
-      capabilities: deriveAgentCapabilities(agent),
-      preferredCallMode: preferredAgentCallMode(agent),
-      memwalPolicy: agent.memwalPolicy,
-      sealedHarness: protectedArtifacts.get(agent.id),
-      active: agent.id === (sessions.get(args.codex_installation_id || defaultInstallationId) || "walrus-researcher"),
+      ...publicAgent(agent),
+      active:
+        agent.id ===
+        (sessions.get(args.codex_installation_id || defaultInstallationId) ||
+          "walrus-researcher"),
     }));
 
   return {
     gatewayCall: true,
+    source,
     count: filtered.length,
     activeAgentId: sessions.get(args.codex_installation_id || defaultInstallationId) || "walrus-researcher",
     hiredAgents: filtered,
