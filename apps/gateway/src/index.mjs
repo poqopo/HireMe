@@ -5371,12 +5371,29 @@ async function runProtectedAgent(args = {}) {
   const waitForMemory = shouldWaitForMemory(args);
   const protectedInternalsRequest = classifyProtectedInternalsRequest(args.task || "");
   if (protectedInternalsRequest.blocked) {
-    return buildBlockedProtectedInternalsCall({
+    const blockedCall = buildBlockedProtectedInternalsCall({
       agent,
       task: args.task || "",
       budgetCalls,
       reason: protectedInternalsRequest.reason,
     });
+    const blockedEvent = {
+      callId: blockedCall.callId,
+      agentId: agent.id,
+      executionMode: "guardrail_block",
+      responseMode: "direct_answer",
+      resultType: blockedCall.result?.type || null,
+      resultProvider: "hireme_guardrail",
+      outputText: blockedCall.result?.outputText || null,
+      attachmentCount: 0,
+      memoryJobId: null,
+      codexView: null,
+      result: blockedCall.result,
+      jsonOutput: blockedCall.jsonOutput,
+    };
+    emitAgentCallEvent(args, "output_fast", blockedEvent);
+    emitAgentCallEvent(args, "result", blockedEvent);
+    return blockedCall;
   }
   const requestedHirerId = readHirerId(args);
   const hirerIds = readHirerIdentityCandidates(args);
@@ -7988,23 +8005,76 @@ function classifyProtectedInternalsRequest(task) {
   const koreanProtectedAssetPattern =
     /(시스템\s*프롬프트|개발자\s*프롬프트|비공개\s*프롬프트|숨겨진\s*프롬프트|하네스|보호\s*하네스|비공개\s*스킬|스킬\s*소스|원본\s*프롬프트|원본\s*파일|복호화|암호문|백업\s*키|평가\s*셋|루브릭|메모리|월러스\s*아티팩트)/i;
   const extractionIntentPattern =
-    /\b(show|print|dump|reveal|expose|extract|leak|list|quote|verbatim|copy|return|send|read|summarize|describe)\b/i;
+    /\b(show(?:\s+(?:me|us))?|print|dump|reveal|expose|extract|leak|list|quote|verbatim|copy|return|send\s+(?:me|us)|read|summarize|describe)\b/i;
   const koreanExtractionIntentPattern =
     /(보여|출력|덤프|공개|노출|추출|유출|나열|인용|그대로|복사|반환|보내|읽어|요약|설명)/i;
 
-  const mentionsProtectedAsset =
-    protectedAssetPattern.test(text) || koreanProtectedAssetPattern.test(text);
-  const asksToExtract =
-    extractionIntentPattern.test(text) || koreanExtractionIntentPattern.test(text);
+  const segments = splitGuardrailSegments(text);
+  for (const segment of segments) {
+    const mentionsProtectedAsset =
+      protectedAssetPattern.test(segment) || koreanProtectedAssetPattern.test(segment);
+    if (!mentionsProtectedAsset) continue;
+    const asksToExtract =
+      hasPositiveExtractionIntent(segment, extractionIntentPattern, protectedAssetPattern) ||
+      hasPositiveKoreanExtractionIntent(segment, koreanExtractionIntentPattern);
 
-  if (mentionsProtectedAsset && asksToExtract) {
-    return {
-      blocked: true,
-      reason: "protected_creator_internals_requested",
-    };
+    if (asksToExtract) {
+      return {
+        blocked: true,
+        reason: "protected_creator_internals_requested",
+      };
+    }
   }
 
   return { blocked: false };
+}
+
+function splitGuardrailSegments(text) {
+  return String(text || "")
+    .split(/(?:\r?\n)+|(?<=[.!?])\s+/)
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+}
+
+function hasPositiveExtractionIntent(segment, pattern, protectedAssetPattern) {
+  const text = String(segment || "");
+  for (const match of text.matchAll(new RegExp(pattern.source, `${pattern.flags.includes("i") ? "i" : ""}g`))) {
+    const prefix = text.slice(Math.max(0, match.index - 40), match.index).toLowerCase();
+    if (/\b(do\s+not|don't|never|cannot|can't|without|not|no)\s+(?:\w+\s+){0,4}$/.test(prefix)) {
+      continue;
+    }
+    if (/(?:non-|anti-)$/.test(prefix)) {
+      continue;
+    }
+    const intent = String(match[0] || "").toLowerCase();
+    const before = text.slice(Math.max(0, match.index - 80), match.index);
+    const after = text.slice(match.index + match[0].length, match.index + match[0].length + 160);
+    const requestMarker =
+      /\b(please|can\s+you|could\s+you|would\s+you|i\s+want|let\s+me|give\s+me|tell\s+me|need\s+you\s+to)\b/i;
+
+    if (/^(show|send)\s+(me|us)$/.test(intent)) return true;
+    if (protectedAssetPattern.test(after)) return true;
+    if (
+      protectedAssetPattern.test(before) &&
+      /\b(raw|verbatim|plaintext|exact|full|secret|private|to\s+(?:me|us))\b/i.test(after)
+    ) {
+      return true;
+    }
+    if (requestMarker.test(text)) return true;
+  }
+  return false;
+}
+
+function hasPositiveKoreanExtractionIntent(segment, pattern) {
+  const text = String(segment || "");
+  for (const match of text.matchAll(new RegExp(pattern.source, `${pattern.flags.includes("i") ? "i" : ""}g`))) {
+    const prefix = text.slice(Math.max(0, match.index - 24), match.index);
+    if (/(하지\s*마|말아|않|없이|불가|금지)\s*$/.test(prefix)) {
+      continue;
+    }
+    return true;
+  }
+  return false;
 }
 
 function buildBlockedProtectedInternalsCall({ agent, task, budgetCalls, reason }) {
