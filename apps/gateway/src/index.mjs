@@ -17,7 +17,6 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { basename, dirname, extname, join, relative, resolve } from "node:path";
-import { loadEnvFile } from "node:process";
 import { promisify } from "node:util";
 import { createClient } from "@supabase/supabase-js";
 import {
@@ -54,8 +53,16 @@ import {
   readWalrusBlobBytes,
   storeFileOnWalrus,
 } from "./walrusBlobStore.mjs";
+import { fileURLToPath } from "node:url";
 
-for (const envFile of [".env", ".env.local"]) {
+const gatewaySourceDir = dirname(fileURLToPath(import.meta.url));
+const repoRootDir = resolve(gatewaySourceDir, "../../..");
+for (const envFile of [
+  resolve(repoRootDir, ".env"),
+  resolve(repoRootDir, ".env.local"),
+  ".env",
+  ".env.local",
+]) {
   try {
     loadEnvFile(envFile);
   } catch (err) {
