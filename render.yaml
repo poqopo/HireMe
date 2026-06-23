@@ -52,7 +52,7 @@ services:
       - key: HIREME_PLATFORM_KMS_KEY_ID
         value: platform:render
       - key: MEMWAL_SERVER_URL
-        value: https://relayer-staging.memory.walrus.xyz
+        value: https://relayer.memory.walrus.xyz
       - key: HIREME_MEMWAL_REMEMBER_ASYNC
         value: "0"
       - key: HIREME_MEMWAL_REMEMBER_TIMEOUT_MS
