@@ -211,6 +211,7 @@ const tryChatTranscriptsStorageKey = "hireme-demo-try-chat-transcripts-v2";
 const legacyTryChatTranscriptsStorageKeys = [
   "hireme-demo-try-chat-transcripts-v1",
 ];
+const tryChatPendingRestoreTtlMs = 5 * 60 * 1000;
 const typicalOutputStorageBucket =
   import.meta.env.VITE_HIREME_TYPICAL_OUTPUT_BUCKET || "hireme-agent-media";
 const gatewayUrl = (
@@ -1859,10 +1860,21 @@ function readTryChatTranscript(key: string): TryChatTranscriptRecord | null {
     const store = JSON.parse(raw) as Record<string, TryChatTranscriptRecord>;
     const record = store[key];
     if (!record || !Array.isArray(record.messages)) return null;
+    const conversationContext = record.conversationContext || null;
+    const storedMessages = record.messages.filter(isTryChatMessage).slice(-80);
+    const latestAssistantId = latestAssistantMessageId(storedMessages);
+    const updatedAt = record.updatedAt || new Date().toISOString();
     return {
-      conversationContext: record.conversationContext || null,
-      messages: record.messages.filter(isTryChatMessage).slice(-80),
-      updatedAt: record.updatedAt || new Date().toISOString(),
+      conversationContext,
+      messages: storedMessages.map((message) =>
+        recoverStoredTryChatMessage({
+          conversationContext,
+          isLatestAssistant: message.id === latestAssistantId,
+          message,
+          transcriptUpdatedAt: updatedAt,
+        }),
+      ),
+      updatedAt,
     };
   } catch {
     return null;
@@ -1923,6 +1935,47 @@ function sanitizeTryChatMessageForStorage(message: TryChatMessage) {
     ),
     pending: false,
   };
+}
+
+function recoverStoredTryChatMessage({
+  conversationContext,
+  isLatestAssistant,
+  message,
+  transcriptUpdatedAt,
+}: {
+  conversationContext: TryConversationContext | null;
+  isLatestAssistant: boolean;
+  message: TryChatMessage;
+  transcriptUpdatedAt: string;
+}) {
+  if (message.role !== "assistant" || message.memWalStatus !== "pending") {
+    return message;
+  }
+
+  const updatedAt = Date.parse(transcriptUpdatedAt || message.createdAt || "");
+  const isStale =
+    Number.isFinite(updatedAt) &&
+    Date.now() - updatedAt > tryChatPendingRestoreTtlMs;
+  if (isStale) {
+    return { ...message, memWalStatus: "failed" as const };
+  }
+
+  if (!message.memoryJobId) {
+    if (
+      isLatestAssistant &&
+      conversationContext?.memoryJobId &&
+      tryMemWalDisplayStatus(conversationContext) === "pending"
+    ) {
+      return {
+        ...message,
+        conversationId: conversationContext.conversationId,
+        memoryJobId: conversationContext.memoryJobId,
+      };
+    }
+    return { ...message, memWalStatus: "failed" as const };
+  }
+
+  return message;
 }
 
 function buildTryConversationContext({
@@ -5928,7 +5981,7 @@ function TryAgentChatPanel({
     };
 
     try {
-      for (let attempt = 0; attempt < 24; attempt += 1) {
+      for (let attempt = 0; attempt < 40; attempt += 1) {
         await wait(Math.min(5000, 1500 + attempt * 500));
         if (!isMountedRef.current) return;
 

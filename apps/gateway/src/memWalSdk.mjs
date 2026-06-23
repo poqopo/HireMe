@@ -389,24 +389,63 @@ function resolveMemWalSdkKey() {
 async function rememberAndMaybeWait(client, text, namespace, options = {}) {
   const startedAt = Date.now();
   if (shouldRememberAsync(options)) {
-    return decorateRememberJob(await client.remember(text, namespace), {
+    return decorateRememberJob(await rememberWithRateLimitRetry(() => client.remember(text, namespace)), {
       waitForStore: false,
       storeLatencyMs: Date.now() - startedAt,
     });
   }
   return decorateRememberJob(
-    await client.rememberAndWait(text, namespace, {
-      timeoutMs: defaultRememberTimeoutMs(),
-      pollIntervalMs: Math.max(
-        250,
-        Math.trunc(Number(process.env.HIREME_MEMWAL_POLL_INTERVAL_MS || "1000") || 1000),
-      ),
-    }),
+    await rememberWithRateLimitRetry(() =>
+      client.rememberAndWait(text, namespace, {
+        timeoutMs: defaultRememberTimeoutMs(),
+        pollIntervalMs: Math.max(
+          250,
+          Math.trunc(Number(process.env.HIREME_MEMWAL_POLL_INTERVAL_MS || "1000") || 1000),
+        ),
+      }),
+    ),
     {
       waitForStore: true,
       storeLatencyMs: Date.now() - startedAt,
     },
   );
+}
+
+async function rememberWithRateLimitRetry(run) {
+  const retries = Math.max(
+    0,
+    Math.trunc(Number(process.env.HIREME_MEMWAL_REMEMBER_RETRIES || "2") || 2),
+  );
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await run();
+    } catch (err) {
+      if (attempt >= retries || !isMemWalRateLimitError(err)) throw err;
+      await wait(readMemWalRetryAfterMs(err));
+    }
+  }
+}
+
+function isMemWalRateLimitError(err) {
+  const text = `${err?.message || ""} ${err?.code || ""}`;
+  return /\b429\b|rate limit/i.test(text);
+}
+
+function readMemWalRetryAfterMs(err) {
+  const text = err?.message || "";
+  const seconds = Number(
+    /retry_after_seconds["']?\s*[:=]\s*(\d+)/i.exec(text)?.[1] ||
+      /retry-after["']?\s*[:=]\s*(\d+)/i.exec(text)?.[1] ||
+      "",
+  );
+  const retryMs = Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : 60_000;
+  return Math.min(90_000, Math.max(1_000, retryMs + 1000));
+}
+
+function wait(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
 }
 
 function shouldRememberAsync({ waitForStore = null } = {}) {
