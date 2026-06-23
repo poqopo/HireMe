@@ -11781,6 +11781,11 @@ async function persistMcpCallLedgerAndStats({
       };
     }
 
+    const settlementBillableCalls = Math.max(
+      0,
+      Math.trunc(Number(billableCalls) || 0),
+    );
+    const ledgerBillableCalls = Math.max(1, settlementBillableCalls);
     const { error } = await admin.from("mcp_call_ledger").upsert(
       {
         call_id: callId,
@@ -11795,7 +11800,7 @@ async function persistMcpCallLedgerAndStats({
         response_digest: responseDigest,
         input_tokens: inputTokens,
         output_tokens: outputTokens,
-        billable_calls: billableCalls,
+        billable_calls: ledgerBillableCalls,
         amount_usd: amountUsd,
         price_per_1m_tokens_sui: pricePer1MTokensSui,
         amount_sui: amountSui,
@@ -11806,7 +11811,8 @@ async function persistMcpCallLedgerAndStats({
           pricePer1MTokensSui,
           amountSui,
           amountMist,
-          billableCalls,
+          billableCalls: settlementBillableCalls,
+          ledgerBillableCalls,
           nonBillableReason,
           accessType: access.accessType,
           entitlementId: access.id,

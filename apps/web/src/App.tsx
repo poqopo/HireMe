@@ -494,10 +494,12 @@ type TryChatMessage = {
   role: "user" | "assistant";
   text: string;
   attachments?: TryChatAttachment[];
+  conversationId?: string | null;
   createdAt: string;
   pending?: boolean;
   error?: boolean;
   memWalBlobId?: string | null;
+  memoryJobId?: string | null;
   memWalStatus?: TryMemWalDisplayStatus | null;
   responseMode?: string | null;
 };
@@ -1989,6 +1991,25 @@ function latestAssistantMessageId(messages: TryChatMessage[]) {
     if (messages[index].role === "assistant") return messages[index].id;
   }
   return null;
+}
+
+function pendingAssistantMemoryTargets(
+  messages: TryChatMessage[],
+  fallbackConversationId?: string | null,
+) {
+  return messages
+    .filter(
+      (message) =>
+        message.role === "assistant" &&
+        message.memWalStatus === "pending" &&
+        Boolean(message.memoryJobId),
+    )
+    .map((message) => ({
+      conversationId: message.conversationId || fallbackConversationId || "",
+      memoryJobId: message.memoryJobId || "",
+      messageId: message.id,
+    }))
+    .filter((target) => target.conversationId && target.memoryJobId);
 }
 
 function extractTryImageAttachments(call: GatewayAgentCallResponse) {
@@ -5899,7 +5920,7 @@ function TryAgentChatPanel({
       );
       setMessages((current) =>
         current.map((message) =>
-          message.id === messageId || message.memWalStatus === "pending"
+          message.id === messageId
             ? { ...message, memWalStatus: "failed" }
             : message,
         ),
@@ -5919,26 +5940,24 @@ function TryAgentChatPanel({
             conversationId,
           });
           const nextStatus = tryMemWalDisplayStatus(nextConversationContext);
-          setConversationContext(nextConversationContext);
+          setConversationContext((current) =>
+            !current ||
+            current.memoryJobId === memoryJobId ||
+            current.conversationId === conversationId
+              ? nextConversationContext
+              : current,
+          );
           if (nextStatus) {
             setMessages((current) =>
               current.map((message) => {
                 if (message.id === messageId) {
                   return {
                     ...message,
+                    conversationId: nextConversationContext.conversationId,
+                    memoryJobId: nextConversationContext.memoryJobId,
                     memWalBlobId: nextConversationContext.memWalBlobId,
                     memWalStatus: nextStatus,
                   };
-                }
-                if (nextStatus === "stored" && message.memWalStatus === "pending") {
-                  return {
-                    ...message,
-                    memWalBlobId: nextConversationContext.memWalBlobId,
-                    memWalStatus: "stored",
-                  };
-                }
-                if (nextStatus === "failed" && message.memWalStatus === "pending") {
-                  return { ...message, memWalStatus: "failed" };
                 }
                 return message;
               }),
@@ -5963,8 +5982,25 @@ function TryAgentChatPanel({
   }
 
   useEffect(() => {
-    if (!conversationContext?.memoryJobId) return;
-    if (tryMemWalDisplayStatus(conversationContext) !== "pending") return;
+    const messageTargets = pendingAssistantMemoryTargets(
+      messages,
+      conversationContext?.conversationId,
+    );
+    for (const target of messageTargets) {
+      void pollTryMemWalStatus(target);
+    }
+
+    if (
+      !conversationContext?.memoryJobId ||
+      tryMemWalDisplayStatus(conversationContext) !== "pending"
+    ) {
+      return;
+    }
+
+    const hasMatchingMessageTarget = messageTargets.some(
+      (target) => target.memoryJobId === conversationContext.memoryJobId,
+    );
+    if (hasMatchingMessageTarget) return;
 
     const messageId = latestAssistantMessageId(messages);
     if (!messageId) return;
@@ -6057,6 +6093,8 @@ function TryAgentChatPanel({
         const memWalStatus = tryMemWalDisplayStatus(nextConversationContext);
         setConversationContext(nextConversationContext);
         updatePendingMessage({
+          conversationId: nextConversationContext.conversationId,
+          memoryJobId: nextConversationContext.memoryJobId,
           ...(options.showText
             ? {
                 attachments: extractTryImageAttachments(call),
@@ -6159,6 +6197,8 @@ function TryAgentChatPanel({
             ? {
                 ...message,
                 attachments: extractTryImageAttachments(result),
+                conversationId: nextConversationContext.conversationId,
+                memoryJobId: nextConversationContext.memoryJobId,
                 memWalBlobId: nextConversationContext.memWalBlobId,
                 memWalStatus,
                 text: extractAgentCallText(result),
