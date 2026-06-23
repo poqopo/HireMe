@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
 const port = Number.parseInt(
@@ -99,6 +99,7 @@ try {
     task: "파일로 안녕을 보내줘",
     budget_calls: 1,
     response_mode: "direct_answer",
+    wait_for_memory: true,
   });
   await assertGatewayAttachment(directCall, "direct gateway");
 
@@ -107,11 +108,11 @@ try {
     hirerId,
     task: "파일로 안녕을 한 번 더 보내줘",
   });
-  await assertMcpResource(mcpCall);
+  await assertMcpStreamDescriptor(mcpCall);
 
   console.log("HireMe Agent file-transfer smoke passed");
   console.log(`Agent: ${agentId}`);
-  console.log("Verified: create-from-folder -> try -> gateway attachments -> MCP resource/image -> local files");
+  console.log("Verified: create-from-folder -> try -> gateway attachments -> MCP stream descriptor");
 } catch (err) {
   if (gatewayStdout.trim()) {
     console.error(gatewayStdout.trim());
@@ -282,12 +283,13 @@ async function callPluginThroughMcp({ agentId, hirerId, task }) {
       id: 2,
       method: "tools/call",
       params: {
-        name: "hireme_call_agent",
+        name: "hireme_call_agent_stream",
         arguments: {
           agent_id: agentId,
           task,
           budget_calls: 1,
           response_mode: "direct_answer",
+          wait_for_memory: false,
         },
       },
     },
@@ -310,71 +312,17 @@ async function callPluginThroughMcp({ agentId, hirerId, task }) {
     .find((response) => response.id === 2);
 }
 
-async function assertMcpResource(response) {
+async function assertMcpStreamDescriptor(response) {
   if (response?.error) {
     throw new Error(`MCP call returned error: ${JSON.stringify(response.error)}`);
   }
   const content = response?.result?.content || [];
   const text = content.find((item) => item.type === "text")?.text || "";
-  const resources = content
-    .filter((item) => item.type === "resource")
-    .map((item) => item.resource);
-  const textResource = resources.find((resource) =>
-    /text\/plain/.test(resource?.mimeType || ""),
-  );
-  const pngResource = resources.find((resource) =>
-    /image\/png/.test(resource?.mimeType || ""),
-  );
-  const imageContent = content.find((item) => item.type === "image");
-  if (!textResource || !pngResource) {
-    throw new Error(`MCP call did not return resource attachments: ${JSON.stringify(response)}`);
+  if (
+    !text.includes('"type": "hireme_agent_call_stream"') ||
+    !text.includes("/v1/agent-call/stream") ||
+    !text.includes('"output_fast"')
+  ) {
+    throw new Error(`MCP call did not return a stream descriptor: ${JSON.stringify(response)}`);
   }
-  const decoded = Buffer.from(textResource.blob || "", "base64").toString("utf8");
-  if (decoded !== fixtureFileText) {
-    throw new Error("MCP resource blob did not round-trip");
-  }
-  if (!pngResource.blob || !Buffer.from(pngResource.blob, "base64").equals(fixturePngBytes)) {
-    throw new Error("MCP PNG resource blob did not round-trip");
-  }
-  if (!imageContent || imageContent.mimeType !== "image/png") {
-    throw new Error("MCP call did not return an image content item for the PNG attachment");
-  }
-  if (!Buffer.from(imageContent.data || "", "base64").equals(fixturePngBytes)) {
-    throw new Error("MCP image content data did not round-trip");
-  }
-  if (!textResource.uri?.startsWith("hireme-result://")) {
-    throw new Error("MCP resource did not use a hireme-result URI");
-  }
-  if (!text.includes("<attached:")) {
-    throw new Error("MCP text response did not redact inline base64 data");
-  }
-  if (text.includes(Buffer.from(fixtureFileText, "utf8").toString("base64"))) {
-    throw new Error("MCP text response leaked the base64 blob");
-  }
-  if (!text.includes("Output files saved to the working directory:")) {
-    throw new Error("MCP text response did not include a local saved-file section");
-  }
-  const savedPaths = extractMarkdownLinkPaths(text);
-  if (savedPaths.length < 2) {
-    throw new Error(`MCP text response did not include a saved-file link: ${text}`);
-  }
-  const savedTextPath = savedPaths.find((path) => path.endsWith(".txt"));
-  const savedPngPath = savedPaths.find((path) => path.endsWith(".png"));
-  if (!savedTextPath || !savedPngPath) {
-    throw new Error(`MCP text response did not include saved text and PNG links: ${text}`);
-  }
-  const savedText = await readFile(savedTextPath, "utf8");
-  if (savedText !== fixtureFileText) {
-    throw new Error("MCP saved local file did not round-trip");
-  }
-  const savedPng = await readFile(savedPngPath);
-  if (!savedPng.equals(fixturePngBytes)) {
-    throw new Error("MCP saved local PNG did not round-trip");
-  }
-}
-
-function extractMarkdownLinkPaths(text) {
-  return [...text.matchAll(/\[[^\]]+\]\((?:<([^>]+)>|([^)\n]+))\)/g)]
-    .map((match) => match[1] || match[2])
-    .filter(Boolean);
 }

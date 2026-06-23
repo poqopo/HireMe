@@ -10,6 +10,7 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 const trialCallAllowance = 100;
+const defaultAgentStorageEpochs = 7;
 const mcpProfile =
   String(process.env.HIREME_MCP_PROFILE || "").toLowerCase() === "creator"
     ? "creator"
@@ -409,7 +410,7 @@ const inputSchemas = {
     type: "object",
     properties: {},
   },
-  hireme_call_agent: {
+  hireme_call_agent_stream: {
     type: "object",
     properties: {
       agent_id: {
@@ -436,12 +437,7 @@ const inputSchemas = {
         type: "integer",
         minimum: 1,
         maximum: 100,
-        description: "Maximum billable MCP calls for this request",
-      },
-      record_path: {
-        type: "string",
-        description:
-          "Optional public artifact record path for protected example agents.",
+        description: "Maximum billable MCP calls for this request.",
       },
       hire_receipt_object_id: {
         type: "string",
@@ -453,164 +449,32 @@ const inputSchemas = {
         description:
           "Optional hirer identity. Defaults to HIREME_HIRER_ID or local-hirer.",
       },
-      async_job: {
+      wait_for_memory: {
         type: "boolean",
         description:
-          "When true, enqueue the Agent call and return a jobId immediately. Poll with hireme_get_agent_result.",
+          "When true, keep the SSE stream open until memWal storage finishes. Defaults to true.",
       },
-      wait_for_result: {
+      save_local_result: {
         type: "boolean",
         description:
-          "When false, enqueue the Agent call and return a jobId immediately. When true, force a synchronous result.",
+          "When true, ask the gateway to save the returned Agent result under .hireme/gateway/results/<callId>/ and return it as an attachment.",
       },
     },
     required: ["task"],
   },
-  hireme_get_agent_result: {
+  hireme_get_memory_status: {
     type: "object",
     properties: {
+      memory_job_id: {
+        type: "string",
+        description:
+          "Memory job id returned at output_fast.memoryJobId from hireme_call_agent_stream.",
+      },
       job_id: {
         type: "string",
-        description: "Agent job id returned by hireme_call_agent.",
+        description: "Alias for memory_job_id.",
       },
     },
-    required: ["job_id"],
-  },
-  hireme_call_agent_loop: {
-    type: "object",
-    properties: {
-      agent_id: {
-        type: "string",
-        description: "Optional explicit agent id. Uses active agent when omitted.",
-      },
-      task: {
-        type: "string",
-        minLength: 1,
-        description: "Initial task to send to the hired agent.",
-      },
-      conversation_id: {
-        type: "string",
-        description:
-          "Optional memWal MCP conversation id. Recent turns are loaded as context and loop calls are appended.",
-      },
-      response_mode: {
-        type: "string",
-        enum: ["direct_answer", "local_codex_execution_brief"],
-        description:
-          "Optional explicit output mode. Omit to let the gateway infer whether the agent should answer directly or hand off to local workspace.",
-      },
-      budget_calls: {
-        type: "integer",
-        minimum: 1,
-        maximum: 100,
-        description:
-          "Total maximum Agent calls this loop may spend. Each iteration consumes one call.",
-      },
-      max_iterations: {
-        type: "integer",
-        minimum: 1,
-        maximum: 20,
-        description: "Hard loop iteration cap. Defaults to min(budget_calls, 3).",
-      },
-      loop_policy: {
-        type: "string",
-        enum: ["agent_signal", "fixed_tasks", "single"],
-        description:
-          "agent_signal continues when Agent output includes codexLoop/nextTask. fixed_tasks follows loop_tasks. single disables continuation.",
-      },
-      loop_tasks: {
-        type: "array",
-        items: { type: "string" },
-        description:
-          "Optional follow-up tasks for loop_policy=fixed_tasks, applied after the first call.",
-      },
-      hire_receipt_object_id: {
-        type: "string",
-        description:
-          "Optional paid hire receipt object id for protected example agents.",
-      },
-      hirer_id: {
-        type: "string",
-        description:
-          "Optional hirer identity. Defaults to HIREME_HIRER_ID or local-hirer.",
-      },
-    },
-    required: ["task"],
-  },
-  hireme_call_agent_team: {
-    type: "object",
-    properties: {
-      agent_ids: {
-        type: "array",
-        items: { type: "string" },
-        minItems: 1,
-        description:
-          "Ordered Agent ids. Each Agent speaks in this order for each round.",
-      },
-      team_agents: {
-        type: "array",
-        items: {
-          type: "object",
-          properties: {
-            agent_id: { type: "string" },
-            role: { type: "string" },
-            name: { type: "string" },
-          },
-        },
-        description:
-          "Optional richer team list. Use either team_agents or agent_ids.",
-      },
-      task: {
-        type: "string",
-        minLength: 1,
-        description: "Shared user task for the Agent team.",
-      },
-      conversation_id: {
-        type: "string",
-        description:
-          "Shared memWal MCP conversation id. Omit to create a team conversation id.",
-      },
-      response_mode: {
-        type: "string",
-        enum: ["direct_answer", "local_codex_execution_brief"],
-        description:
-          "Output mode for each Agent call. Defaults to direct_answer for team collaboration.",
-      },
-      rounds: {
-        type: "integer",
-        minimum: 1,
-        maximum: 10,
-        description: "How many times the ordered Agent list should speak.",
-      },
-      final_agent_id: {
-        type: "string",
-        description:
-          "Agent id that writes the final synthesis. Defaults to the last team Agent.",
-      },
-      include_final: {
-        type: "boolean",
-        description:
-          "Whether to run a final synthesis call after team rounds. Defaults to true.",
-      },
-      budget_calls: {
-        type: "integer",
-        minimum: 1,
-        maximum: 100,
-        description:
-          "Total Agent calls the team may spend. Each team turn and final synthesis consumes one call.",
-      },
-      hire_receipt_object_id: {
-        type: "string",
-        description:
-          "Optional paid hire receipt object id for protected example agents.",
-      },
-      hirer_id: {
-        type: "string",
-        description:
-          "Optional hirer identity. Defaults to HIREME_HIRER_ID or local-hirer.",
-      },
-    },
-    required: ["task"],
   },
   hireme_call_walrus_agent: {
     type: "object",
@@ -1209,32 +1073,18 @@ const tools = [
     inputSchema: inputSchemas.hireme_list_conversations,
   },
   {
-    name: "hireme_call_agent",
-    title: "Call a hired HireMe agent",
+    name: "hireme_call_agent_stream",
+    title: "Stream a HireMe agent call",
     description:
-      "Call an explicitly selected or session-active protected Agent through the HireMe gateway.",
-    inputSchema: inputSchemas.hireme_call_agent,
+      "Return an SSE endpoint descriptor for streaming Agent call progress, output, and memWal storage events.",
+    inputSchema: inputSchemas.hireme_call_agent_stream,
   },
   {
-    name: "hireme_get_agent_result",
-    title: "Poll a HireMe agent job",
+    name: "hireme_get_memory_status",
+    title: "Poll HireMe memWal storage",
     description:
-      "Return the status of an async protected Agent job and include the final result once it completes.",
-    inputSchema: inputSchemas.hireme_get_agent_result,
-  },
-  {
-    name: "hireme_call_agent_loop",
-    title: "Call a hired HireMe agent in a bounded loop",
-    description:
-      "Call a protected Agent repeatedly when the previous Agent output asks Codex to continue. Final result preserves the Agent's own output contract.",
-    inputSchema: inputSchemas.hireme_call_agent_loop,
-  },
-  {
-    name: "hireme_call_agent_team",
-    title: "Call multiple HireMe agents as a shared-conversation team",
-    description:
-      "Call several protected Agents against the same memWal conversation id so each Agent can see prior user and Agent turns and collaborate before a final synthesis.",
-    inputSchema: inputSchemas.hireme_call_agent_team,
+      "Return whether a streamed Agent call has finished storing its user-result memWal and MCP conversation records.",
+    inputSchema: inputSchemas.hireme_get_memory_status,
   },
   {
     name: "hireme_call_walrus_agent",
@@ -1337,10 +1187,21 @@ const creatorToolNames = new Set([
   "hireme_connection_help",
 ]);
 
+const userToolNames = new Set([
+  "hireme_whoami",
+  "hireme_list_hired_agents",
+  "hireme_list_my_agents",
+  "hireme_get_agent",
+  "hireme_select_agent",
+  "hireme_current_agent",
+  "hireme_call_agent_stream",
+  "hireme_get_memory_status",
+]);
+
 const advertisedTools =
   mcpProfile === "creator"
     ? tools.filter((tool) => creatorToolNames.has(tool.name))
-    : tools;
+    : tools.filter((tool) => userToolNames.has(tool.name));
 
 function sealedHarnessFor(agentId) {
   return (
@@ -1369,6 +1230,16 @@ function publicAgent(agent) {
     publicSummary: agent.publicSummary,
     howToUse: agent.howToUse || null,
     publicSkills: agent.skills,
+    capabilities: deriveAgentCapabilities(agent),
+    preferredCallMode: preferredAgentCallMode(agent),
+    codexUsage: {
+      recommendedTools: recommendedAgentTools(agent),
+      memoryModes: ["fast", "wait_memory", "stream"],
+      outputContract:
+        deriveAgentCapabilities(agent).includes("image_result")
+          ? "Use image attachments as the primary result."
+          : "Use outputText as the primary result.",
+    },
     publicContract: agent.harnessSummary,
     memwalPolicy: agent.memwalPolicy,
     hiddenAssetClasses: agent.protectedAssets,
@@ -1381,6 +1252,50 @@ function publicAgent(agent) {
     medianLatencyMs: agent.latencyMs,
     hired: true,
   };
+}
+
+function deriveAgentCapabilities(agent = {}) {
+  const haystack = [
+    agent.id,
+    agent.name,
+    agent.handle,
+    agent.category,
+    agent.publicSummary,
+    agent.headline,
+    agent.resultMediaType,
+    agent.result_media_type,
+    ...(Array.isArray(agent.skills) ? agent.skills : []),
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  const capabilities = new Set(["protected_agent_call", "memwal_result_storage"]);
+  if (
+    /\b(image|illustration|png|jpg|jpeg|photo|visual|sprite|asset)\b/.test(haystack) ||
+    String(agent.resultMediaType || agent.result_media_type || "").toLowerCase() === "image"
+  ) {
+    capabilities.add("image_result");
+    capabilities.add("openai_image_generation");
+  } else {
+    capabilities.add("text_result");
+  }
+  if (/\b(code|repo|react|supabase|patch|mcp)\b/.test(haystack)) {
+    capabilities.add("code_task");
+  }
+  if (/\b(research|citation|brief|source)\b/.test(haystack)) {
+    capabilities.add("research_task");
+  }
+  return [...capabilities];
+}
+
+function preferredAgentCallMode(agent = {}) {
+  const capabilities = deriveAgentCapabilities(agent);
+  if (capabilities.includes("image_result")) return "fast_with_attachment";
+  return "fast";
+}
+
+function recommendedAgentTools(agent = {}) {
+  return ["hireme_call_agent_stream"];
 }
 
 function findAgent(agentId) {
@@ -1645,6 +1560,66 @@ async function callGateway(path, body = {}, options = {}) {
   }
 }
 
+function readOptionalBoolean(value) {
+  if (value === undefined || value === null || value === "") return null;
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value !== 0;
+  const text = String(value).trim().toLowerCase();
+  if (["1", "true", "yes", "y", "on"].includes(text)) return true;
+  if (["0", "false", "no", "n", "off"].includes(text)) return false;
+  return null;
+}
+
+function buildAgentCallStreamDescriptor(args = {}) {
+  const body = {
+    codex_installation_id: codexInstallationId,
+    ...args,
+    stream: true,
+    wait_for_result: true,
+    waitForResult: true,
+    wait_for_memory:
+      readOptionalBoolean(args.wait_for_memory ?? args.waitForMemory) ?? true,
+    waitForMemory:
+      readOptionalBoolean(args.wait_for_memory ?? args.waitForMemory) ?? true,
+  };
+  return {
+    type: "hireme_agent_call_stream",
+    stream: true,
+    method: "POST",
+    url: `${gatewayUrl.replace(/\/$/, "")}/v1/agent-call/stream`,
+    contentType: "application/json",
+    restApi: {
+      version: "hireme.agent-call.v2",
+      canonicalStreamEndpoint: "/v1/agent-call/stream",
+      jsonFallbackEndpoint: "/v1/agent-call",
+      memoryStatusEndpoint: "/v1/agent-memory-status",
+      outputEvent: "output_fast",
+    },
+    headers: gatewayApiKey
+      ? {
+          "content-type": "application/json",
+          "x-hireme-gateway-key": "<configured locally>",
+        }
+      : { "content-type": "application/json" },
+    body,
+    events: [
+      "ready",
+      "authorized",
+      "artifact_loaded",
+      "output_fast",
+      "result",
+      "memwal_pending",
+      "memwal_wait_started",
+      "memwal_stored",
+      "done",
+      "error",
+    ],
+    curlExample:
+      `curl -N -X POST ${gatewayUrl.replace(/\/$/, "")}/v1/agent-call/stream ` +
+      `-H 'content-type: application/json' --data '<JSON body omitted>'`,
+  };
+}
+
 async function callGatewayMultipart(path, formData, options = {}) {
   if (process.env.HIREME_MCP_GATEWAY_DISABLED === "1") return null;
 
@@ -1861,6 +1836,8 @@ function listAgents(args = {}) {
       pricePerCallUsd: agent.pricePerCallUsd,
       pricePer1MTokensSui: agent.pricePer1MTokensSui ?? agent.pricePerCallUsd,
       publicSkills: agent.skills,
+      capabilities: deriveAgentCapabilities(agent),
+      preferredCallMode: preferredAgentCallMode(agent),
       memwalPolicy: agent.memwalPolicy,
       sealedHarness: sealedHarnessFor(agent.id),
       active: agent.id === activeAgentId,
@@ -2188,7 +2165,7 @@ async function callTool(name, args = {}) {
       useHttpMcpFor: [
         "hireme_list_my_agents",
         "hireme_list_hired_agents",
-        "hireme_call_agent",
+        "hireme_call_agent_stream",
         "hireme_create_sui_payment_intent",
         "hireme_confirm_sui_payment",
       ],
@@ -2273,6 +2250,8 @@ async function callTool(name, args = {}) {
         hirer_id: args.hirer_id || defaultHirerId,
         hire_receipt_object_id:
           args.hire_receipt_object_id || defaultHireReceiptFor(routed.agentId),
+        return_stream_url: true,
+        wait_for_memory: false,
       };
       const gateway = await callGateway("/v1/agent-call", callArgs);
       if (gateway) {
@@ -2439,191 +2418,29 @@ async function callTool(name, args = {}) {
         retryTool: "hireme_list_conversations",
       });
     }
-    case "hireme_call_agent": {
-      const wantsAsyncJob =
-        args.async_job === true ||
-        args.asyncJob === true ||
-        args.wait_for_result === false ||
-        args.waitForResult === false;
-      const gateway = await callGateway("/v1/agent-call", {
+    case "hireme_call_agent_stream": {
+      const callArgs = {
         agent_id: args.agent_id || activeAgentId,
         hirer_id: args.hirer_id || defaultHirerId,
         ...args,
-      }, {
-        timeoutMs: Number(
-          process.env.HIREME_MCP_AGENT_CALL_TIMEOUT_MS ||
-            (wantsAsyncJob ? 10_000 : 120_000),
-        ),
-      });
-      if (gateway) {
-        activeAgentId = gateway.activeAgentId || args.agent_id || activeAgentId;
-        return textResult(gateway);
-      }
-      const agent = findAgent(args.agent_id || activeAgentId);
-      const callId = `call_${Date.now().toString(36)}`;
-      const budgetCalls = args.budget_calls || 1;
-      const responseMode = classifyAgentResponseMode(
-        args.task,
-        args.response_mode || args.responseMode,
-      );
-      const fallbackPayload = {
-        type:
-          responseMode === "direct_answer"
-            ? "protected_agent_answer"
-            : "protected_agent_guidance",
-        outputMode:
-          responseMode === "direct_answer"
-            ? "hirer_facing_answer"
-            : "local_codex_execution_brief",
-        summary:
-          responseMode === "direct_answer"
-            ? "Demo response: the selected protected agent answered directly in local fallback mode."
-            : "Demo response: the selected protected agent accepted the task. Production will execute the encrypted Agent folder inside the MCP gateway and return only safe output.",
-        outputText:
-          responseMode === "direct_answer"
-            ? "Demo response: the selected protected agent answered directly in local fallback mode."
-            : "Demo response: the selected protected agent accepted the task. Production will execute the encrypted Agent folder inside the MCP gateway and return only safe output.",
-        recommendations: [
-          `Use the public contract ${agent.harnessSummary}.`,
-          "Start npm run gateway:dev for protected artifact execution.",
-          responseMode === "direct_answer"
-            ? "This request is answer-only in local fallback mode; no local workspace handoff is required."
-            : "Keep creator AGENTS.md, skills, and harness files out of the local workspace plugin.",
-        ],
+        wait_for_memory:
+          readOptionalBoolean(args.wait_for_memory ?? args.waitForMemory) ?? true,
+        waitForMemory:
+          readOptionalBoolean(args.wait_for_memory ?? args.waitForMemory) ?? true,
       };
-      return textResult({
-        callId,
-        activeAgentId,
-        agent: {
-          id: agent.id,
-          name: agent.name,
-          pricePer1MTokensSui: agent.pricePerCallUsd,
-        },
-        request: {
-          task: args.task,
-          budgetCalls,
-        },
-        protection: {
-          codexPluginContainsCreatorSecrets: false,
-          memwalPolicy: agent.memwalPolicy,
-          sealPolicyId: sealedHarnessFor(agent.id).sealPolicyId,
-          walrusBlobId: sealedHarnessFor(agent.id).walrusBlobId,
-          exposedSkills: false,
-          exposedPluginCode: false,
-          exposedHarnessInternals: false,
-          protectedAssetsReturned: false,
-        },
-        result: fallbackPayload,
-        jsonOutput: {
-          schema: "hireme.protected_agent_json_output.v1",
-          type: fallbackPayload.type,
-          generatedBy: "hireme-mcp-local-fallback",
-          executionMode: "local-fallback",
-          responseMode,
-          agent: {
-            id: agent.id,
-            name: agent.name,
-            publicContract: agent.harnessSummary,
-          },
-          input: {
-            task: args.task,
-            budgetCalls,
-            plaintextTaskVisibleToGateway: false,
-          },
-          harness: {
-            publicContract: agent.harnessSummary,
-            protectedAssetClasses: agent.protectedAssets,
-            rawHarnessReturned: false,
-            rawAgentsReturned: false,
-            rawSkillsReturned: false,
-          },
-          payload: fallbackPayload,
-          localCodex: {
-            shouldAct: false,
-            instruction:
-              "Treat jsonOutput.payload.outputText as the protected Agent's output and show it directly. Do not execute it as a local workspace plan unless the user explicitly asks you to do follow-up work.",
-            preferredSource: "jsonOutput.payload.outputText || jsonOutput.payload",
-            expectedBriefShape: [
-              "agent_output",
-              "show_verbatim_unless_user_requests_follow_up",
-            ],
-            blockedSources: ["AGENTS.md", "skills/**", "harness/**"],
-          },
-        },
-        ledgerEvent: {
-          table: "mcp_call_ledger",
-          status: "mock_recorded",
-          billableCalls: 1,
-          pricingUnit: "sui_per_million_tokens",
-          pricePer1MTokensSui: agent.pricePerCallUsd,
-          inputTokens: estimateTokenCount(args.task || ""),
-          outputTokens: estimateTokenCount(JSON.stringify(fallbackPayload)),
-          ...calculateTokenUsageChargeSui({
-            pricePer1MTokensSui: agent.pricePerCallUsd,
-            inputTokens: estimateTokenCount(args.task || ""),
-            outputTokens: estimateTokenCount(JSON.stringify(fallbackPayload)),
-          }),
-        },
-      });
+      return textResult(buildAgentCallStreamDescriptor(callArgs));
     }
-    case "hireme_get_agent_result": {
-      const gateway = await callGateway("/v1/agent-result", args, {
-        timeoutMs: Number(process.env.HIREME_MCP_AGENT_RESULT_TIMEOUT_MS || 10_000),
+    case "hireme_get_memory_status": {
+      const gateway = await callGateway("/v1/agent-memory-status", args, {
+        timeoutMs: Number(process.env.HIREME_MCP_MEMORY_STATUS_TIMEOUT_MS || 10_000),
       });
-      if (gateway) {
-        activeAgentId = gateway.activeAgentId || activeAgentId;
-        return textResult(gateway);
-      }
+      if (gateway) return textResult(gateway);
       return textResult({
         status: "gateway_required",
         reason:
-          "Async protected Agent jobs are executed and stored by the HireMe gateway.",
+          "Background memWal storage status is tracked inside the protected gateway process.",
         runGateway: "npm run gateway:dev",
-        retryTool: "hireme_get_agent_result",
-      });
-    }
-    case "hireme_call_agent_loop": {
-      const gateway = await callGateway("/v1/agent-loop", {
-        agent_id: args.agent_id || activeAgentId,
-        hirer_id: args.hirer_id || defaultHirerId,
-        ...args,
-      }, {
-        timeoutMs: Number(process.env.HIREME_MCP_AGENT_LOOP_TIMEOUT_MS || 60_000),
-      });
-      if (gateway) {
-        activeAgentId = gateway.activeAgentId || args.agent_id || activeAgentId;
-        return textResult(gateway);
-      }
-      return textResult({
-        status: "gateway_required",
-        reason:
-          "Looped protected Agent execution must run through the HireMe gateway so each iteration is authorized, metered, and stored without exposing creator files.",
-        runGateway: "npm run gateway:dev",
-        retryTool: "hireme_call_agent_loop",
-      });
-    }
-    case "hireme_call_agent_team": {
-      const gateway = await callGateway("/v1/agent-team", {
-        hirer_id: args.hirer_id || defaultHirerId,
-        ...args,
-      }, {
-        timeoutMs: Number(process.env.HIREME_MCP_AGENT_TEAM_TIMEOUT_MS || 120_000),
-      });
-      if (gateway) {
-        const finalAgentId =
-          gateway.team?.finalAgentId ||
-          gateway.activeAgentId ||
-          args.final_agent_id ||
-          activeAgentId;
-        if (finalAgentId) activeAgentId = finalAgentId;
-        return textResult(gateway);
-      }
-      return textResult({
-        status: "gateway_required",
-        reason:
-          "Team protected Agent execution must run through the HireMe gateway so every Agent turn shares the same memWal conversation while authorization, metering, and creator privacy remain enforced.",
-        runGateway: "npm run gateway:dev",
-        retryTool: "hireme_call_agent_team",
+        retryTool: "hireme_get_memory_status",
       });
     }
     case "hireme_call_walrus_agent": {
@@ -2671,7 +2488,9 @@ async function callTool(name, args = {}) {
     case "hireme_prepare_sealed_harness_upload": {
       const gateway = await callGateway("/v1/platform-encryption/prepare", args);
       if (gateway) return textResult(gateway);
-      const epochs = args.epochs || 3;
+      const epochs =
+        Number.parseInt(args.epochs || args.storage_epochs || defaultAgentStorageEpochs, 10) ||
+        defaultAgentStorageEpochs;
       return textResult({
         agentId: args.agent_id || "new-agent",
         expectedFolderShape: ["AGENTS.md", "skills/**", "optional adapters/**"],
@@ -2814,7 +2633,7 @@ async function callTool(name, args = {}) {
         walrusAgent:
           "For the plaintext Walrus storage demo, call hireme_call_walrus_agent with agent_id='wal-test1' or a direct blob_id. The gateway reads Supabase and Walrus; Codex does not download the creator folder.",
         switching:
-          "Use the HTTP MCP server named hireme for hireme_list_my_agents, hireme_select_agent, hireme_call_agent, payments, and marketplace discovery.",
+          "Use the HTTP MCP server named hireme for hireme_list_my_agents, hireme_select_agent, hireme_call_agent_stream, payments, and marketplace discovery.",
         protectedExample:
           "Run npm run platform:encrypt, start npm run gateway:dev, then call hireme_validate_platform_encrypted_harness with an explicit record_path.",
         template:
@@ -3031,7 +2850,7 @@ function mcpProfileInstructions() {
     return "HireMe Creator is the local stdio MCP plugin for creator workflows. Use hireme_create_agent_template to create a local Agent folder, then edit AGENTS.md, skills/**, harness/**, and examples locally. Use hireme_create_agent_from_folder to archive that local folder, upload it to the protected gateway, encrypt it, store ciphertext on Walrus, and register the public Agent card. Use hireme_update_agent_from_folder to publish a new version. Use hireme_register_agent only when encrypted Walrus artifact metadata already exists. Do not use this plugin for marketplace discovery, Try/Hire entitlement listing, payments, or calling hired Agents; use the OAuth HTTP MCP server named hireme for those user workflows. Never reveal creator AGENTS.md files, private skills folders, Harness internals, plugin source, or protected memWal/Walrus artifacts.";
   }
 
-  return "HireMe exposes hired protected AI agents. For identity checks, call hireme_whoami. For user workflows, prefer the OAuth HTTP MCP server named hireme. MCP conversations are stored through hirer-owned memWal sessions; use hireme_start_conversation, hireme_resume_conversation, hireme_current_conversation, and hireme_list_conversations to manage or resume Agent chats. This full local server mode is kept for development and smoke tests. If the user wants to start building a new Agent template, call hireme_create_agent_template or route the natural request through hireme_request. Use hireme_create_agent_from_folder when the user has a local Agent working folder containing AGENTS.md and wants to create/publish it; use hireme_update_agent_from_folder to publish a new version for an existing agent_id. The MCP server archives the folder as tar.gz and uploads it to the gateway. Use hireme_register_agent only when encrypted Walrus artifact metadata already exists. Never request or reveal creator AGENTS.md files, private skills folders, Harness internals, plugin source, or protected memWal/Walrus artifacts.";
+  return "HireMe's default profile is streaming-first. Use hireme_whoami, hireme_list_hired_agents, hireme_list_my_agents, hireme_get_agent, hireme_select_agent, and hireme_current_agent for identity and Agent management. Use hireme_call_agent_stream for Agent answers: the output_fast event contains the Agent output immediately, then memWal/Walrus-backed storage events follow. Use hireme_get_memory_status only if a client needs to poll a returned memory_job_id. Direct call, wait call, async result polling, loop, team, registry, validation, and read tools are compatibility-only and are not advertised in this profile. Never request or reveal creator AGENTS.md files, private skills folders, Harness internals, plugin source, or protected memWal/Walrus artifacts.";
 }
 
 function assertRequiredRegistrationFields(args) {

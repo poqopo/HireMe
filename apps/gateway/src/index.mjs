@@ -17,6 +17,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { basename, dirname, extname, join, relative, resolve } from "node:path";
+import { loadEnvFile } from "node:process";
 import { promisify } from "node:util";
 import { createClient } from "@supabase/supabase-js";
 import {
@@ -54,8 +55,13 @@ import {
   storeFileOnWalrus,
 } from "./walrusBlobStore.mjs";
 
-loadEnvFile(".env");
-loadEnvFile(".env.local");
+for (const envFile of [".env", ".env.local"]) {
+  try {
+    loadEnvFile(envFile);
+  } catch (err) {
+    if (err?.code !== "ENOENT") throw err;
+  }
+}
 
 const defaultAgentStorageEpochs = 7;
 const port = Number.parseInt(
@@ -384,6 +390,7 @@ const sessions = new Map([[defaultInstallationId, "walrus-researcher"]]);
 const mcpConversationSessions = new Map();
 const ledger = [];
 const agentJobs = new Map();
+const memoryJobs = new Map();
 const agentResultAttachmentBlobs = new Map();
 const agentEntitlements = new Map();
 const suiPaymentIntents = new Map();
@@ -599,7 +606,7 @@ const server = createServer(async (req, res) => {
     const body = await readJson(req);
 
     if (req.method === "POST" && url.pathname === "/v1/agents/list") {
-      sendJson(res, 200, listAgents(body));
+      sendJson(res, 200, await listAgents(body));
       return;
     }
 
@@ -734,22 +741,64 @@ const server = createServer(async (req, res) => {
     }
 
     if (req.method === "POST" && url.pathname === "/v1/agent-call") {
-      sendJson(res, 200, await runProtectedAgentOrStartJob(body));
+      if (shouldStreamCurrentRestAgentCall(req, body)) {
+        await streamProtectedAgentCall(body, res);
+        return;
+      }
+      const deprecatedJobRequest = deprecatedAgentCallJobRequest(body);
+      if (deprecatedJobRequest) {
+        sendJson(res, 410, deprecatedRestEndpointResponse({
+          endpoint: "/v1/agent-call",
+          replacementEndpoint: "/v1/agent-call/stream",
+          replacementTool: "hireme_call_agent_stream",
+          reason: deprecatedJobRequest,
+        }));
+        return;
+      }
+      sendJson(res, 200, await runCurrentRestAgentCall(body));
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/v1/agent-call/stream") {
+      await streamProtectedAgentCall(body, res);
       return;
     }
 
     if (req.method === "POST" && url.pathname === "/v1/agent-result") {
-      sendJson(res, 200, getProtectedAgentJobResult(body));
+      sendJson(res, 410, deprecatedRestEndpointResponse({
+        endpoint: "/v1/agent-result",
+        replacementEndpoint: "/v1/agent-memory-status",
+        replacementTool: "hireme_get_memory_status",
+        reason:
+          "Async Agent result polling was replaced by output_fast plus memory status polling.",
+      }));
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/v1/agent-memory-status") {
+      sendJson(res, 200, getProtectedAgentMemoryStatus(body));
       return;
     }
 
     if (req.method === "POST" && url.pathname === "/v1/agent-loop") {
-      sendJson(res, 200, await runProtectedAgentLoop(body));
+      sendJson(res, 410, deprecatedRestEndpointResponse({
+        endpoint: "/v1/agent-loop",
+        replacementEndpoint: "/v1/agent-call/stream",
+        replacementTool: "hireme_call_agent_stream",
+        reason:
+          "Bounded loop calls are no longer part of the default HireMe call API.",
+      }));
       return;
     }
 
     if (req.method === "POST" && url.pathname === "/v1/agent-team") {
-      sendJson(res, 200, await runProtectedAgentTeam(body));
+      sendJson(res, 410, deprecatedRestEndpointResponse({
+        endpoint: "/v1/agent-team",
+        replacementEndpoint: "/v1/agent-call/stream",
+        replacementTool: "hireme_call_agent_stream",
+        reason:
+          "Team orchestration calls are no longer part of the default HireMe call API.",
+      }));
       return;
     }
 
@@ -828,17 +877,16 @@ const server = createServer(async (req, res) => {
       code: err.code || "gateway_error",
       message: err.message,
     });
+    const errorPayload = gatewayErrorResponse(err);
     if (errorUrl.pathname === "/oauth/web-session") {
       sendWebSessionJson(req, res, err.statusCode || 500, {
-        error: err.code || "gateway_error",
-        message: err.message,
+        error: errorPayload.error,
+        message: errorPayload.message,
+        codexError: errorPayload.codexError,
       });
       return;
     }
-    sendJson(res, err.statusCode || 500, {
-      error: err.code || "gateway_error",
-      message: err.message,
-    });
+    sendJson(res, errorPayload.codexError.statusCode, errorPayload);
   }
 });
 
@@ -1040,180 +1088,50 @@ const httpMcpTools = [
     },
   },
   {
-    name: "hireme_call_agent",
-    title: "Call a hired HireMe agent",
+    name: "hireme_call_agent_stream",
+    title: "Stream a HireMe agent call",
     description:
-      "Call an explicitly selected protected Agent using the OAuth-connected user's entitlement.",
+      "Return an SSE endpoint descriptor for streaming Agent call progress, output, and memWal storage events.",
     inputSchema: {
       type: "object",
       properties: {
         agent_id: { type: "string" },
         task: { type: "string" },
-        conversation_id: {
-          type: "string",
-          description:
-            "Optional memWal MCP conversation id. Recent turns are loaded as context and this call is appended.",
-        },
+        conversation_id: { type: "string" },
         response_mode: {
           type: "string",
           enum: ["direct_answer", "local_codex_execution_brief"],
-          description:
-            "Optional explicit output mode. Omit to let the gateway infer whether the agent should answer directly or hand off to local workspace.",
         },
         budget_calls: { type: "integer", minimum: 1 },
         hire_receipt_object_id: { type: "string" },
-        async_job: {
+        wait_for_memory: {
           type: "boolean",
           description:
-            "When true, enqueue the Agent call and return a jobId immediately. Poll with hireme_get_agent_result.",
+            "When true, keep the SSE stream open until memWal storage finishes. Defaults to true.",
         },
-        wait_for_result: {
-          type: "boolean",
-          description:
-            "When false, enqueue the Agent call and return a jobId immediately. When true, force a synchronous result.",
-        },
-        save_local_result: {
-          type: "boolean",
-          description:
-            "When true, save the returned Agent result under .hireme/gateway/results/<callId>/ and include it as a downloadable attachment.",
-        },
+        save_local_result: { type: "boolean" },
       },
       required: ["task"],
     },
   },
   {
-    name: "hireme_get_agent_result",
-    title: "Poll a HireMe agent job",
+    name: "hireme_get_memory_status",
+    title: "Poll HireMe memWal storage",
     description:
-      "Return the status of an async protected Agent job and include the final result once it completes.",
+      "Return whether a streamed Agent call has finished storing its user-result memWal and MCP conversation records.",
     inputSchema: {
       type: "object",
       properties: {
+        memory_job_id: {
+          type: "string",
+          description:
+            "Memory job id returned at output_fast.memoryJobId from hireme_call_agent_stream.",
+        },
         job_id: {
           type: "string",
-          description: "Agent job id returned by hireme_call_agent.",
+          description: "Alias for memory_job_id.",
         },
       },
-      required: ["job_id"],
-    },
-  },
-  {
-    name: "hireme_call_agent_loop",
-    title: "Call a HireMe agent in a bounded loop",
-    description:
-      "Call a protected Agent repeatedly when the previous Agent output asks Codex to continue. Final result preserves the Agent's own output contract.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        agent_id: { type: "string" },
-        task: { type: "string" },
-        conversation_id: {
-          type: "string",
-          description:
-            "Optional memWal MCP conversation id. Recent turns are loaded as context and loop calls are appended.",
-        },
-        response_mode: {
-          type: "string",
-          enum: ["direct_answer", "local_codex_execution_brief"],
-          description:
-            "Optional explicit output mode. Omit to let the gateway infer whether the agent should answer directly or hand off to local workspace.",
-        },
-        budget_calls: {
-          type: "integer",
-          minimum: 1,
-          maximum: 100,
-          description:
-            "Total maximum Agent calls the loop may spend. Each loop iteration consumes one call.",
-        },
-        max_iterations: {
-          type: "integer",
-          minimum: 1,
-          maximum: 20,
-          description: "Hard loop iteration cap. Defaults to min(budget_calls, 3).",
-        },
-        loop_policy: {
-          type: "string",
-          enum: ["agent_signal", "fixed_tasks", "single"],
-          description:
-            "agent_signal continues only when Agent output includes codexLoop/nextTask. fixed_tasks follows loop_tasks. single disables continuation.",
-        },
-        loop_tasks: {
-          type: "array",
-          items: { type: "string" },
-          description:
-            "Optional follow-up tasks for loop_policy=fixed_tasks, applied after the first call.",
-        },
-        hire_receipt_object_id: { type: "string" },
-      },
-      required: ["task"],
-    },
-  },
-  {
-    name: "hireme_call_agent_team",
-    title: "Call multiple HireMe agents as a shared-conversation team",
-    description:
-      "Call several protected Agents against the same memWal conversation id so each Agent can see prior user and Agent turns and collaborate before a final synthesis.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        agent_ids: {
-          type: "array",
-          items: { type: "string" },
-          minItems: 1,
-          description:
-            "Ordered Agent ids. Each Agent speaks in this order for each round.",
-        },
-        team_agents: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: {
-              agent_id: { type: "string" },
-              role: { type: "string" },
-              name: { type: "string" },
-            },
-          },
-          description:
-            "Optional richer team list. Use either team_agents or agent_ids.",
-        },
-        task: { type: "string", minLength: 1 },
-        conversation_id: {
-          type: "string",
-          description:
-            "Shared memWal MCP conversation id. Omit to create a team conversation id.",
-        },
-        response_mode: {
-          type: "string",
-          enum: ["direct_answer", "local_codex_execution_brief"],
-          description:
-            "Output mode for each Agent call. Defaults to direct_answer for team collaboration.",
-        },
-        rounds: {
-          type: "integer",
-          minimum: 1,
-          maximum: 10,
-          description: "How many times the ordered Agent list should speak.",
-        },
-        final_agent_id: {
-          type: "string",
-          description:
-            "Agent id that writes the final synthesis. Defaults to the last team Agent.",
-        },
-        include_final: {
-          type: "boolean",
-          description:
-            "Whether to run a final synthesis call after team rounds. Defaults to true.",
-        },
-        budget_calls: {
-          type: "integer",
-          minimum: 1,
-          maximum: 100,
-          description:
-            "Total Agent calls the team may spend. Each team turn and final synthesis consumes one call.",
-        },
-        hire_receipt_object_id: { type: "string" },
-      },
-      required: ["task"],
     },
   },
   {
@@ -1375,6 +1293,21 @@ const httpMcpTools = [
     },
   },
 ];
+
+const httpMcpAdvertisedToolNames = new Set([
+  "hireme_whoami",
+  "hireme_list_hired_agents",
+  "hireme_list_my_agents",
+  "hireme_get_agent",
+  "hireme_select_agent",
+  "hireme_current_agent",
+  "hireme_call_agent_stream",
+  "hireme_get_memory_status",
+]);
+
+const httpMcpAdvertisedTools = httpMcpTools.filter((tool) =>
+  httpMcpAdvertisedToolNames.has(tool.name),
+);
 
 function oauthAuthorizationServerMetadata(req) {
   const baseUrl = gatewayBaseUrl(req);
@@ -1860,10 +1793,10 @@ async function handleHttpMcpMessage(message, session) {
           capabilities: { tools: { listChanged: false } },
           serverInfo: { name: "hireme", version: "0.1.0" },
           instructions:
-            "HireMe exposes OAuth-connected protected AI agents. Use hireme_whoami to confirm the connected HireMe user, hireme_list_my_agents to see callable Agents, hireme_request for natural delegation, and hireme_call_agent for structured calls. MCP conversations are stored through hirer-owned memWal sessions; use hireme_start_conversation, hireme_resume_conversation, hireme_current_conversation, and hireme_list_conversations when the user wants to manage or resume Agent chats. This HTTP MCP server cannot read or create local workspace folders; creator template and folder-publish workflows belong in the local hireme-creator stdio plugin or the web upload flow. Use hireme_register_agent only when encrypted Walrus artifact metadata already exists. Do not reveal creator private Agent folders.",
+            "HireMe's default Codex profile is streaming-first. Use hireme_whoami, hireme_list_hired_agents, hireme_list_my_agents, hireme_get_agent, hireme_select_agent, and hireme_current_agent for identity and Agent management. Use hireme_call_agent_stream for Agent answers: the output_fast event contains the Agent output immediately, then memWal/Walrus-backed storage events follow. Use hireme_get_memory_status only if a client needs to poll a returned memory_job_id. Legacy direct call, wait call, async result polling, loop, team, registry, validation, and read tools are compatibility-only and are not advertised in this profile. Creator workflows belong in the local hireme-creator stdio plugin or the web upload flow. Do not reveal creator private Agent folders.",
         });
       case "tools/list":
-        return rpcResult(message.id, { tools: httpMcpTools });
+        return rpcResult(message.id, { tools: httpMcpAdvertisedTools });
       case "tools/call":
         return rpcResult(
           message.id,
@@ -1938,15 +1871,16 @@ async function callHttpMcpTool(name, args = {}, session) {
       }
 
       const routed = routeNaturalRequest(args.request, args.agent_id, sessionKey);
-      const result = await runProtectedAgentOrStartJob({
+      const result = buildAgentCallStreamDescriptor({
         ...scopedArgs,
         agent_id: routed.agentId,
         task: routed.task,
         budget_calls: args.budget_calls || 1,
         hire_receipt_object_id:
           args.hire_receipt_object_id || defaultHireReceiptFor(routed.agentId),
+        wait_for_memory: false,
       });
-      sessions.set(sessionKey, result.activeAgentId || routed.agentId);
+      sessions.set(sessionKey, routed.agentId);
       return mcpTextResult({
         routedBy: "hireme_request",
         naturalRequest: args.request,
@@ -1956,7 +1890,7 @@ async function callHttpMcpTool(name, args = {}, session) {
       });
     }
     case "hireme_list_hired_agents":
-      return mcpTextResult(listAgents(scopedArgs));
+      return mcpTextResult(await listAgents(scopedArgs));
     case "hireme_create_agent_template":
       return mcpTextResult(creatorLocalMcpRequired({
         action: "create_agent_template",
@@ -2002,20 +1936,19 @@ async function callHttpMcpTool(name, args = {}, session) {
       return mcpTextResult(await currentMcpConversation(scopedArgs));
     case "hireme_list_conversations":
       return mcpTextResult(await listMcpConversations(scopedArgs));
-    case "hireme_call_agent":
-      return mcpTextResult(await runProtectedAgentOrStartJob({
+    case "hireme_call_agent_stream": {
+      const callArgs = {
         ...scopedArgs,
         agent_id: args.agent_id || sessions.get(sessionKey) || "walrus-researcher",
-      }));
-    case "hireme_get_agent_result":
-      return mcpTextResult(getProtectedAgentJobResult(scopedArgs));
-    case "hireme_call_agent_loop":
-      return mcpTextResult(await runProtectedAgentLoop({
-        ...scopedArgs,
-        agent_id: args.agent_id || sessions.get(sessionKey) || "walrus-researcher",
-      }));
-    case "hireme_call_agent_team":
-      return mcpTextResult(await runProtectedAgentTeam(scopedArgs));
+        wait_for_memory:
+          readOptionalBoolean(args.wait_for_memory ?? args.waitForMemory) ?? true,
+        waitForMemory:
+          readOptionalBoolean(args.wait_for_memory ?? args.waitForMemory) ?? true,
+      };
+      return mcpTextResult(buildAgentCallStreamDescriptor(callArgs));
+    }
+    case "hireme_get_memory_status":
+      return mcpTextResult(getProtectedAgentMemoryStatus(scopedArgs));
     case "hireme_register_agent":
       return mcpTextResult(await registerAgentFromMcp(scopedArgs));
     case "hireme_create_agent_from_folder":
@@ -3395,6 +3328,8 @@ function listAgents(args = {}) {
       avgOutputTokens: agent.avgOutputTokens || null,
       activeUsers: agent.activeUsers || 0,
       publicSkills: agent.skills,
+      capabilities: deriveAgentCapabilities(agent),
+      preferredCallMode: preferredAgentCallMode(agent),
       memwalPolicy: agent.memwalPolicy,
       sealedHarness: protectedArtifacts.get(agent.id),
       active: agent.id === (sessions.get(args.codex_installation_id || defaultInstallationId) || "walrus-researcher"),
@@ -3421,6 +3356,16 @@ function publicAgent(agent) {
     publicSummary: agent.publicSummary,
     howToUse: agent.howToUse || null,
     publicSkills: agent.skills,
+    capabilities: deriveAgentCapabilities(agent),
+    preferredCallMode: preferredAgentCallMode(agent),
+    codexUsage: {
+      recommendedTools: recommendedAgentTools(agent),
+      memoryModes: ["fast", "wait_memory", "stream"],
+      outputContract:
+        deriveAgentCapabilities(agent).includes("image_result")
+          ? "Use image attachments as the primary result."
+          : "Use outputText as the primary result.",
+    },
     publicContract: agent.publicContract,
     memwalPolicy: agent.memwalPolicy,
     hiddenAssetClasses: agent.hiddenAssetClasses,
@@ -3446,6 +3391,51 @@ function publicAgent(agent) {
         : null,
     hired: true,
   };
+}
+
+function deriveAgentCapabilities(agent = {}) {
+  const haystack = [
+    agent.id,
+    agent.name,
+    agent.handle,
+    agent.category,
+    agent.publicSummary,
+    agent.headline,
+    agent.resultMediaType,
+    agent.result_media_type,
+    agent.resultTitle,
+    ...(Array.isArray(agent.skills) ? agent.skills : []),
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  const capabilities = new Set(["protected_agent_call", "memwal_result_storage"]);
+  if (
+    /\b(image|illustration|png|jpg|jpeg|photo|visual|sprite|asset)\b/.test(haystack) ||
+    String(agent.resultMediaType || agent.result_media_type || "").toLowerCase() === "image"
+  ) {
+    capabilities.add("image_result");
+    capabilities.add("openai_image_generation");
+  } else {
+    capabilities.add("text_result");
+  }
+  if (/\b(code|repo|react|supabase|patch|mcp)\b/.test(haystack)) {
+    capabilities.add("code_task");
+  }
+  if (/\b(research|citation|brief|source)\b/.test(haystack)) {
+    capabilities.add("research_task");
+  }
+  return [...capabilities];
+}
+
+function preferredAgentCallMode(agent = {}) {
+  const capabilities = deriveAgentCapabilities(agent);
+  if (capabilities.includes("image_result")) return "fast_with_attachment";
+  return "fast";
+}
+
+function recommendedAgentTools(agent = {}) {
+  return ["hireme_call_agent_stream"];
 }
 
 async function createSuiPaymentIntent(args = {}) {
@@ -4159,20 +4149,26 @@ async function buildWalletState(admin, context) {
   }
   for (const row of totalOwnedAgentRows) {
     const stat = ensureWalletAgentStat(agentStats, ledgerRowAgentRef(row));
-    stat.totalEarnedMist += ledgerRowMist(row);
-    stat.totalCallCount += 1;
+    if (isBillableLedgerRow(row)) {
+      stat.totalEarnedMist += ledgerRowMist(row);
+      stat.totalCallCount += 1;
+    }
   }
   for (const row of earningRows) {
     const stat = ensureWalletAgentStat(agentStats, ledgerRowAgentRef(row));
-    stat.myEarnedMist += ledgerRowMist(row);
-    stat.earnedCallCount += 1;
-    stat.lastEarnedAt = latestIso(stat.lastEarnedAt, row.created_at);
+    if (isBillableLedgerRow(row)) {
+      stat.myEarnedMist += ledgerRowMist(row);
+      stat.earnedCallCount += 1;
+      stat.lastEarnedAt = latestIso(stat.lastEarnedAt, row.created_at);
+    }
   }
   for (const row of spendingRows) {
     const stat = ensureWalletAgentStat(agentStats, ledgerRowAgentRef(row));
-    stat.mySpentMist += ledgerRowMist(row);
-    stat.spentCallCount += 1;
-    stat.lastChargedAt = latestIso(stat.lastChargedAt, row.created_at);
+    if (isBillableLedgerRow(row)) {
+      stat.mySpentMist += ledgerRowMist(row);
+      stat.spentCallCount += 1;
+      stat.lastChargedAt = latestIso(stat.lastChargedAt, row.created_at);
+    }
   }
 
   return {
@@ -4399,7 +4395,7 @@ async function listMcpLedgerRows(admin, { field, values }) {
   try {
     const { data, error } = await admin
       .from("mcp_call_ledger")
-      .select("agent_id, hirer_id, creator_id, amount_mist, amount_sui, input_tokens, output_tokens, created_at, agents(slug, name)")
+      .select("agent_id, hirer_id, creator_id, amount_mist, amount_sui, billable_calls, input_tokens, output_tokens, metadata, created_at, agents(slug, name)")
       .eq("status", "completed")
       .in(field, values)
       .order("created_at", { ascending: false })
@@ -4450,11 +4446,36 @@ function ledgerRowAgentRef(row) {
 }
 
 function sumLedgerMist(rows) {
-  return rows.reduce((total, row) => total + ledgerRowMist(row), 0n);
+  return rows.reduce(
+    (total, row) => total + (isBillableLedgerRow(row) ? ledgerRowMist(row) : 0n),
+    0n,
+  );
 }
 
 function ledgerRowMist(row) {
   return parseMist(row.amount_mist);
+}
+
+function isBillableLedgerRow(row) {
+  if (ledgerRowAccessType(row) === "trial") return false;
+  if (Number(row.billable_calls ?? 1) <= 0) return false;
+  return ledgerRowMist(row) > 0n;
+}
+
+function ledgerRowAccessType(row) {
+  const metadata = row?.metadata;
+  if (metadata && typeof metadata === "object" && !Array.isArray(metadata)) {
+    return String(metadata.accessType || metadata.access_type || "").trim();
+  }
+  if (typeof metadata === "string") {
+    try {
+      const parsed = JSON.parse(metadata);
+      return String(parsed?.accessType || parsed?.access_type || "").trim();
+    } catch {
+      return "";
+    }
+  }
+  return "";
 }
 
 function latestIso(current, next) {
@@ -4535,6 +4556,105 @@ function gatewayWhoami(args = {}) {
   };
 }
 
+function shouldStreamCurrentRestAgentCall(req, args = {}) {
+  const accept = String(req.headers.accept || "").toLowerCase();
+  if (accept.includes("text/event-stream")) return true;
+  return (
+    readOptionalBoolean(
+      args.stream ?? args.sse ?? args.event_stream ?? args.eventStream,
+    ) === true
+  );
+}
+
+function deprecatedAgentCallJobRequest(args = {}) {
+  const waitForResult = readOptionalBoolean(
+    args.wait_for_result ?? args.waitForResult,
+  );
+  if (waitForResult === false) {
+    return "wait_for_result=false belongs to the removed async Agent job API.";
+  }
+  const asyncRequested = readOptionalBoolean(
+    args.async_job ??
+      args.asyncJob ??
+      args.background_job ??
+      args.backgroundJob ??
+      args.run_async ??
+      args.runAsync ??
+      args.async,
+  );
+  if (asyncRequested === true) {
+    return "async_job/background_job belongs to the removed async Agent job API.";
+  }
+  return null;
+}
+
+function deprecatedRestEndpointResponse({
+  endpoint,
+  replacementEndpoint,
+  replacementTool,
+  reason,
+}) {
+  return {
+    gatewayCall: true,
+    error: "deprecated_rest_endpoint",
+    type: "hireme_rest_endpoint_deprecated",
+    status: "deprecated",
+    statusCode: 410,
+    endpoint,
+    reason,
+    restApi: {
+      version: "hireme.agent-call.v2",
+      canonicalStreamEndpoint: "/v1/agent-call/stream",
+      jsonFallbackEndpoint: "/v1/agent-call",
+      memoryStatusEndpoint: "/v1/agent-memory-status",
+      replacementEndpoint,
+      replacementTool,
+    },
+    message:
+      `${endpoint} is deprecated in the current HireMe REST API. ` +
+      `Use ${replacementEndpoint}${replacementTool ? ` or ${replacementTool}` : ""}.`,
+  };
+}
+
+async function runCurrentRestAgentCall(args = {}) {
+  const waitForMemory =
+    readOptionalBoolean(args.wait_for_memory ?? args.waitForMemory) ?? false;
+  const descriptorRequested =
+    readOptionalBoolean(
+      args.return_stream_url ??
+        args.returnStreamUrl ??
+        args.stream_url ??
+        args.streamUrl,
+    ) === true;
+  const normalizedArgs = {
+    ...args,
+    async_job: false,
+    asyncJob: false,
+    wait_for_result: true,
+    waitForResult: true,
+    wait_for_memory: waitForMemory,
+    waitForMemory: waitForMemory,
+  };
+
+  if (descriptorRequested) {
+    return buildAgentCallStreamDescriptor(normalizedArgs);
+  }
+
+  const result = await runProtectedAgent(normalizedArgs);
+  return {
+    ...result,
+    restApi: {
+      version: "hireme.agent-call.v2",
+      mode: "json_fast_fallback",
+      canonicalStreamEndpoint: "/v1/agent-call/stream",
+      jsonFallbackEndpoint: "/v1/agent-call",
+      memoryStatusEndpoint: "/v1/agent-memory-status",
+      outputEvent: "output_fast",
+      memoryJobId: result.memoryJobId || result.memory?.jobId || null,
+    },
+  };
+}
+
 async function runProtectedAgentOrStartJob(args = {}) {
   const installationId = args.codex_installation_id || defaultInstallationId;
   const agentId = args.agent_id || sessions.get(installationId) || "walrus-researcher";
@@ -4543,6 +4663,17 @@ async function runProtectedAgentOrStartJob(args = {}) {
     ...args,
     agent_id: agent.id,
   };
+
+  if (
+    readOptionalBoolean(
+      normalizedArgs.return_stream_url ??
+        normalizedArgs.returnStreamUrl ??
+        normalizedArgs.stream_url ??
+        normalizedArgs.streamUrl,
+    ) === true
+  ) {
+    return buildAgentCallStreamDescriptor(normalizedArgs);
+  }
 
   if (shouldStartProtectedAgentJob(normalizedArgs, agent)) {
     return startProtectedAgentJob(normalizedArgs, agent);
@@ -4660,12 +4791,13 @@ function startProtectedAgentJob(args = {}, agent = {}) {
     codexInstallationId: record.codexInstallationId,
     conversationId: record.conversationId,
     asyncJob: true,
-    pollTool: "hireme_get_agent_result",
+    pollTool: null,
+    pollEndpoint: "/v1/agent-result",
     pollArgs: {
       job_id: jobId,
     },
     message:
-      "Agent call accepted as an async job. Poll hireme_get_agent_result with this job_id until status is completed.",
+      "Agent call accepted as an async job. Poll /v1/agent-result with this job_id until status is completed.",
     job: publicProtectedAgentJob(record),
   };
 }
@@ -4722,7 +4854,65 @@ function getProtectedAgentJobResult(args = {}) {
     job_id: jobId,
     asyncJob: true,
     job,
-    message: "Agent job is still running. Poll hireme_get_agent_result again.",
+    message: "Agent job is still running. Poll /v1/agent-result again.",
+  };
+}
+
+async function streamProtectedAgentCall(args = {}, res) {
+  const writeEvent = createSseWriter(res);
+  writeEvent("ready", {
+    ok: true,
+    stream: "hireme.agent-call.v1",
+    waitForMemory:
+      readOptionalBoolean(args.wait_for_memory ?? args.waitForMemory) !== false,
+  });
+
+  try {
+    const result = await runProtectedAgentOrStartJob({
+      ...args,
+      wait_for_result: true,
+      waitForResult: true,
+      wait_for_memory:
+        readOptionalBoolean(args.wait_for_memory ?? args.waitForMemory) ?? true,
+      waitForMemory:
+        readOptionalBoolean(args.wait_for_memory ?? args.waitForMemory) ?? true,
+      onEvent: ({ event, data }) => writeEvent(event, data),
+    });
+    writeEvent("done", {
+      ok: true,
+      callId: result.callId || null,
+      activeAgentId: result.activeAgentId || null,
+      memory: result.memory || null,
+      codexView: result.codexView || null,
+    });
+  } catch (err) {
+    writeEvent("error", {
+      ok: false,
+      code: err?.code || "agent_call_stream_failed",
+      statusCode: err?.statusCode || 500,
+      message: err?.message || String(err),
+    });
+  } finally {
+    res.end();
+  }
+}
+
+function createSseWriter(res) {
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream; charset=utf-8",
+    "Cache-Control": "no-cache, no-transform",
+    Connection: "keep-alive",
+    "Access-Control-Allow-Origin": "*",
+  });
+  if (typeof res.flushHeaders === "function") {
+    res.flushHeaders();
+  }
+  return (event, data = {}) => {
+    res.write(`event: ${event}\n`);
+    res.write(`data: ${JSON.stringify({
+      ts: new Date().toISOString(),
+      ...data,
+    })}\n\n`);
   };
 }
 
@@ -4742,7 +4932,8 @@ function publicProtectedAgentJob(record) {
     updatedAt: record.updatedAt,
     request: record.request,
     error: record.error,
-    pollTool: "hireme_get_agent_result",
+    pollTool: null,
+    pollEndpoint: "/v1/agent-result",
     pollArgs: {
       job_id: record.jobId,
     },
@@ -4761,10 +4952,86 @@ function pruneProtectedAgentJobs() {
 }
 
 function publicError(err) {
+  const codexError = buildCodexError(err);
   return {
-    code: err?.code || "agent_job_failed",
-    message: err?.message || String(err),
-    statusCode: err?.statusCode || 500,
+    code: codexError.code,
+    message: codexError.message,
+    statusCode: codexError.statusCode,
+    codexError,
+  };
+}
+
+function gatewayErrorResponse(err) {
+  const codexError = buildCodexError(err);
+  return {
+    error: codexError.code,
+    message: codexError.message,
+    codexError,
+  };
+}
+
+function buildCodexError(err) {
+  const code = err?.code || "gateway_error";
+  const message = err?.message || String(err);
+  const statusCode = err?.statusCode || 500;
+  const lowerMessage = String(message).toLowerCase();
+  const lowerCode = String(code).toLowerCase();
+  if (
+    lowerCode.includes("walrus") ||
+    lowerCode.includes("blob") ||
+    lowerMessage.includes("walrus") ||
+    lowerMessage.includes("blob not found") ||
+    lowerMessage.includes("404")
+  ) {
+    return {
+      code,
+      message,
+      statusCode,
+      userMessage:
+        "The Agent artifact could not be loaded from Walrus. The creator may need to republish the Agent.",
+      developerHint:
+        "Check the registered walrus_blob_id/current version and republish with the creator workflow if the blob expired or was replaced.",
+      retryAction: "creator_reupload_agent",
+    };
+  }
+  if (lowerMessage.includes("ollama_api_key") || lowerCode.includes("ollama")) {
+    return {
+      code,
+      message,
+      statusCode,
+      userMessage: "The Ollama text model credentials are not configured for this gateway.",
+      developerHint: "Set OLLAMA_API_KEY and verify HIREME_LLM_PROVIDER/HIREME_OLLAMA_MODEL.",
+      retryAction: "configure_ollama_env",
+    };
+  }
+  if (lowerMessage.includes("openai_api_key") || lowerCode.includes("openai")) {
+    return {
+      code,
+      message,
+      statusCode,
+      userMessage: "The OpenAI image generation credentials are not configured for this gateway.",
+      developerHint:
+        "Set OPENAI_API_KEY and verify HIREME_IMAGE_GENERATION_PROVIDER/HIREME_OPENAI_IMAGE_MODEL.",
+      retryAction: "configure_openai_env",
+    };
+  }
+  if (code === "agent_access_required" || statusCode === 402 || statusCode === 403) {
+    return {
+      code,
+      message,
+      statusCode,
+      userMessage: "This HireMe user does not currently have access to call that Agent.",
+      developerHint: "Use Try/Hire first, then retry the same Agent call with the connected user.",
+      retryAction: "try_or_hire_agent",
+    };
+  }
+  return {
+    code,
+    message,
+    statusCode,
+    userMessage: message,
+    developerHint: "Inspect gateway logs for the request_error entry with this code.",
+    retryAction: "retry_after_fix",
   };
 }
 
@@ -4778,6 +5045,167 @@ function readOptionalBoolean(value) {
   return null;
 }
 
+function shouldWaitForMemory(args = {}) {
+  const explicit = readOptionalBoolean(
+    args.wait_for_memory ??
+      args.waitForMemory ??
+      args.wait_for_memwal ??
+      args.waitForMemWal,
+  );
+  if (explicit !== null) return explicit;
+  return /^(1|true|yes|y|on)$/i.test(
+    process.env.HIREME_AGENT_CALL_WAIT_FOR_MEMORY || "",
+  );
+}
+
+function emitAgentCallEvent(args = {}, event, data = {}) {
+  if (typeof args.onEvent !== "function") return;
+  try {
+    args.onEvent({ event, data });
+  } catch (err) {
+    writeGatewayLog("agent_call_stream_event_failed", {
+      event,
+      code: err?.code || "stream_event_failed",
+      message: err?.message || String(err),
+    });
+  }
+}
+
+function registerProtectedAgentMemoryJob({
+  memoryJobId,
+  callId,
+  agentId,
+  installationId,
+  conversationId,
+  responseMode,
+  waitForMemory,
+  pendingMemory,
+}) {
+  pruneProtectedAgentMemoryJobs();
+  const now = new Date().toISOString();
+  const record = {
+    jobId: memoryJobId,
+    status: "running",
+    createdAt: now,
+    updatedAt: now,
+    startedAt: now,
+    completedAt: null,
+    failedAt: null,
+    callId,
+    activeAgentId: agentId,
+    codexInstallationId: installationId,
+    conversationId,
+    request: {
+      responseMode,
+      waitForMemory,
+    },
+    memoryPersistence: pendingMemory,
+    error: null,
+  };
+  memoryJobs.set(memoryJobId, record);
+  return record;
+}
+
+function completeProtectedAgentMemoryJob(memoryJobId, memoryPersistence) {
+  const record = memoryJobs.get(memoryJobId);
+  if (!record) return null;
+  const now = new Date().toISOString();
+  record.status = "completed";
+  record.completedAt = now;
+  record.updatedAt = now;
+  record.memoryPersistence = memoryPersistence;
+  return record;
+}
+
+function failProtectedAgentMemoryJob(memoryJobId, err) {
+  const record = memoryJobs.get(memoryJobId);
+  if (!record) return null;
+  const now = new Date().toISOString();
+  record.status = "failed";
+  record.failedAt = now;
+  record.updatedAt = now;
+  record.error = publicError(err);
+  return record;
+}
+
+function pruneProtectedAgentMemoryJobs() {
+  const cutoff = Date.now() - defaultAgentJobTtlMs;
+  for (const [jobId, record] of memoryJobs) {
+    if (record.status === "running") continue;
+    const updatedAt = Date.parse(record.updatedAt || record.createdAt || "");
+    if (Number.isFinite(updatedAt) && updatedAt < cutoff) {
+      memoryJobs.delete(jobId);
+    }
+  }
+}
+
+function publicProtectedAgentMemoryJob(record) {
+  return {
+    jobId: record.jobId,
+    job_id: record.jobId,
+    status: record.status,
+    callId: record.callId,
+    activeAgentId: record.activeAgentId,
+    codexInstallationId: record.codexInstallationId,
+    conversationId: record.conversationId,
+    createdAt: record.createdAt,
+    startedAt: record.startedAt,
+    completedAt: record.completedAt,
+    failedAt: record.failedAt,
+    updatedAt: record.updatedAt,
+    request: record.request,
+    memory: record.memoryPersistence?.memory || null,
+    userMemWal: record.memoryPersistence?.userMemWal || null,
+    mcpConversation: record.memoryPersistence?.mcpConversation || null,
+    supabaseLedger: record.memoryPersistence?.supabaseLedger || null,
+    error: record.error,
+    pollTool: "hireme_get_memory_status",
+    pollArgs: {
+      memory_job_id: record.jobId,
+    },
+  };
+}
+
+function getProtectedAgentMemoryStatus(args = {}) {
+  pruneProtectedAgentMemoryJobs();
+  const memoryJobId =
+    args.memory_job_id ||
+    args.memoryJobId ||
+    args.job_id ||
+    args.jobId ||
+    args.id;
+  if (!memoryJobId) {
+    throw Object.assign(new Error("memory_job_id is required"), {
+      statusCode: 400,
+      code: "bad_memory_job_id",
+    });
+  }
+  const record = memoryJobs.get(memoryJobId);
+  if (!record) {
+    throw Object.assign(new Error(`Unknown memory job: ${memoryJobId}`), {
+      statusCode: 404,
+      code: "unknown_memory_job",
+    });
+  }
+  const job = publicProtectedAgentMemoryJob(record);
+  return {
+    gatewayCall: true,
+    type: "hireme_agent_memory_status",
+    status: record.status,
+    memoryJobId,
+    memory_job_id: memoryJobId,
+    callId: record.callId,
+    activeAgentId: record.activeAgentId,
+    conversationId: record.conversationId,
+    memory: job.memory,
+    userMemWal: job.userMemWal,
+    mcpConversation: job.mcpConversation,
+    supabaseLedger: job.supabaseLedger,
+    error: job.error,
+    job,
+  };
+}
+
 async function runProtectedAgent(args = {}) {
   const callStartedAt = Date.now();
   const installationId = args.codex_installation_id || defaultInstallationId;
@@ -4789,6 +5217,7 @@ async function runProtectedAgent(args = {}) {
     task: args.task || "",
     requestedMode: args.response_mode || args.responseMode,
   });
+  const waitForMemory = shouldWaitForMemory(args);
   const protectedInternalsRequest = classifyProtectedInternalsRequest(args.task || "");
   if (protectedInternalsRequest.blocked) {
     return buildBlockedProtectedInternalsCall({
@@ -4858,6 +5287,14 @@ async function runProtectedAgent(args = {}) {
     requestDigest,
     budgetCalls,
   });
+  emitAgentCallEvent(args, "authorized", {
+    callId,
+    agentId: agent.id,
+    hirerId,
+    accessType: access.accessType,
+    requestDigest,
+    budgetCalls,
+  });
   const protectedTaskResult = await runPlatformEncryptedArtifactTask({
     agent,
     artifact,
@@ -4867,6 +5304,12 @@ async function runProtectedAgent(args = {}) {
     hireReceiptObjectId: hireReceiptObjectId || access.receiptObjectId,
     runnerIdentity: args.runner_identity,
     responseMode,
+  });
+  emitAgentCallEvent(args, "artifact_loaded", {
+    callId,
+    agentId: agent.id,
+    protectedHarnessLoaded: Boolean(protectedTaskResult),
+    finalResult: protectedTaskResult?.finalResult === true,
   });
   const protectedSafeResult =
     protectedTaskResult?.result ||
@@ -4970,120 +5413,147 @@ async function runProtectedAgent(args = {}) {
     jsonOutput.localCodex.preferredSource =
       "jsonOutput.payload.attachments || jsonOutput.payload.outputText || jsonOutput.payload";
   }
-  const userMemWalResult = await writeUserMemWalResult({
-    agentId: agent.id,
-    hirerId,
-    callId,
-    requestDigest,
-    responseDigest,
-    hireReceiptObjectId: hireReceiptObjectId || access.receiptObjectId,
-    result: safeResult,
-    resultAttachments: resultAttachmentResolution.attachments,
-    jsonOutput,
-  });
-  let mcpConversation = null;
-  let mcpConversationError = null;
-  if (conversationId) {
-    try {
-      mcpConversation = await appendMcpConversationTurn({
-        hirerId,
-        sessionId: conversationId,
-        codexInstallationId: installationId,
-        agentId: agent.id,
-        title: args.conversation_title || args.conversationTitle,
-        callId,
-        requestDigest,
-        responseDigest,
-        userMessage: args.task || "",
-        assistantMessage: extractMcpConversationAssistantMessage(safeResult, jsonOutput),
-        metadata: {
-          responseMode,
-          executionMode,
-          userMemWalRecordPath: userMemWalResult.recordPath,
-          userMemWalCiphertextDigest: userMemWalResult.publicRecord.ciphertextDigest,
-        },
-      });
-      mcpConversationSessions.set(installationId, conversationId);
-    } catch (err) {
-      mcpConversationError = {
-        code: err.code || "memwal_conversation_store_failed",
-        message: err.message || String(err),
-      };
-      writeGatewayLog("mcp_conversation_store_failed", {
-        callId,
-        agentId: agent.id,
-        hirerId,
-        conversationId,
-        ...mcpConversationError,
-      });
-    }
-  }
-  const supabaseLedger = await persistMcpCallLedgerAndStats({
-    agent,
-    access,
+  const memoryJobId = `memory_job_${callId}`;
+  const memoryPersistencePromise = persistProtectedAgentMemoryAndLedger({
     args,
+    access,
+    agent,
     callId,
-    hirerId,
-    requestDigest,
-    responseDigest,
-    inputTokens,
-    outputTokens,
-    amountUsd,
-    amountSui: usageCharge.amountSui,
-    amountMist: usageCharge.amountMist,
-    pricePer1MTokensSui,
-    latencyMs,
-    toolName: "hireme_call_agent",
-  });
-  const ledgerEvent = {
-    callId,
-    table: "mcp_call_ledger",
-    status: "mock_recorded",
-    hireId: "local-hire",
-    agentId: agent.id,
-    creator: agent.creator,
-    hirerId,
-    accessId: access.id,
-    accessType: access.accessType,
-    requestDigest,
-    responseDigest,
-    userMemWalResultDigest: userMemWalResult.publicRecord.ciphertextDigest,
-    userMemWalResultId: userMemWalResult.publicRecord.callId,
-    billableCalls: 1,
-    pricingUnit: usageCharge.pricingUnit,
-    pricePer1MTokensSui,
-    inputTokens,
-    outputTokens,
-    totalTokens: inputTokens + outputTokens,
-    amountSui: usageCharge.amountSui,
-    amountMist: usageCharge.amountMist,
-    amountUsd,
-    latencyMs,
+    conversationContext,
+    conversationId,
     executionMode,
-    mcpConversationId: conversationId,
-    rawPromptStored: false,
-    rawResponseStored: false,
-    resultStoredInUserMemWal: true,
-    supabaseLedger,
-  };
+    hireReceiptObjectId,
+    hirerId,
+    inputTokens,
+    installationId,
+    jsonOutput,
+    latencyMs,
+    outputTokens,
+    pricePer1MTokensSui,
+    requestDigest,
+    responseDigest,
+    resultAttachmentResolution,
+    responseMode,
+    safeResult,
+    usageCharge,
+  });
 
-  ledger.push({
-    ...ledgerEvent,
-    createdAt: new Date().toISOString(),
+  let memoryPersistence = pendingProtectedAgentMemory({
+    callId,
+    memoryJobId,
+    conversationId,
+    waitForMemory,
   });
-  writeGatewayLog("agent_call_completed", {
+  registerProtectedAgentMemoryJob({
+    memoryJobId,
     callId,
     agentId: agent.id,
-    hirerId,
-    responseDigest,
-    inputTokens,
-    outputTokens,
-    amountSui: usageCharge.amountSui,
-    amountMist: usageCharge.amountMist,
+    installationId,
+    conversationId,
+    responseMode,
+    waitForMemory,
+    pendingMemory: memoryPersistence,
+  });
+
+  const initialCodexView = buildCodexView({
+    agent,
+    safeResult,
+    resultAttachmentResolution,
+    memoryPersistence,
     executionMode,
-    memWalRecordPath: userMemWalResult.recordPath,
-    mcpConversationId: conversationId,
-    supabaseLedgerStatus: supabaseLedger.status,
+    responseMode,
+    callId,
+    memoryJobId,
+    conversationId,
+  });
+
+  const outputFastEvent = {
+    callId,
+    agentId: agent.id,
+    executionMode,
+    responseMode,
+    resultType: safeResult?.type || null,
+    resultProvider: safeResult?.provider || executorExecution.provider || null,
+    model: safeResult?.model || executorExecution.model || null,
+    outputText: safeResult?.outputText || null,
+    attachmentCount: Array.isArray(safeResult?.attachments)
+      ? safeResult.attachments.length
+      : 0,
+    memoryJobId,
+    codexView: initialCodexView,
+    result: safeResult,
+    jsonOutput,
+  };
+  emitAgentCallEvent(args, "output_fast", outputFastEvent);
+  emitAgentCallEvent(args, "result", outputFastEvent);
+
+  emitAgentCallEvent(args, "memwal_pending", {
+    callId,
+    memoryJobId,
+    conversationId,
+    waitForMemory,
+  });
+
+  if (waitForMemory) {
+    emitAgentCallEvent(args, "memwal_wait_started", {
+      callId,
+      memoryJobId,
+      conversationId,
+    });
+    try {
+      memoryPersistence = await memoryPersistencePromise;
+      completeProtectedAgentMemoryJob(memoryJobId, memoryPersistence);
+    } catch (err) {
+      failProtectedAgentMemoryJob(memoryJobId, err);
+      throw err;
+    }
+    emitAgentCallEvent(args, "memwal_stored", {
+      callId,
+      memoryJobId,
+      conversationId,
+      userMemWal: memoryPersistence.userMemWal,
+      mcpConversation: memoryPersistence.mcpConversation,
+      supabaseLedgerStatus: memoryPersistence.supabaseLedger?.status || null,
+    });
+  } else {
+    memoryPersistencePromise
+      .then((storedMemory) => {
+        completeProtectedAgentMemoryJob(memoryJobId, storedMemory);
+        writeGatewayLog("agent_call_memory_completed", {
+          callId,
+          agentId: agent.id,
+          hirerId,
+          memoryJobId,
+          conversationId,
+          userMemWalStored: storedMemory.userMemWal?.stored === true,
+          mcpConversationStored: storedMemory.mcpConversation?.stored === true,
+          supabaseLedgerStatus: storedMemory.supabaseLedger?.status || null,
+        });
+      })
+      .catch((err) => {
+        failProtectedAgentMemoryJob(memoryJobId, err);
+        writeGatewayLog("agent_call_memory_failed", {
+          callId,
+          agentId: agent.id,
+          hirerId,
+          memoryJobId,
+          conversationId,
+          code: err?.code || "memory_persistence_failed",
+          message: err?.message || String(err),
+        });
+      });
+  }
+
+  const codexView = buildCodexView({
+    agent,
+    safeResult,
+    resultAttachmentResolution,
+    memoryPersistence,
+    executionMode,
+    responseMode,
+    callId,
+    memoryJobId,
+    conversationId,
   });
 
   return {
@@ -5099,44 +5569,12 @@ async function runProtectedAgent(args = {}) {
     request: {
       budgetCalls,
       requestDigest,
+      waitForMemory,
     },
-    userMemWal: {
-      stored: true,
-      kind: userMemWalResult.publicRecord.kind,
-      visibility: userMemWalResult.publicRecord.visibility,
-      hirerId: userMemWalResult.publicRecord.hirerId,
-      recordPath: userMemWalResult.recordPath,
-      ciphertextDigest: userMemWalResult.publicRecord.ciphertextDigest,
-      plaintextStoredInDb: false,
-      creatorCanReadPlaintext: false,
-      publicCanReadPlaintext: false,
-      safeSummary: userMemWalResult.publicRecord.safeSummary,
-    },
-    mcpConversation: conversationId
-      ? {
-          stored: mcpConversation?.status === "stored",
-          configured: mcpConversation?.status !== "not_configured",
-          kind: mcpConversation?.publicRecord?.kind || "mcp_conversation",
-          provider: mcpConversation?.publicRecord?.provider || "memwal-sdk",
-          conversationId,
-          namespace: mcpConversation?.publicRecord?.namespace || null,
-          memoryJobId: mcpConversation?.publicRecord?.memoryJobId || null,
-          indexJobId: mcpConversation?.publicRecord?.indexJobId || null,
-          blobId: mcpConversation?.publicRecord?.blobId || null,
-          waitForStore: mcpConversation?.publicRecord?.waitForStore ?? null,
-          memoryStoreLatencyMs:
-            mcpConversation?.publicRecord?.memoryStoreLatencyMs ?? null,
-          indexStoreLatencyMs:
-            mcpConversation?.publicRecord?.indexStoreLatencyMs ?? null,
-          previousTurnsLoaded: conversationContext?.returnedTurns || 0,
-          totalTurns: mcpConversation?.publicRecord?.turnCount || null,
-          error: mcpConversationError,
-          reason: mcpConversation?.reason || null,
-          plaintextStoredInDb: false,
-          creatorCanReadPlaintext: false,
-          publicCanReadPlaintext: false,
-        }
-      : null,
+    codexView,
+    memory: memoryPersistence.memory,
+    userMemWal: memoryPersistence.userMemWal,
+    mcpConversation: memoryPersistence.mcpConversation,
     authorization: {
       hireVerified: true,
       accessId: access.id,
@@ -5207,9 +5645,261 @@ async function runProtectedAgent(args = {}) {
     jsonOutput,
     platformValidation: protectedTaskResult?.validation || null,
     sealedValidation: null,
+    ledgerEvent: memoryPersistence.ledgerEvent,
+    supabaseLedger: memoryPersistence.supabaseLedger,
+    responseMode,
+  };
+}
+
+async function persistProtectedAgentMemoryAndLedger({
+  args,
+  access,
+  agent,
+  callId,
+  conversationContext,
+  conversationId,
+  executionMode,
+  hireReceiptObjectId,
+  hirerId,
+  inputTokens,
+  installationId,
+  jsonOutput,
+  latencyMs,
+  outputTokens,
+  pricePer1MTokensSui,
+  requestDigest,
+  responseDigest,
+  resultAttachmentResolution,
+  responseMode,
+  safeResult,
+  usageCharge,
+}) {
+  const startedAt = Date.now();
+  const userMemWalResult = await writeUserMemWalResult({
+    agentId: agent.id,
+    hirerId,
+    callId,
+    requestDigest,
+    responseDigest,
+    hireReceiptObjectId: hireReceiptObjectId || access.receiptObjectId,
+    result: safeResult,
+    resultAttachments: resultAttachmentResolution.attachments,
+    jsonOutput,
+  });
+
+  let mcpConversation = null;
+  let mcpConversationError = null;
+  if (conversationId) {
+    try {
+      mcpConversation = await appendMcpConversationTurn({
+        hirerId,
+        sessionId: conversationId,
+        codexInstallationId: installationId,
+        agentId: agent.id,
+        title: args.conversation_title || args.conversationTitle,
+        callId,
+        requestDigest,
+        responseDigest,
+        userMessage: args.task || "",
+        assistantMessage: extractMcpConversationAssistantMessage(safeResult, jsonOutput),
+        waitForStore: shouldWaitForMemory(args),
+        metadata: {
+          responseMode,
+          executionMode,
+          userMemWalRecordPath: userMemWalResult.recordPath,
+          userMemWalCiphertextDigest: userMemWalResult.publicRecord.ciphertextDigest,
+        },
+      });
+      mcpConversationSessions.set(installationId, conversationId);
+    } catch (err) {
+      mcpConversationError = {
+        code: err.code || "memwal_conversation_store_failed",
+        message: err.message || String(err),
+      };
+      writeGatewayLog("mcp_conversation_store_failed", {
+        callId,
+        agentId: agent.id,
+        hirerId,
+        conversationId,
+        ...mcpConversationError,
+      });
+    }
+  }
+
+  const settlementCharge = settlementChargeForAccess(access, usageCharge);
+  const supabaseLedger = await persistMcpCallLedgerAndStats({
+    agent,
+    access,
+    args,
+    callId,
+    hirerId,
+    requestDigest,
+    responseDigest,
+    inputTokens,
+    outputTokens,
+    amountUsd: 0,
+    amountSui: settlementCharge.amountSui,
+    amountMist: settlementCharge.amountMist,
+    billableCalls: settlementCharge.billableCalls,
+    nonBillableReason: settlementCharge.nonBillableReason,
+    pricePer1MTokensSui,
+    latencyMs,
+    toolName: "hireme_call_agent_stream",
+  });
+  const ledgerEvent = {
+    callId,
+    table: "mcp_call_ledger",
+    status: "mock_recorded",
+    hireId: "local-hire",
+    agentId: agent.id,
+    creator: agent.creator,
+    hirerId,
+    accessId: access.id,
+    accessType: access.accessType,
+    requestDigest,
+    responseDigest,
+    userMemWalResultDigest: userMemWalResult.publicRecord.ciphertextDigest,
+    userMemWalResultId: userMemWalResult.publicRecord.callId,
+    billableCalls: settlementCharge.billableCalls,
+    pricingUnit: usageCharge.pricingUnit,
+    pricePer1MTokensSui,
+    inputTokens,
+    outputTokens,
+    totalTokens: inputTokens + outputTokens,
+    listPriceAmountSui: usageCharge.amountSui,
+    listPriceAmountMist: usageCharge.amountMist,
+    amountSui: settlementCharge.amountSui,
+    amountMist: settlementCharge.amountMist,
+    amountUsd: 0,
+    nonBillableReason: settlementCharge.nonBillableReason,
+    latencyMs,
+    executionMode,
+    mcpConversationId: conversationId,
+    rawPromptStored: false,
+    rawResponseStored: false,
+    resultStoredInUserMemWal: true,
+    supabaseLedger,
+  };
+
+  ledger.push({
+    ...ledgerEvent,
+    createdAt: new Date().toISOString(),
+  });
+  writeGatewayLog("agent_call_completed", {
+    callId,
+    agentId: agent.id,
+    hirerId,
+    responseDigest,
+    inputTokens,
+    outputTokens,
+    amountSui: settlementCharge.amountSui,
+    amountMist: settlementCharge.amountMist,
+    billableCalls: settlementCharge.billableCalls,
+    nonBillableReason: settlementCharge.nonBillableReason,
+    executionMode,
+    memWalRecordPath: userMemWalResult.recordPath,
+    mcpConversationId: conversationId,
+    supabaseLedgerStatus: supabaseLedger.status,
+  });
+
+  return {
+    memory: {
+      status: "stored",
+      waitForMemory: shouldWaitForMemory(args),
+      latencyMs: Date.now() - startedAt,
+      userResultStored: true,
+      conversationStored: conversationId ? mcpConversation?.status === "stored" : null,
+      ledgerStored: supabaseLedger.status,
+    },
+    userMemWal: {
+      stored: true,
+      status: "stored",
+      kind: userMemWalResult.publicRecord.kind,
+      visibility: userMemWalResult.publicRecord.visibility,
+      hirerId: userMemWalResult.publicRecord.hirerId,
+      recordPath: userMemWalResult.recordPath,
+      ciphertextDigest: userMemWalResult.publicRecord.ciphertextDigest,
+      plaintextStoredInDb: false,
+      creatorCanReadPlaintext: false,
+      publicCanReadPlaintext: false,
+      safeSummary: userMemWalResult.publicRecord.safeSummary,
+    },
+    mcpConversation: conversationId
+      ? {
+          stored: mcpConversation?.status === "stored",
+          status: mcpConversation?.status || "failed",
+          configured: mcpConversation?.status !== "not_configured",
+          kind: mcpConversation?.publicRecord?.kind || "mcp_conversation",
+          provider: mcpConversation?.publicRecord?.provider || "memwal-sdk",
+          conversationId,
+          namespace: mcpConversation?.publicRecord?.namespace || null,
+          memoryJobId: mcpConversation?.publicRecord?.memoryJobId || null,
+          indexJobId: mcpConversation?.publicRecord?.indexJobId || null,
+          blobId: mcpConversation?.publicRecord?.blobId || null,
+          waitForStore: mcpConversation?.publicRecord?.waitForStore ?? null,
+          memoryStoreLatencyMs:
+            mcpConversation?.publicRecord?.memoryStoreLatencyMs ?? null,
+          indexStoreLatencyMs:
+            mcpConversation?.publicRecord?.indexStoreLatencyMs ?? null,
+          previousTurnsLoaded: conversationContext?.returnedTurns || 0,
+          totalTurns: mcpConversation?.publicRecord?.turnCount || null,
+          error: mcpConversationError,
+          reason: mcpConversation?.reason || null,
+          plaintextStoredInDb: false,
+          creatorCanReadPlaintext: false,
+          publicCanReadPlaintext: false,
+        }
+      : null,
     ledgerEvent,
     supabaseLedger,
-    responseMode,
+  };
+}
+
+function pendingProtectedAgentMemory({
+  callId,
+  memoryJobId,
+  conversationId,
+  waitForMemory,
+}) {
+  return {
+    memory: {
+      status: "pending",
+      jobId: memoryJobId,
+      waitForMemory,
+      userResultStored: false,
+      conversationStored: conversationId ? false : null,
+      message:
+        "Agent output returned before memWal persistence completed. Set wait_for_memory=true to wait for storage before returning.",
+    },
+    userMemWal: {
+      stored: false,
+      status: "pending",
+      jobId: memoryJobId,
+      callId,
+      plaintextStoredInDb: false,
+      creatorCanReadPlaintext: false,
+      publicCanReadPlaintext: false,
+    },
+    mcpConversation: conversationId
+      ? {
+          stored: false,
+          status: "pending",
+          conversationId,
+          plaintextStoredInDb: false,
+          creatorCanReadPlaintext: false,
+          publicCanReadPlaintext: false,
+        }
+      : null,
+    ledgerEvent: {
+      callId,
+      status: "pending",
+      resultStoredInUserMemWal: false,
+      mcpConversationId: conversationId,
+    },
+    supabaseLedger: {
+      status: "pending",
+      reason: "memory_persistence_running_in_background",
+    },
   };
 }
 
@@ -7585,6 +8275,50 @@ function gatewayPublicBaseUrl() {
   ).replace(/\/$/, "");
 }
 
+function buildAgentCallStreamDescriptor(args = {}) {
+  const body = {
+    ...args,
+    stream: true,
+    wait_for_result: true,
+    waitForResult: true,
+    wait_for_memory:
+      readOptionalBoolean(args.wait_for_memory ?? args.waitForMemory) ?? true,
+    waitForMemory:
+      readOptionalBoolean(args.wait_for_memory ?? args.waitForMemory) ?? true,
+  };
+  delete body.onEvent;
+  return {
+    type: "hireme_agent_call_stream",
+    stream: true,
+    method: "POST",
+    url: `${gatewayPublicBaseUrl()}/v1/agent-call/stream`,
+    contentType: "application/json",
+    restApi: {
+      version: "hireme.agent-call.v2",
+      canonicalStreamEndpoint: "/v1/agent-call/stream",
+      jsonFallbackEndpoint: "/v1/agent-call",
+      memoryStatusEndpoint: "/v1/agent-memory-status",
+      outputEvent: "output_fast",
+    },
+    body,
+    events: [
+      "ready",
+      "authorized",
+      "artifact_loaded",
+      "output_fast",
+      "result",
+      "memwal_pending",
+      "memwal_wait_started",
+      "memwal_stored",
+      "done",
+      "error",
+    ],
+    curlExample:
+      `curl -N -X POST ${gatewayPublicBaseUrl()}/v1/agent-call/stream ` +
+      `-H 'content-type: application/json' --data '<JSON body omitted>'`,
+  };
+}
+
 function storeAgentResultAttachmentBlob({
   callId,
   index,
@@ -7760,6 +8494,99 @@ function publicAgentResultAttachment(attachment) {
     ...metadata
   } = attachment;
   return metadata;
+}
+
+function buildCodexView({
+  agent,
+  safeResult,
+  resultAttachmentResolution,
+  memoryPersistence,
+  executionMode,
+  responseMode,
+  callId,
+  memoryJobId,
+  conversationId,
+}) {
+  const attachments = (resultAttachmentResolution?.attachments || []).map(
+    publicCodexResultAttachment,
+  );
+  const primaryAttachment =
+    attachments.find((attachment) => attachment.isPrimary) || attachments[0] || null;
+  const primaryImage =
+    primaryAttachment?.kind === "image" ? primaryAttachment : null;
+  const memoryStatus = memoryPersistence?.memory?.status || null;
+  return {
+    type: "hireme_codex_view",
+    callId,
+    activeAgentId: agent?.id || null,
+    agentName: agent?.name || null,
+    primaryText: extractCodexPrimaryText(safeResult),
+    resultType: safeResult?.type || null,
+    outputMode: safeResult?.outputMode || null,
+    provider: safeResult?.provider || null,
+    model: safeResult?.model || null,
+    executionMode,
+    responseMode,
+    attachments,
+    primaryAttachment,
+    primaryImage,
+    memoryStatus,
+    memoryJobId,
+    conversationId,
+    nextAction:
+      memoryStatus === "pending"
+        ? "poll_memory_status"
+        : primaryAttachment
+          ? "show_attachment"
+          : "show_text",
+    pollTool: memoryStatus === "pending" ? "hireme_get_memory_status" : null,
+    pollArgs:
+      memoryStatus === "pending"
+        ? {
+            memory_job_id: memoryJobId,
+          }
+        : null,
+  };
+}
+
+function publicCodexResultAttachment(attachment, index) {
+  const metadata = publicAgentResultAttachment(attachment);
+  const mimeType = metadata.mimeType || "application/octet-stream";
+  const kind = String(mimeType).toLowerCase().startsWith("image/")
+    ? "image"
+    : String(mimeType).toLowerCase().startsWith("text/")
+      ? "text"
+      : "file";
+  const filename =
+    metadata.filename || metadata.name || `agent-result-${index + 1}`;
+  return {
+    index: index + 1,
+    kind,
+    filename,
+    mimeType,
+    sizeBytes: metadata.sizeBytes || null,
+    digest: metadata.digest || null,
+    uri: metadata.uri || null,
+    downloadUrl: metadata.downloadUrl || null,
+    downloadPath: metadata.downloadPath || null,
+    source: metadata.source || null,
+    isPrimary: index === 0,
+    previewable: kind === "image" || kind === "text",
+    suggestedLocalFilename: filename,
+    creatorSecretsReturned: false,
+  };
+}
+
+function extractCodexPrimaryText(result) {
+  if (!result || typeof result !== "object") {
+    return typeof result === "string" ? result.trim() : null;
+  }
+  for (const key of ["outputText", "summary", "message", "text"]) {
+    if (typeof result[key] === "string" && result[key].trim()) {
+      return result[key].trim();
+    }
+  }
+  return null;
 }
 
 function summarizeAgentResultFileReference(reference) {
@@ -8389,7 +9216,7 @@ async function registerAgentFromMcp(args = {}) {
     nextSteps: [
       "Call hireme_list_hired_agents to confirm the gateway registry entry.",
       "Open /agents or run npm run supabase:smoke when Supabase persistence is enabled.",
-      "Call hireme_call_agent with the new agent_id after a paid hire receipt exists.",
+      "Call hireme_call_agent_stream with the new agent_id after a paid hire receipt exists.",
     ],
   };
 }
@@ -9878,7 +10705,7 @@ async function persistAgentEntitlement(record, agent) {
           expires_at: record.expiresAt,
           metadata: {
             agentSlug: agent.id,
-            codexTool: "hireme_call_agent",
+            codexTool: "hireme_call_agent_stream",
             ownerSuiAddress: record.ownerSuiAddress || null,
             paymentIntentId: record.paymentIntentId || null,
             paymentTxDigest: record.paymentTxDigest || null,
@@ -10011,6 +10838,24 @@ function calculateTokenUsageChargeSui({
     totalTokens,
     amountSui: formatMistAsSui(amountMist),
     amountMist: amountMist.toString(),
+  };
+}
+
+function settlementChargeForAccess(access, usageCharge) {
+  if (access?.accessType === "trial") {
+    return {
+      ...usageCharge,
+      billableCalls: 0,
+      amountSui: formatMistAsSui(0n),
+      amountMist: "0",
+      nonBillableReason: "trial_access",
+    };
+  }
+
+  return {
+    ...usageCharge,
+    billableCalls: 1,
+    nonBillableReason: null,
   };
 }
 
@@ -10738,6 +11583,8 @@ async function persistMcpCallLedgerAndStats({
   amountUsd,
   amountSui,
   amountMist,
+  billableCalls = 1,
+  nonBillableReason = null,
   pricePer1MTokensSui,
   latencyMs,
   toolName,
@@ -10784,7 +11631,7 @@ async function persistMcpCallLedgerAndStats({
         response_digest: responseDigest,
         input_tokens: inputTokens,
         output_tokens: outputTokens,
-        billable_calls: 1,
+        billable_calls: billableCalls,
         amount_usd: amountUsd,
         price_per_1m_tokens_sui: pricePer1MTokensSui,
         amount_sui: amountSui,
@@ -10795,6 +11642,8 @@ async function persistMcpCallLedgerAndStats({
           pricePer1MTokensSui,
           amountSui,
           amountMist,
+          billableCalls,
+          nonBillableReason,
           accessType: access.accessType,
           entitlementId: access.id,
         },
@@ -11163,7 +12012,7 @@ function publicEntitlement(record) {
 
 function codexCallHint(record, agent) {
   return {
-    tool: "hireme_call_agent",
+    tool: "hireme_call_agent_stream",
     agentId: agent.id,
     hirerId: record.hirerId,
     text: `HireMe MCP에서 ${agent.id} agent를 호출해줘. hirer_id는 ${record.hirerId}로 써.`,

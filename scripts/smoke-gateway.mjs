@@ -11,6 +11,8 @@ const gateway = spawn("node", ["apps/gateway/src/index.mjs"], {
     ...process.env,
     HIREME_GATEWAY_PORT: String(port),
     HIREME_GATEWAY_API_KEY: gatewayKey,
+    HIREME_GATEWAY_PUBLIC_URL: gatewayUrl,
+    HIREME_MCP_GATEWAY_URL: gatewayUrl,
     HIREME_OAUTH_ALLOW_DEMO_LOGIN: "1",
     HIREME_LLM_PROVIDER: "ollama",
     HIREME_OLLAMA_DISABLED: "1",
@@ -60,14 +62,50 @@ try {
     budget_calls: 3,
   });
   if (!directCall.gatewayCall || !directCall.runner?.privateHarnessApplied) {
-    throw new Error("Gateway direct call did not run through protected runner");
+    throw new Error("Gateway REST call did not run through protected runner");
+  }
+  if (
+    directCall.restApi?.version !== "hireme.agent-call.v2" ||
+    directCall.restApi?.canonicalStreamEndpoint !== "/v1/agent-call/stream" ||
+    directCall.request?.waitForMemory !== false ||
+    directCall.memory?.status !== "pending"
+  ) {
+    throw new Error("Gateway REST call did not use current fast-output contract");
   }
   if (
     directCall.jsonOutput?.schema !== "hireme.protected_agent_json_output.v1" ||
     directCall.jsonOutput?.responseMode !== "local_codex_execution_brief" ||
     directCall.jsonOutput?.localCodex?.shouldAct !== false
   ) {
-    throw new Error("Gateway direct call did not return display-only Agent output JSON");
+    throw new Error("Gateway REST call did not return display-only Agent output JSON");
+  }
+
+  const streamDescriptor = await postJson(`${gatewayUrl}/v1/agent-call`, gatewayKey, {
+    agent_id: "codex-builder",
+    hirer_id: "smoke-hirer",
+    task: "Return a stream descriptor",
+    return_stream_url: true,
+    wait_for_memory: false,
+  });
+  if (
+    streamDescriptor.type !== "hireme_agent_call_stream" ||
+    streamDescriptor.url !== `${gatewayUrl}/v1/agent-call/stream` ||
+    !streamDescriptor.events?.includes("output_fast")
+  ) {
+    throw new Error("Gateway REST call did not return the current stream descriptor");
+  }
+
+  const deprecatedAgentResult = await postJsonAllowError(
+    `${gatewayUrl}/v1/agent-result`,
+    gatewayKey,
+    { job_id: "legacy-job" },
+  );
+  if (
+    deprecatedAgentResult.status !== 410 ||
+    deprecatedAgentResult.body?.error !== "deprecated_rest_endpoint" ||
+    deprecatedAgentResult.body?.restApi?.replacementEndpoint !== "/v1/agent-memory-status"
+  ) {
+    throw new Error("Gateway legacy agent-result endpoint was not deprecated");
   }
 
   const greetingCall = await postJson(`${gatewayUrl}/v1/agent-call`, gatewayKey, {
@@ -167,8 +205,9 @@ try {
     httpMcpOutput.initialize?.result?.serverInfo?.name !== "hireme" ||
     !httpMcpTools.some((tool) => tool.name === "hireme_whoami") ||
     !httpMcpTools.some((tool) => tool.name === "hireme_list_my_agents") ||
-    !httpMcpTools.some((tool) => tool.name === "hireme_call_agent") ||
-    !httpMcpTools.some((tool) => tool.name === "hireme_register_agent") ||
+    !httpMcpTools.some((tool) => tool.name === "hireme_call_agent_stream") ||
+    httpMcpTools.some((tool) => tool.name === "hireme_call_agent") ||
+    httpMcpTools.some((tool) => tool.name === "hireme_register_agent") ||
     httpMcpTools.some((tool) => tool.name === "hireme_update_agent_from_folder")
   ) {
     throw new Error("HTTP MCP OAuth flow did not initialize HireMe tools");
@@ -187,10 +226,11 @@ try {
     throw new Error("HTTP MCP OAuth flow did not list the connected user's Agents");
   }
   if (
-    !httpMcpCallText.includes('"gatewayCall": true') ||
-    !httpMcpCallText.includes('"activeAgentId": "codex-builder"')
+    !httpMcpCallText.includes('"type": "hireme_agent_call_stream"') ||
+    !httpMcpCallText.includes("/v1/agent-call/stream") ||
+    !httpMcpCallText.includes('"output_fast"')
   ) {
-    throw new Error("HTTP MCP OAuth flow did not call the connected user's Agent");
+    throw new Error("HTTP MCP OAuth flow did not return the Agent stream descriptor");
   }
 
   const pluginOutput = await runPluginThroughGateway(gatewayUrl, gatewayKey);
@@ -211,18 +251,16 @@ try {
   const myAgentsText = myAgentsResult?.result?.content?.[0]?.text || "";
   const whoamiText = whoamiResult?.result?.content?.[0]?.text || "";
 
-  if (!text.includes('"gatewayCall": true')) {
-    throw new Error("Plugin MCP call did not route through the gateway");
-  }
-  if (!text.includes('"schema": "hireme.protected_agent_json_output.v1"')) {
-    throw new Error("Plugin MCP call did not return the protected JSON output schema");
-  }
-  if (!text.includes('"privateFolderReturnedToCodex": false')) {
-    throw new Error("Gateway response did not preserve private folder boundary");
+  if (
+    !text.includes('"type": "hireme_agent_call_stream"') ||
+    !text.includes("/v1/agent-call/stream") ||
+    !text.includes('"output_fast"')
+  ) {
+    throw new Error("Plugin MCP call did not return the Agent stream descriptor");
   }
   if (
     !naturalText.includes('"inferredAgentId": "launch-operator"') ||
-    !naturalText.includes('"shouldAct": false')
+    !naturalText.includes('"type": "hireme_agent_call_stream"')
   ) {
     throw new Error("Plugin MCP natural request did not route to launch-operator");
   }
@@ -419,10 +457,11 @@ async function runHttpMcpOAuthFlow(gatewayUrl) {
       id: 4,
       method: "tools/call",
       params: {
-        name: "hireme_call_agent",
+        name: "hireme_call_agent_stream",
         arguments: {
           agent_id: "codex-builder",
           task: "Create a billing ledger schema through HTTP MCP",
+          wait_for_memory: false,
         },
       },
     }),
@@ -523,12 +562,13 @@ async function runPluginThroughGateway(gatewayUrl, gatewayKey) {
       id: 4,
       method: "tools/call",
       params: {
-        name: "hireme_call_agent",
+        name: "hireme_call_agent_stream",
         arguments: {
           agent_id: "codex-builder",
           hirer_id: "local-hirer",
           task: "Create a billing ledger schema",
           budget_calls: 3,
+          wait_for_memory: false,
         },
       },
     },

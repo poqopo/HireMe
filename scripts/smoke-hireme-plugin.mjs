@@ -45,7 +45,7 @@ const requests = [
     id: 4,
     method: "tools/call",
     params: {
-      name: "hireme_call_agent",
+      name: "hireme_call_agent_stream",
       arguments: {
         task: "Create a billing ledger schema",
         budget_calls: 3,
@@ -168,8 +168,8 @@ const responses = stdout
   .map((line) => JSON.parse(line));
 
 const toolList = responses.find((response) => response.id === 2);
-const callResult = responses.find((response) => response.id === 4);
-const greetingResult = responses.find((response) => response.id === 5);
+const streamResult = responses.find((response) => response.id === 4);
+const removedCallResult = responses.find((response) => response.id === 5);
 const validateResult = responses.find((response) => response.id === 6);
 const naturalResult = responses.find((response) => response.id === 7);
 const walrusResult = responses.find((response) => response.id === 8);
@@ -181,79 +181,109 @@ if (!toolList?.result?.tools?.some((tool) => tool.name === "hireme_whoami")) {
   throw new Error("hireme_whoami was not advertised by tools/list");
 }
 
-if (!toolList?.result?.tools?.some((tool) => tool.name === "hireme_call_agent")) {
-  throw new Error("hireme_call_agent was not advertised by tools/list");
+if (!toolList?.result?.tools?.some((tool) => tool.name === "hireme_call_agent_stream")) {
+  throw new Error("hireme_call_agent_stream was not advertised by tools/list");
 }
 
-if (!toolList?.result?.tools?.some((tool) => tool.name === "hireme_request")) {
-  throw new Error("hireme_request was not advertised by tools/list");
+if (!toolList?.result?.tools?.some((tool) => tool.name === "hireme_get_memory_status")) {
+  throw new Error("hireme_get_memory_status was not advertised by tools/list");
+}
+
+if (!toolList?.result?.tools?.some((tool) => tool.name === "hireme_list_hired_agents")) {
+  throw new Error("hireme_list_hired_agents was not advertised by tools/list");
 }
 
 if (!toolList?.result?.tools?.some((tool) => tool.name === "hireme_list_my_agents")) {
   throw new Error("hireme_list_my_agents was not advertised by tools/list");
 }
 
+if (!toolList?.result?.tools?.some((tool) => tool.name === "hireme_get_agent")) {
+  throw new Error("hireme_get_agent was not advertised by tools/list");
+}
+
+if (!toolList?.result?.tools?.some((tool) => tool.name === "hireme_select_agent")) {
+  throw new Error("hireme_select_agent was not advertised by tools/list");
+}
+
+if (!toolList?.result?.tools?.some((tool) => tool.name === "hireme_current_agent")) {
+  throw new Error("hireme_current_agent was not advertised by tools/list");
+}
+
+if (toolList?.result?.tools?.some((tool) => tool.name === "hireme_call_agent")) {
+  throw new Error("hireme_call_agent should be removed from the default user profile");
+}
+
+if (toolList?.result?.tools?.some((tool) => tool.name === "hireme_call_agent_fast")) {
+  throw new Error("hireme_call_agent_fast should be removed from the default user profile");
+}
+
 if (
-  !toolList?.result?.tools?.some(
+  toolList?.result?.tools?.some(
+    (tool) => tool.name === "hireme_call_agent_wait_memory",
+  )
+) {
+  throw new Error("hireme_call_agent_wait_memory should be removed from the default user profile");
+}
+
+if (toolList?.result?.tools?.some((tool) => tool.name === "hireme_get_agent_result")) {
+  throw new Error("hireme_get_agent_result should be removed from the default user profile");
+}
+
+if (toolList?.result?.tools?.some((tool) => tool.name === "hireme_request")) {
+  throw new Error("hireme_request should be hidden in the default user profile");
+}
+
+if (toolList?.result?.tools?.some((tool) => tool.name === "hireme_call_agent_loop")) {
+  throw new Error("hireme_call_agent_loop should be removed from the default user profile");
+}
+
+if (toolList?.result?.tools?.some((tool) => tool.name === "hireme_call_agent_team")) {
+  throw new Error("hireme_call_agent_team should be removed from the default user profile");
+}
+
+if (
+  toolList?.result?.tools?.some(
     (tool) => tool.name === "hireme_validate_sealed_harness",
   )
 ) {
-  throw new Error("hireme_validate_sealed_harness was not advertised by tools/list");
+  throw new Error("hireme_validate_sealed_harness should be hidden in the default user profile");
 }
 
 if (
-  !toolList?.result?.tools?.some(
+  toolList?.result?.tools?.some(
     (tool) => tool.name === "hireme_call_walrus_agent",
   )
 ) {
-  throw new Error("hireme_call_walrus_agent was not advertised by tools/list");
+  throw new Error("hireme_call_walrus_agent should be hidden in the default user profile");
 }
 
-if (!toolList?.result?.tools?.some((tool) => tool.name === "hireme_read_memwal")) {
-  throw new Error("hireme_read_memwal was not advertised by tools/list");
+if (toolList?.result?.tools?.some((tool) => tool.name === "hireme_read_memwal")) {
+  throw new Error("hireme_read_memwal should be hidden in the default user profile");
 }
 
-if (!toolList?.result?.tools?.some((tool) => tool.name === "hireme_register_agent")) {
-  throw new Error("hireme_register_agent was not advertised by tools/list");
+if (toolList?.result?.tools?.some((tool) => tool.name === "hireme_register_agent")) {
+  throw new Error("hireme_register_agent should be hidden in the default user profile");
 }
 
 if (
-  !toolList?.result?.tools?.some(
+  toolList?.result?.tools?.some(
     (tool) => tool.name === "hireme_update_agent_from_folder",
   )
 ) {
-  throw new Error("hireme_update_agent_from_folder was not advertised by tools/list");
-}
-
-if (!callResult?.result?.content?.[0]?.text?.includes('"agent"')) {
-  throw new Error("hireme_call_agent did not return the expected call result");
+  throw new Error("hireme_update_agent_from_folder should be hidden in the default user profile");
 }
 
 if (
-  !callResult?.result?.content?.[0]?.text?.includes(
-    '"schema": "hireme.protected_agent_json_output.v1"',
-  )
+  !streamResult?.result?.content?.[0]?.text?.includes(
+    '"type": "hireme_agent_call_stream"',
+  ) ||
+  !streamResult?.result?.content?.[0]?.text?.includes('"output_fast"')
 ) {
-  throw new Error("hireme_call_agent did not return protected Agent JSON output");
+  throw new Error("hireme_call_agent_stream did not return the expected stream descriptor");
 }
 
-if (
-  !callResult?.result?.content?.[0]?.text?.includes(
-    '"responseMode": "local_codex_execution_brief"',
-  )
-) {
-  throw new Error("hireme_call_agent did not preserve the inferred response mode");
-}
-
-if (!callResult?.result?.content?.[0]?.text?.includes('"shouldAct": false')) {
-  throw new Error("hireme_call_agent should expose Agent output without automatic local execution");
-}
-
-if (
-  !greetingResult?.result?.content?.[0]?.text?.includes('"responseMode": "direct_answer"') ||
-  !greetingResult?.result?.content?.[0]?.text?.includes('"shouldAct": false')
-) {
-  throw new Error("hireme_call_agent did not return the direct answer mode");
+if (!removedCallResult?.error?.message?.includes("Unknown tool: hireme_call_agent")) {
+  throw new Error("hireme_call_agent should be removed from default tool calls");
 }
 
 if (
