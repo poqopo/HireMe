@@ -13,7 +13,7 @@ const defaultRecallLimit = Math.max(
 );
 const defaultRememberTimeoutMs = Math.max(
   5_000,
-  Math.trunc(Number(process.env.HIREME_MEMWAL_REMEMBER_TIMEOUT_MS || "30000") || 30_000),
+  Math.trunc(Number(process.env.HIREME_MEMWAL_REMEMBER_TIMEOUT_MS || "75000") || 75_000),
 );
 
 let cachedClient = null;
@@ -30,6 +30,7 @@ export async function createMcpConversationSession({
   codexInstallationId,
   agentId,
   title,
+  waitForStore = null,
 }) {
   const client = getMemWalClient();
   const safeHirerId = normalizeNamespaceSegment(hirerId || "local-hirer");
@@ -57,7 +58,9 @@ export async function createMcpConversationSession({
     });
   }
 
-  const indexJob = await rememberAndMaybeWait(client, memoryText, indexNamespace);
+  const indexJob = await rememberAndMaybeWait(client, memoryText, indexNamespace, {
+    waitForStore,
+  });
   return {
     status: "stored",
     kind: "mcp_conversation",
@@ -85,6 +88,8 @@ export async function createMcpConversationSession({
       memoryJobId: indexJob.job_id || indexJob.id || null,
       blobId: indexJob.blob_id || null,
       owner: indexJob.owner || null,
+      waitForStore: indexJob.waitForStore,
+      storeLatencyMs: indexJob.storeLatencyMs,
       safeSummary: {
         title: normalizeTitle(title),
         activeAgentId: agentId || null,
@@ -112,6 +117,7 @@ export async function appendMcpConversationTurn({
   userMessage,
   assistantMessage,
   metadata,
+  waitForStore = true,
 }) {
   const client = getMemWalClient();
   const safeHirerId = normalizeNamespaceSegment(hirerId || "local-hirer");
@@ -154,8 +160,8 @@ export async function appendMcpConversationTurn({
   }
 
   const [turnJob, indexJob] = await Promise.all([
-    rememberAndMaybeWait(client, turnText, namespace),
-    rememberAndMaybeWait(client, indexText, indexNamespace),
+    rememberAndMaybeWait(client, turnText, namespace, { waitForStore }),
+    rememberAndMaybeWait(client, indexText, indexNamespace, { waitForStore }),
   ]);
 
   return {
@@ -186,6 +192,9 @@ export async function appendMcpConversationTurn({
       indexJobId: indexJob.job_id || indexJob.id || null,
       blobId: turnJob.blob_id || null,
       owner: turnJob.owner || null,
+      waitForStore: Boolean(turnJob.waitForStore && indexJob.waitForStore),
+      memoryStoreLatencyMs: turnJob.storeLatencyMs,
+      indexStoreLatencyMs: indexJob.storeLatencyMs,
       turnCount: null,
       safeSummary: {
         title: normalizeTitle(title),
@@ -387,17 +396,46 @@ function readMemWalSdkConfig() {
   };
 }
 
-async function rememberAndMaybeWait(client, text, namespace) {
-  if (process.env.HIREME_MEMWAL_REMEMBER_ASYNC === "1") {
-    return client.remember(text, namespace);
+async function rememberAndMaybeWait(client, text, namespace, options = {}) {
+  const startedAt = Date.now();
+  if (shouldRememberAsync(options)) {
+    return decorateRememberJob(await client.remember(text, namespace), {
+      waitForStore: false,
+      storeLatencyMs: Date.now() - startedAt,
+    });
   }
-  return client.rememberAndWait(text, namespace, {
-    timeoutMs: defaultRememberTimeoutMs,
-    pollIntervalMs: Math.max(
-      250,
-      Math.trunc(Number(process.env.HIREME_MEMWAL_POLL_INTERVAL_MS || "1000") || 1000),
-    ),
-  });
+  return decorateRememberJob(
+    await client.rememberAndWait(text, namespace, {
+      timeoutMs: defaultRememberTimeoutMs,
+      pollIntervalMs: Math.max(
+        250,
+        Math.trunc(Number(process.env.HIREME_MEMWAL_POLL_INTERVAL_MS || "1000") || 1000),
+      ),
+    }),
+    {
+      waitForStore: true,
+      storeLatencyMs: Date.now() - startedAt,
+    },
+  );
+}
+
+function shouldRememberAsync({ waitForStore = null } = {}) {
+  if (waitForStore === true) return false;
+  if (waitForStore === false) return true;
+  return /^(1|true|yes|y|on)$/i.test(process.env.HIREME_MEMWAL_REMEMBER_ASYNC || "");
+}
+
+function decorateRememberJob(job, metadata) {
+  if (job && typeof job === "object") {
+    return {
+      ...job,
+      ...metadata,
+    };
+  }
+  return {
+    value: job,
+    ...metadata,
+  };
 }
 
 function formatConversationTurnMemory({

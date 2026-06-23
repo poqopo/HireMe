@@ -54,7 +54,9 @@ services:
       - key: MEMWAL_SERVER_URL
         value: https://relayer-staging.memory.walrus.xyz
       - key: HIREME_MEMWAL_REMEMBER_ASYNC
-        value: "1"
+        value: "0"
+      - key: HIREME_MEMWAL_REMEMBER_TIMEOUT_MS
+        value: "75000"
       - key: MEMWAL_PRIVATE_KEY
         sync: false
       - key: MEMWAL_ACCOUNT_ID
@@ -64,14 +66,16 @@ services:
       - key: HIREME_SEAL_KEY_SERVER_IDS
         sync: false
       - key: HIREME_LLM_PROVIDER
-        value: openai
+        value: ollama
       - key: OPENAI_API_KEY
         sync: false
       - key: HIREME_OPENAI_MODEL
         value: gpt-5.4-nano
       - key: OLLAMA_BASE_URL
-        value: https://ollama.com/api
+        value: https://ollama.com
       - key: OLLAMA_API_KEY
         sync: false
       - key: OLLAMA_MODEL
-        value: gpt-oss:120b
+        value: gemma4:31b-cloud
+      - key: HIREME_IMAGE_GENERATION_PROVIDER
+        value: openai

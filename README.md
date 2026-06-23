@@ -174,6 +174,7 @@ The gateway stores MCP conversation turns with:
 The demo evidence to look for is:
 
 - first call: `mcpConversation.stored: true`
+- first call: `mcpConversation.waitForStore: true`
 - later call: `previousTurnsLoaded > 0`
 - same `conversation_id`
 - MemWal namespace and job/blob metadata
@@ -260,7 +261,13 @@ Browser-facing variables use the `VITE_` prefix. Server secrets must not use `VI
 | `MEMWAL_PRIVATE_KEY` | Gateway | MemWal delegate/private key |
 | `MEMWAL_ACCOUNT_ID` | Gateway | MemWal account ID |
 | `MEMWAL_SERVER_URL` | Gateway | MemWal relayer URL |
-| `OPENAI_API_KEY` | Gateway | LLM execution provider key |
+| `HIREME_SAVE_LOCAL_AGENT_RESULTS` | Gateway | Optional default for saving returned Agent results under `.hireme/gateway/results` |
+| `HIREME_LLM_PROVIDER` | Gateway | LLM execution provider, currently `ollama` for text execution |
+| `OLLAMA_BASE_URL` | Gateway | Ollama base URL, e.g. `https://ollama.com` |
+| `OLLAMA_API_KEY` | Gateway | Ollama API key for Agent execution |
+| `OLLAMA_MODEL` | Gateway | Ollama model name, e.g. `gemma4:31b-cloud` |
+| `HIREME_IMAGE_GENERATION_PROVIDER` | Gateway | Protected Harness image provider, default `openai` |
+| `OPENAI_API_KEY` | Gateway | OpenAI key used for protected Harness image-category generation |
 | `HIREME_SEAL_PACKAGE_ID` | Gateway | Sui package ID for policy metadata |
 
 See `.env.example`, `apps/gateway/.env.example`, and `render.yaml` for deployment-oriented configuration.

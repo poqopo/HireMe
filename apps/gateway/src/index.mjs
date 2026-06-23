@@ -57,6 +57,7 @@ import {
 loadEnvFile(".env");
 loadEnvFile(".env.local");
 
+const defaultAgentStorageEpochs = 7;
 const port = Number.parseInt(
   process.env.HIREME_GATEWAY_PORT || process.env.PORT || "8787",
   10,
@@ -97,16 +98,16 @@ const defaultSuiPaymentIntentTtlMs = Math.max(
   Math.trunc(Number(process.env.HIREME_SUI_PAYMENT_INTENT_TTL_MS || "900000") || 900_000),
 );
 const defaultLlmProvider = String(
-  process.env.HIREME_LLM_PROVIDER || (process.env.OPENAI_API_KEY ? "openai" : "ollama"),
+  process.env.HIREME_LLM_PROVIDER || "ollama",
 ).toLowerCase();
 const defaultOllamaModel =
   process.env.HIREME_OLLAMA_MODEL ||
   process.env.OLLAMA_MODEL ||
-  "gpt-oss:120b";
+  "gemma4:31b-cloud";
 const defaultOllamaBaseUrl = (
   process.env.HIREME_OLLAMA_BASE_URL ||
   process.env.OLLAMA_BASE_URL ||
-  "https://ollama.com/api"
+  "https://ollama.com"
 ).replace(/\/$/, "");
 const defaultOpenAIModel =
   process.env.HIREME_OPENAI_MODEL ||
@@ -129,12 +130,49 @@ const defaultOpenAIImageSize =
   process.env.HIREME_OPENAI_IMAGE_SIZE ||
   process.env.OPENAI_IMAGE_SIZE ||
   "1024x1024";
+const defaultImageGenerationProvider = String(
+  process.env.HIREME_PROTECTED_HARNESS_IMAGE_GENERATION_PROVIDER ||
+    process.env.HIREME_IMAGE_GENERATION_PROVIDER ||
+    "openai",
+).toLowerCase();
+const defaultOllamaImageModel =
+  process.env.HIREME_OLLAMA_IMAGE_MODEL ||
+  process.env.OLLAMA_IMAGE_MODEL ||
+  process.env.HIREME_IMAGE_MODEL ||
+  "x/z-image-turbo";
+const defaultOllamaImageSize =
+  process.env.HIREME_OLLAMA_IMAGE_SIZE ||
+  process.env.OLLAMA_IMAGE_SIZE ||
+  process.env.HIREME_IMAGE_SIZE ||
+  "1024x1024";
+const defaultOllamaImageDimensions = parseImageSize(defaultOllamaImageSize, {
+  width: 1024,
+  height: 1024,
+});
+const defaultOllamaImageSteps = Math.max(
+  0,
+  Math.trunc(
+    Number(process.env.HIREME_OLLAMA_IMAGE_STEPS || process.env.OLLAMA_IMAGE_STEPS || "0") ||
+      0,
+  ),
+);
 const defaultOpenAIImageTimeoutMs = Math.max(
   5_000,
   Math.trunc(
     Number(
       process.env.HIREME_OPENAI_IMAGE_TIMEOUT_MS ||
         process.env.HIREME_IMAGE_TIMEOUT_MS ||
+        "420000",
+    ) || 420_000,
+  ),
+);
+const defaultOllamaImageTimeoutMs = Math.max(
+  5_000,
+  Math.trunc(
+    Number(
+      process.env.HIREME_OLLAMA_IMAGE_TIMEOUT_MS ||
+        process.env.HIREME_IMAGE_TIMEOUT_MS ||
+        process.env.HIREME_OPENAI_IMAGE_TIMEOUT_MS ||
         "420000",
     ) || 420_000,
   ),
@@ -1033,6 +1071,11 @@ const httpMcpTools = [
           type: "boolean",
           description:
             "When false, enqueue the Agent call and return a jobId immediately. When true, force a synchronous result.",
+        },
+        save_local_result: {
+          type: "boolean",
+          description:
+            "When true, save the returned Agent result under .hireme/gateway/results/<callId>/ and include it as a downloadable attachment.",
         },
       },
       required: ["task"],
@@ -4850,6 +4893,12 @@ async function runProtectedAgent(args = {}) {
       : executorExecution.status === "completed"
         ? executorExecution.result
         : protectedSafeResult;
+  await maybeAttachLocalSavedAgentResult({
+    args,
+    agent,
+    callId,
+    result: safeResult,
+  });
   const resultAttachmentResolution = await resolveAgentResultAttachments({
     result: safeResult,
     callId,
@@ -5074,6 +5123,11 @@ async function runProtectedAgent(args = {}) {
           memoryJobId: mcpConversation?.publicRecord?.memoryJobId || null,
           indexJobId: mcpConversation?.publicRecord?.indexJobId || null,
           blobId: mcpConversation?.publicRecord?.blobId || null,
+          waitForStore: mcpConversation?.publicRecord?.waitForStore ?? null,
+          memoryStoreLatencyMs:
+            mcpConversation?.publicRecord?.memoryStoreLatencyMs ?? null,
+          indexStoreLatencyMs:
+            mcpConversation?.publicRecord?.indexStoreLatencyMs ?? null,
           previousTurnsLoaded: conversationContext?.returnedTurns || 0,
           totalTurns: mcpConversation?.publicRecord?.turnCount || null,
           error: mcpConversationError,
@@ -5972,24 +6026,41 @@ async function tryRunProtectedHarnessImageGeneration({
   responseMode,
 }) {
   if (protectedHarnessImageGenerationDisabled) return null;
-  if (!isOpenAIConfigured()) return null;
 
   const baseImage = findHarnessBaseImage(rootDir, files);
   if (!baseImage) return null;
   if (!isHarnessImageGenerationTask(task, { hasBaseImage: true })) return null;
 
+  const provider = selectHarnessImageGenerationProvider();
+  if (provider === "openai" && !isOpenAIConfigured()) return null;
+  if (provider === "ollama" && !isOllamaImageConfigured()) return null;
   const prompt = buildHarnessImageGenerationPrompt({
     agent,
     task,
     agentsMd,
+    includeReferenceImage: provider === "openai" || shouldSendOllamaImageReference(),
   });
   const startedAt = Date.now();
+  let model = provider === "openai" ? defaultOpenAIImageModel : defaultOllamaImageModel;
+  const providerResultType =
+    provider === "openai" ? "openai_image_edit" : "ollama_image_generation";
 
   try {
-    const imageBytes = await callOpenAIImageEdit({
-      baseImagePath: baseImage.absolutePath,
-      prompt,
-    });
+    const generation =
+      provider === "openai"
+        ? {
+            imageBytes: await callOpenAIImageEdit({
+              baseImagePath: baseImage.absolutePath,
+              prompt,
+            }),
+            endpointType: "openai-image-edit",
+          }
+        : await callOllamaImageGeneration({
+            baseImagePath: baseImage.absolutePath,
+            prompt,
+          });
+    const imageBytes = generation.imageBytes;
+    model = generation.model || model;
     const resultDir = resolve(".hireme/gateway/results", callId);
     await mkdir(resultDir, { recursive: true });
     const outputFilename = `${safeUploadName(agent.id)}-${Date.now().toString(36)}.png`;
@@ -6002,15 +6073,18 @@ async function tryRunProtectedHarnessImageGeneration({
       execution: {
         status: "completed",
         kind: "harness_image_generation",
-        model: defaultOpenAIImageModel,
+        provider,
+        providerResultType,
+        model,
+        endpointType: generation.endpointType || null,
         latencyMs: Date.now() - startedAt,
         outputFilename,
         outputDigest: `sha256:${sha256Hex(imageBytes)}`,
       },
       result: {
         type: "protected_harness_image_result",
-        provider: "openai_image_edit",
-        model: defaultOpenAIImageModel,
+        provider: providerResultType,
+        model,
         outputText,
         outputTextDigest: `sha256:${sha256Hex(outputText)}`,
         outputMode: "hirer_facing_answer",
@@ -6029,11 +6103,13 @@ async function tryRunProtectedHarnessImageGeneration({
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     writeGatewayLog("protected_harness_image_generation_failed", {
-      callId,
-      agentId: agent.id,
-      code: err?.code || "harness_image_generation_failed",
-      message,
-    });
+        callId,
+        agentId: agent.id,
+        code: err?.code || "harness_image_generation_failed",
+        provider,
+        providerResultType,
+        message,
+      });
     const outputText =
       "이미지 생성에 실패했습니다. Agent Harness는 로드됐지만 이미지 API 호출이 완료되지 않았습니다.";
     return {
@@ -6041,14 +6117,16 @@ async function tryRunProtectedHarnessImageGeneration({
       execution: {
         status: "failed",
         kind: "harness_image_generation",
-        model: defaultOpenAIImageModel,
+        provider,
+        providerResultType,
+        model,
         code: err?.code || "harness_image_generation_failed",
         latencyMs: Date.now() - startedAt,
       },
       result: {
         type: "protected_harness_image_error",
-        provider: "openai_image_edit",
-        model: defaultOpenAIImageModel,
+        provider: providerResultType,
+        model,
         outputText,
         outputTextDigest: `sha256:${sha256Hex(outputText)}`,
         outputMode: "hirer_facing_answer",
@@ -6067,7 +6145,7 @@ async function tryRunProtectedHarnessImageGeneration({
 function isHarnessImageGenerationTask(task, { hasBaseImage = false } = {}) {
   const text = String(task || "").toLowerCase();
   if (!text.trim()) return false;
-  if (hasLocalWorkspaceExecutionSignal(text)) return false;
+  if (hasImageGenerationNegation(text)) return false;
 
   const imageSignal =
     /(image|png|character|avatar|sprite|illustration|mascot|drawing|artwork|variant|zombie)/i.test(text) ||
@@ -6075,7 +6153,24 @@ function isHarnessImageGenerationTask(task, { hasBaseImage = false } = {}) {
   const generationSignal =
     /(create|make|generate|edit|transform|variant|version|zombie)/i.test(text) ||
     /만들|생성|변형|버전|바꿔|그려|좀비/.test(text);
+  if (hasLocalWorkspaceExecutionSignal(text) && !(hasBaseImage && imageSignal && generationSignal)) {
+    return false;
+  }
   return generationSignal && (imageSignal || hasBaseImage);
+}
+
+function hasImageGenerationNegation(text) {
+  const imageWords =
+    "(?:image|png|picture|illustration|avatar|character|mascot|sprite|drawing|artwork)";
+  const generationWords = "(?:create|make|generate|edit|draw|render|produce)";
+  const englishNegation = new RegExp(
+    `(?:do not|don't|dont|without|no)\\s+(?:${generationWords}\\s+)?[^.?!]{0,60}${imageWords}|${imageWords}[^.?!]{0,60}(?:do not|don't|dont|without|no)`,
+    "i",
+  );
+  const koreanNegation =
+    /(?:이미지|그림|일러스트|캐릭터|아바타|마스코트).{0,24}(?:만들지\s*말|생성하지\s*말|그리지\s*말|제작하지\s*말|하지\s*말|없이|빼고|말고)/.test(text) ||
+    /(?:만들지\s*말|생성하지\s*말|그리지\s*말|제작하지\s*말|하지\s*말|없이|빼고|말고).{0,24}(?:이미지|그림|일러스트|캐릭터|아바타|마스코트)/.test(text);
+  return englishNegation.test(text) || koreanNegation;
 }
 
 function findHarnessBaseImage(rootDir, files) {
@@ -6089,15 +6184,29 @@ function findHarnessBaseImage(rootDir, files) {
   };
 }
 
-function buildHarnessImageGenerationPrompt({ agent, task, agentsMd }) {
+function buildHarnessImageGenerationPrompt({
+  agent,
+  task,
+  agentsMd,
+  includeReferenceImage = true,
+}) {
   const privateInstructions = truncateTextPreserveLines(
     agentsMd?.text || "",
     Math.min(defaultHarnessFileMaxChars, 6_000),
   );
+  const referenceInstruction = includeReferenceImage
+    ? [
+        "Use the attached input image as the only canonical character reference.",
+        "Create the requested character variant while preserving the original character identity, silhouette, proportions, face layout, pose, and visual style.",
+        "Do not invent a new character. Do not add unrelated text, logos, watermarks, props, or background elements.",
+      ]
+    : [
+        "Create a finished character image from the protected agent guidance and hirer request.",
+        "Preserve the described character identity, silhouette, proportions, face layout, pose, and visual style as much as possible.",
+        "Do not add unrelated text, logos, watermarks, props, or background elements.",
+      ];
   return [
-    "Use the attached input image as the only canonical character reference.",
-    "Create the requested character variant while preserving the original character identity, silhouette, proportions, face layout, pose, and visual style.",
-    "Do not invent a new character. Do not add unrelated text, logos, watermarks, props, or background elements.",
+    ...referenceInstruction,
     "Apply the creator-private agent instructions below as hidden guidance. Do not render or quote the instruction text in the image.",
     "",
     `[Agent]\n${agent.name} (${agent.publicContract})`,
@@ -6111,6 +6220,227 @@ function buildHarnessImageGenerationPrompt({ agent, task, agentsMd }) {
     "- Keep the character fully visible and uncropped.",
     "- Make the requested theme immediately recognizable without overpowering the original identity.",
   ].join("\n");
+}
+
+function selectHarnessImageGenerationProvider() {
+  if (defaultImageGenerationProvider === "openai") return "openai";
+  return "ollama";
+}
+
+function shouldSendOllamaImageReference() {
+  return !/^(0|false|no)$/i.test(
+    process.env.HIREME_OLLAMA_IMAGE_INCLUDE_REFERENCE ||
+      process.env.HIREME_IMAGE_INCLUDE_REFERENCE ||
+      "1",
+  );
+}
+
+async function callOllamaImageGeneration({ baseImagePath, prompt }) {
+  const referenceBase64 =
+    shouldSendOllamaImageReference() && baseImagePath
+      ? Buffer.from(await readFile(baseImagePath)).toString("base64")
+      : "";
+
+  try {
+    return await fetchOllamaImageGeneration({
+      prompt,
+      referenceBase64,
+    });
+  } catch (err) {
+    if (!referenceBase64 || !shouldRetryOllamaImageWithoutReference(err)) {
+      throw err;
+    }
+    return fetchOllamaImageGeneration({
+      prompt: buildOllamaImagePromptWithoutReference(prompt),
+      referenceBase64: "",
+    });
+  }
+}
+
+async function fetchOllamaImageGeneration({ prompt, referenceBase64 }) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), defaultOllamaImageTimeoutMs);
+  const headers = {
+    "Content-Type": "application/json",
+  };
+  if (process.env.OLLAMA_API_KEY) {
+    headers.Authorization = `Bearer ${process.env.OLLAMA_API_KEY}`;
+  }
+  let lastFailure = null;
+
+  try {
+    for (const endpoint of ollamaImageEndpointCandidates(defaultOllamaBaseUrl)) {
+      const body =
+        endpoint.type === "openai-compatible-images"
+          ? {
+              model: defaultOllamaImageModel,
+              prompt,
+              size: defaultOllamaImageSize,
+              response_format: "b64_json",
+              n: 1,
+            }
+          : {
+              model: defaultOllamaImageModel,
+              prompt,
+              stream: false,
+              width: defaultOllamaImageDimensions.width,
+              height: defaultOllamaImageDimensions.height,
+              ...(defaultOllamaImageSteps ? { steps: defaultOllamaImageSteps } : {}),
+              ...(referenceBase64 ? { images: [referenceBase64] } : {}),
+            };
+      const response = await fetch(endpoint.url, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+      const responseText = await response.text();
+      const data = parseJsonOrNdjson(responseText);
+
+      if (response.ok) {
+        const imageBytes = await readImageBytesFromOllamaResponse(data, {
+          signal: controller.signal,
+        });
+        if (!imageBytes?.length) {
+          throw Object.assign(
+            new Error("Ollama image generation response did not include image data."),
+            {
+              code: "ollama_image_generation_empty",
+              endpointType: endpoint.type,
+              responseDigest: `sha256:${sha256Hex(responseText || "")}`,
+            },
+          );
+        }
+        return {
+          imageBytes,
+          endpointType: endpoint.type,
+          model: defaultOllamaImageModel,
+        };
+      }
+
+      const message =
+        data?.error?.message ||
+        data?.error ||
+        data?.message ||
+        `Ollama image API returned ${response.status}`;
+      lastFailure = {
+        statusCode: response.status,
+        message,
+        responseDigest: `sha256:${sha256Hex(responseText || "")}`,
+        endpointType: endpoint.type,
+      };
+
+      if (isOllamaModelNotFoundFailure(response.status, message)) break;
+      if (!shouldTryNextOllamaEndpoint(response.status)) break;
+    }
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  const err = new Error(lastFailure?.message || "Ollama image generation failed.");
+  err.code = "ollama_image_generation_failed";
+  err.statusCode = lastFailure?.statusCode;
+  err.endpointType = lastFailure?.endpointType;
+  err.responseDigest = lastFailure?.responseDigest;
+  throw err;
+}
+
+function ollamaImageEndpointCandidates(baseUrl) {
+  const base = String(baseUrl || "https://ollama.com").replace(/\/$/, "");
+  if (/\/api$/i.test(base)) {
+    const root = base.replace(/\/api$/i, "");
+    return [
+      { type: "native-generate", url: `${base}/generate` },
+      { type: "openai-compatible-images", url: `${root}/v1/images/generations` },
+    ];
+  }
+  if (/\/v1$/i.test(base)) {
+    const root = base.replace(/\/v1$/i, "");
+    return [
+      { type: "openai-compatible-images", url: `${base}/images/generations` },
+      { type: "native-generate", url: `${root}/api/generate` },
+    ];
+  }
+  return [
+    { type: "native-generate", url: `${base}/api/generate` },
+    { type: "openai-compatible-images", url: `${base}/v1/images/generations` },
+  ];
+}
+
+function isOllamaModelNotFoundFailure(statusCode, message) {
+  return statusCode === 404 && /model ['"].+['"] not found/i.test(String(message || ""));
+}
+
+function parseJsonOrNdjson(text) {
+  try {
+    return text ? JSON.parse(text) : null;
+  } catch {
+    const lines = String(text || "")
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+    for (let index = lines.length - 1; index >= 0; index -= 1) {
+      try {
+        return JSON.parse(lines[index]);
+      } catch {
+        // Keep walking back through streamed JSON lines.
+      }
+    }
+    return { rawTextDigest: `sha256:${sha256Hex(text || "")}` };
+  }
+}
+
+async function readImageBytesFromOllamaResponse(data, { signal } = {}) {
+  const nativeBase64 = readImageBase64FromOllamaResponse(data);
+  if (nativeBase64) return Buffer.from(stripDataUrlPrefix(nativeBase64), "base64");
+
+  const imageUrl = data?.data?.[0]?.url || data?.url;
+  if (typeof imageUrl === "string" && /^https?:\/\//i.test(imageUrl)) {
+    const imageResponse = await fetch(imageUrl, { signal });
+    if (!imageResponse.ok) {
+      throw Object.assign(
+        new Error(`Ollama image URL download returned ${imageResponse.status}`),
+        { code: "ollama_image_download_failed", statusCode: imageResponse.status },
+      );
+    }
+    return Buffer.from(await imageResponse.arrayBuffer());
+  }
+  return null;
+}
+
+function readImageBase64FromOllamaResponse(data) {
+  const candidates = [
+    data?.image,
+    data?.images?.[0],
+    data?.data?.[0]?.b64_json,
+    data?.data?.[0]?.b64,
+    data?.data?.[0]?.image,
+    data?.response?.image,
+  ];
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim()) {
+      return candidate.trim();
+    }
+  }
+  return "";
+}
+
+function stripDataUrlPrefix(value) {
+  return String(value || "").replace(/^data:[^;]+;base64,/i, "");
+}
+
+function shouldRetryOllamaImageWithoutReference(err) {
+  const statusCode = Number(err?.statusCode || 0);
+  if (![400, 415, 422].includes(statusCode)) return false;
+  const message = String(err?.message || "").toLowerCase();
+  return /image|multimodal|vision|unsupported|invalid|input/.test(message);
+}
+
+function buildOllamaImagePromptWithoutReference(prompt) {
+  return String(prompt || "")
+    .replace(/Use the attached input image as the only canonical character reference\./g, "")
+    .replace(/attached input image/gi, "protected character guidance")
+    .trim();
 }
 
 async function callOpenAIImageEdit({ baseImagePath, prompt }) {
@@ -6224,10 +6554,16 @@ async function readPlatformEncryptedArtifactBytes({ agent, artifact }) {
     if (fallback) return fallback;
   }
 
-  return readWalrusBlobBytes({
-    blobId: artifact.walrusBlobId,
-    fileName: `${safeUploadName(agent.id)}.platform-encryption.json`,
-  });
+  try {
+    return await readWalrusBlobBytes({
+      blobId: artifact.walrusBlobId,
+      fileName: `${safeUploadName(agent.id)}.platform-encryption.json`,
+    });
+  } catch (err) {
+    const fallback = await readProtectedRuntimeFallbackArtifact({ agent });
+    if (fallback) return fallback;
+    throw err;
+  }
 }
 
 async function readLocalWalrusFallbackArtifact({ agent, blobId }) {
@@ -6991,6 +7327,51 @@ function applyAgentResultAttachmentResolution(result, resolution) {
   }
 }
 
+async function maybeAttachLocalSavedAgentResult({ args = {}, agent, callId, result }) {
+  if (!shouldSaveLocalAgentResult(args) || !result || typeof result !== "object") {
+    return null;
+  }
+
+  const outputText = typeof result.outputText === "string" ? result.outputText.trim() : "";
+  const mimeType = outputText ? "text/plain" : "application/json";
+  const extension = outputText ? "txt" : "json";
+  const content = outputText || JSON.stringify(redactAttachmentDataForTokenEstimate(result), null, 2);
+  const resultDir = resolve(".hireme/gateway/results", safeUploadName(callId));
+  await mkdir(resultDir, { recursive: true });
+  const filename = `${safeUploadName(agent?.id || "agent")}-result.${extension}`;
+  const outputPath = join(resultDir, filename);
+  await writeFile(outputPath, content, "utf8");
+
+  const localAttachment = {
+    path: outputPath,
+    filename,
+    mimeType,
+    source: "gateway_local_result_save",
+  };
+  if (Array.isArray(result.attachments)) {
+    result.attachments.push(localAttachment);
+  } else {
+    result.attachments = [localAttachment];
+  }
+  result.localResultSaved = {
+    path: outputPath,
+    filename,
+    mimeType,
+  };
+  return localAttachment;
+}
+
+function shouldSaveLocalAgentResult(args = {}) {
+  const requested = readOptionalBoolean(
+    args.save_local_result ??
+      args.saveLocalResult ??
+      args.save_result_file ??
+      args.saveResultFile,
+  );
+  if (requested !== null) return requested;
+  return /^(1|true|yes)$/i.test(process.env.HIREME_SAVE_LOCAL_AGENT_RESULTS || "");
+}
+
 function readAgentResultFileReferences(result) {
   if (!result || typeof result !== "object") return [];
   const references = [];
@@ -7285,6 +7666,26 @@ function readInlineAttachmentBytes(reference) {
   return null;
 }
 
+async function readProtectedRuntimeFallbackArtifact({ agent }) {
+  if (!/^(1|true|yes)$/i.test(process.env.HIREME_ALLOW_LOCAL_WALRUS_FALLBACK || "")) {
+    return null;
+  }
+  const fallbackPath = resolve(
+    ".hireme/walrus/protected-runtime",
+    `${safeUploadName(agent.id)}.platform-encryption.json`,
+  );
+  const info = await stat(fallbackPath).catch(() => null);
+  if (!info?.isFile()) return null;
+  const bytes = await readFile(fallbackPath);
+  return {
+    bytes,
+    outPath: fallbackPath,
+    digest: `sha256:${sha256Hex(bytes)}`,
+    sizeBytes: bytes.length,
+    source: "local-protected-runtime-fallback",
+  };
+}
+
 function readAttachmentFilename(reference) {
   if (!reference || typeof reference !== "object") return "";
   return readStringField(reference, ["filename", "fileName", "name", "title"]);
@@ -7449,8 +7850,18 @@ function guessMimeType(filePath) {
   return mimeTypes[extension] || "application/octet-stream";
 }
 
+function parseImageSize(value, fallback = { width: 1024, height: 1024 }) {
+  const match = /^(\d{2,5})x(\d{2,5})$/i.exec(String(value || "").trim());
+  if (!match) return fallback;
+  const width = Math.max(1, Math.trunc(Number(match[1]) || fallback.width));
+  const height = Math.max(1, Math.trunc(Number(match[2]) || fallback.height));
+  return { width, height };
+}
+
 function prepareSealedHarnessUpload(args = {}) {
-  const epochs = args.epochs || 3;
+  const epochs =
+    Number.parseInt(args.epochs || args.storage_epochs || defaultAgentStorageEpochs, 10) ||
+    defaultAgentStorageEpochs;
   const agentId = args.agent_id || "new-agent";
   return {
     gatewayCall: true,
@@ -7682,7 +8093,10 @@ async function createAgentFromArchiveUpload({
       agentId,
       encryptedPath,
       ciphertextDigest,
-      epochs: Number.parseInt(metadata.epochs || metadata.storage_epochs || "3", 10),
+      epochs: Number.parseInt(
+        metadata.epochs || metadata.storage_epochs || defaultAgentStorageEpochs,
+        10,
+      ),
     });
 
     const registration = await registerAgentFromMcp({
@@ -7710,6 +8124,7 @@ async function createAgentFromArchiveUpload({
       seal_threshold: sealed.sealMetadata.threshold,
       seal_key_server_ids: sealed.sealMetadata.keyServerIds,
       storage_network: storage.network,
+      storage_epochs: storage.storageEpochs,
       harness_archive_format: harnessArchiveFormat,
       archive_format: harnessArchiveFormat,
       metadata: {
@@ -7724,6 +8139,7 @@ async function createAgentFromArchiveUpload({
         plaintextArchiveDigest,
         plaintextArchiveSizeBytes: plaintextArchive.byteLength,
         storageProvider: storage.provider,
+        storageEpochs: storage.storageEpochs,
         walrusStoreError: storage.error || null,
         localFallbackPath: storage.localPath || null,
       },
@@ -7755,6 +8171,7 @@ async function createAgentFromArchiveUpload({
         entryCount: archive.entries.length,
         containsAgentsMd: archive.containsAgentsMd,
         walrusStoreError: storage.error || null,
+        storageEpochs: storage.storageEpochs,
       },
       protectedArtifact: {
         ...registration.protectedArtifact,
@@ -7766,6 +8183,7 @@ async function createAgentFromArchiveUpload({
         folderManifestDigest,
         archiveFormat: harnessArchiveFormat,
         harnessArchiveFormat,
+        storageEpochs: storage.storageEpochs,
       },
     };
   } finally {
@@ -7923,6 +8341,9 @@ async function registerAgentFromMcp(args = {}) {
         args.metadata?.archiveFormat ||
         "tar.gz",
     ),
+    storageEpochs:
+      Number.parseInt(args.storage_epochs || args.storageEpochs || defaultAgentStorageEpochs, 10) ||
+      defaultAgentStorageEpochs,
     pricePerCallUsd: pricePer1MTokensSui,
     pricePer1MTokensSui,
     visibility:
@@ -8193,6 +8614,7 @@ async function persistRegisteredAgentToSupabase({ agent, artifact, args }) {
             ciphertextFormat: artifact.ciphertextFormat,
             archiveFormat: artifact.archiveFormat,
             harnessArchiveFormat: artifact.archiveFormat,
+            storageEpochs: artifact.storageEpochs,
             platformKmsKeyId: artifact.platformKmsKeyId,
             platformPolicyId: artifact.platformPolicyId || artifact.policyId,
             platformEncryptionId:
@@ -8227,12 +8649,14 @@ async function persistRegisteredAgentToSupabase({ agent, artifact, args }) {
           archive_format: artifact.archiveFormat,
           storage_provider: "walrus",
           storage_network: artifact.network.replace(/^walrus-/, ""),
+          storage_epochs: artifact.storageEpochs,
           metadata: {
             source: "protected_artifacts_public_registry",
             agentVersionId: versionRow.id,
             ciphertextDigest: artifact.ciphertextDigest,
             folderManifestDigest: artifact.folderManifestDigest,
             archiveFormat: artifact.archiveFormat,
+            storageEpochs: artifact.storageEpochs,
           },
         },
         { onConflict: "walrus_blob_id" },
@@ -9598,6 +10022,21 @@ function isOllamaConfigured() {
   return !ollamaDisabled && Boolean(process.env.OLLAMA_API_KEY);
 }
 
+function isOllamaImageConfigured() {
+  if (ollamaDisabled) return false;
+  if (isLocalOllamaBaseUrl(defaultOllamaBaseUrl)) return true;
+  return Boolean(process.env.OLLAMA_API_KEY);
+}
+
+function isLocalOllamaBaseUrl(baseUrl) {
+  try {
+    const parsed = new URL(String(baseUrl || ""));
+    return ["localhost", "127.0.0.1", "::1"].includes(parsed.hostname);
+  } catch {
+    return false;
+  }
+}
+
 function buildGatewayExecutorInput({
   agent,
   task,
@@ -9758,6 +10197,12 @@ function readOllamaOutputText(response) {
   if (typeof messageContent === "string" && messageContent.trim()) {
     return messageContent.trim();
   }
+  for (const choice of response?.choices || []) {
+    const content = choice?.message?.content || choice?.text;
+    if (typeof content === "string" && content.trim()) {
+      return content.trim();
+    }
+  }
   if (typeof response?.response === "string" && response.response.trim()) {
     return response.response.trim();
   }
@@ -9765,14 +10210,29 @@ function readOllamaOutputText(response) {
 }
 
 function readOllamaUsage(response, fallbackInputTokens, fallbackOutputTokens) {
+  const usage = response?.usage || {};
   return {
     inputTokens: Math.max(
       0,
-      Math.trunc(Number(response?.prompt_eval_count ?? fallbackInputTokens) || 0),
+      Math.trunc(
+        Number(
+          response?.prompt_eval_count ??
+            usage.prompt_tokens ??
+            usage.input_tokens ??
+            fallbackInputTokens,
+        ) || 0,
+      ),
     ),
     outputTokens: Math.max(
       0,
-      Math.trunc(Number(response?.eval_count ?? fallbackOutputTokens) || 0),
+      Math.trunc(
+        Number(
+          response?.eval_count ??
+            usage.completion_tokens ??
+            usage.output_tokens ??
+            fallbackOutputTokens,
+        ) || 0,
+      ),
     ),
   };
 }
@@ -9912,61 +10372,22 @@ async function callOllamaAgent({
     harnessRuntimeContext,
     conversationContext,
   });
-  const body = {
-    model: defaultOllamaModel,
-    stream: false,
-    messages: [
-      {
-        role: "system",
-        content: buildGatewayExecutorInstructions(responseMode),
-      },
-      {
-        role: "user",
-        content: JSON.stringify(input, null, 2),
-      },
-    ],
-    options: {
-      num_predict: defaultModelMaxOutputTokens,
+  const messages = [
+    {
+      role: "system",
+      content: buildGatewayExecutorInstructions(responseMode),
     },
-  };
+    {
+      role: "user",
+      content: JSON.stringify(input, null, 2),
+    },
+  ];
 
   try {
-    const response = await fetch(`${defaultOllamaBaseUrl}/chat`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${process.env.OLLAMA_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(body),
+    const { data, endpoint } = await fetchOllamaChatCompletion({
+      messages,
       signal: controller.signal,
     });
-    const responseText = await response.text();
-    let data = null;
-    try {
-      data = responseText ? JSON.parse(responseText) : null;
-    } catch {
-      data = { rawTextDigest: `sha256:${sha256Hex(responseText)}` };
-    }
-
-    if (!response.ok) {
-      const message =
-        data?.error ||
-        data?.message ||
-        `Ollama Cloud API returned ${response.status}`;
-      writeGatewayLog("ollama_agent_call_failed", {
-        callId,
-        agentId: agent.id,
-        statusCode: response.status,
-        message,
-        responseDigest: `sha256:${sha256Hex(responseText || "")}`,
-      });
-      return {
-        status: "failed",
-        provider: "ollama",
-        statusCode: response.status,
-        message,
-      };
-    }
 
     const outputText = readOllamaOutputText(data);
     if (!outputText) {
@@ -10005,6 +10426,7 @@ async function callOllamaAgent({
     const result = {
       type: "ollama_agent_result",
       provider: "ollama",
+      model: defaultOllamaModel,
       outputText,
       outputTextDigest: `sha256:${sha256Hex(outputText)}`,
       protectedGuidanceApplied: true,
@@ -10025,6 +10447,8 @@ async function callOllamaAgent({
     return {
       status: "completed",
       provider: "ollama",
+      endpointType: endpoint.type,
+      model: defaultOllamaModel,
       result,
       usage,
       latencyMs,
@@ -10034,6 +10458,9 @@ async function callOllamaAgent({
     writeGatewayLog("ollama_agent_call_failed", {
       callId,
       agentId: agent.id,
+      statusCode: err?.statusCode || null,
+      endpointType: err?.endpointType || null,
+      responseDigest: err?.responseDigest || null,
       message,
     });
     return {
@@ -10044,6 +10471,96 @@ async function callOllamaAgent({
   } finally {
     clearTimeout(timeout);
   }
+}
+
+async function fetchOllamaChatCompletion({ messages, signal }) {
+  const headers = {
+    Authorization: `Bearer ${process.env.OLLAMA_API_KEY}`,
+    "Content-Type": "application/json",
+  };
+  let lastFailure = null;
+
+  for (const endpoint of ollamaChatEndpointCandidates(defaultOllamaBaseUrl)) {
+    const body =
+      endpoint.type === "openai-compatible"
+        ? {
+            model: defaultOllamaModel,
+            stream: false,
+            messages,
+            max_tokens: defaultModelMaxOutputTokens,
+          }
+        : {
+            model: defaultOllamaModel,
+            stream: false,
+            messages,
+            options: {
+              num_predict: defaultModelMaxOutputTokens,
+            },
+          };
+    const response = await fetch(endpoint.url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+      signal,
+    });
+    const responseText = await response.text();
+    let data = null;
+    try {
+      data = responseText ? JSON.parse(responseText) : null;
+    } catch {
+      data = { rawTextDigest: `sha256:${sha256Hex(responseText)}` };
+    }
+
+    if (response.ok) {
+      return { data, responseText, endpoint };
+    }
+
+    const message =
+      data?.error?.message ||
+      data?.error ||
+      data?.message ||
+      `Ollama API returned ${response.status}`;
+    lastFailure = {
+      statusCode: response.status,
+      message,
+      responseDigest: `sha256:${sha256Hex(responseText || "")}`,
+      endpointType: endpoint.type,
+    };
+
+    if (!shouldTryNextOllamaEndpoint(response.status)) break;
+  }
+
+  const err = new Error(lastFailure?.message || "Ollama API call failed.");
+  err.statusCode = lastFailure?.statusCode;
+  err.endpointType = lastFailure?.endpointType;
+  err.responseDigest = lastFailure?.responseDigest;
+  throw err;
+}
+
+function ollamaChatEndpointCandidates(baseUrl) {
+  const base = String(baseUrl || "https://ollama.com").replace(/\/$/, "");
+  if (/\/api$/i.test(base)) {
+    const root = base.replace(/\/api$/i, "");
+    return [
+      { type: "native", url: `${base}/chat` },
+      { type: "openai-compatible", url: `${root}/v1/chat/completions` },
+    ];
+  }
+  if (/\/v1$/i.test(base)) {
+    const root = base.replace(/\/v1$/i, "");
+    return [
+      { type: "openai-compatible", url: `${base}/chat/completions` },
+      { type: "native", url: `${root}/api/chat` },
+    ];
+  }
+  return [
+    { type: "native", url: `${base}/api/chat` },
+    { type: "openai-compatible", url: `${base}/v1/chat/completions` },
+  ];
+}
+
+function shouldTryNextOllamaEndpoint(statusCode) {
+  return statusCode === 404 || statusCode === 405;
 }
 
 async function callOpenAIAgent({
@@ -11247,7 +11764,8 @@ async function storeProtectedEncryptedArchive({
   ciphertextDigest,
   epochs,
 }) {
-  const normalizedEpochs = Number.isInteger(epochs) && epochs > 0 ? epochs : 3;
+  const normalizedEpochs =
+    Number.isInteger(epochs) && epochs > 0 ? epochs : defaultAgentStorageEpochs;
   try {
     const upload = await storeFileOnWalrus({
       filePath: encryptedPath,
@@ -11264,6 +11782,7 @@ async function storeProtectedEncryptedArchive({
         upload.suiObjectId ||
         `0x${sha256Hex(`${upload.blobId}:sui-object`).slice(0, 64)}`,
       raw: upload.result,
+      storageEpochs: normalizedEpochs,
     };
   } catch (err) {
     if (isWalrusUploadRequired()) {
@@ -11297,6 +11816,7 @@ async function storeProtectedEncryptedArchive({
       blobId,
       suiObjectId: `0x${sha256Hex(`${blobId}:sui-object`).slice(0, 64)}`,
       localPath,
+      storageEpochs: normalizedEpochs,
       error: err instanceof Error ? err.message : String(err),
     };
   }
