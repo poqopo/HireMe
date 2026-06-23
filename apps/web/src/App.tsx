@@ -59,6 +59,7 @@ import {
   UserRound,
   WalletCards,
   X,
+  AlertTriangle,
   type LucideIcon,
 } from "lucide-react";
 import { categories } from "@/lib/agents";
@@ -206,7 +207,10 @@ function revealDelayStyle(delayMs: number): CSSProperties {
 const authStorageKey = "hireme-demo-auth-user";
 const accessStorageKey = "hireme-demo-agent-access-v1";
 const createdAgentsStorageKey = "hireme-demo-created-agents-v1";
-const tryChatTranscriptsStorageKey = "hireme-demo-try-chat-transcripts-v1";
+const tryChatTranscriptsStorageKey = "hireme-demo-try-chat-transcripts-v2";
+const legacyTryChatTranscriptsStorageKeys = [
+  "hireme-demo-try-chat-transcripts-v1",
+];
 const typicalOutputStorageBucket =
   import.meta.env.VITE_HIREME_TYPICAL_OUTPUT_BUCKET || "hireme-agent-media";
 const gatewayUrl = (
@@ -468,6 +472,12 @@ type GatewayAgentCallResponse = {
     configured?: boolean;
     conversationId?: string;
     memoryJobId?: string | null;
+    blobId?: string | null;
+    indexJobId?: string | null;
+    error?: {
+      code?: string;
+      message?: string;
+    } | null;
   };
   authorization?: {
     trialCallsRemaining?: number | null;
@@ -487,6 +497,7 @@ type TryChatMessage = {
   createdAt: string;
   pending?: boolean;
   error?: boolean;
+  memWalBlobId?: string | null;
   memWalStatus?: TryMemWalDisplayStatus | null;
   responseMode?: string | null;
 };
@@ -498,13 +509,15 @@ type TryChatAttachment = {
   label: string;
 };
 
-type TryMemWalDisplayStatus = "pending" | "stored";
+type TryMemWalDisplayStatus = "pending" | "stored" | "failed";
 
 type TryConversationContext = {
   agentId: string;
   conversationId: string;
   memWalStatus: string;
   conversationStored: boolean | null;
+  mcpConversationStatus: string | null;
+  memWalBlobId?: string | null;
   userMemWalStatus: string | null;
   memoryJobId?: string | null;
   waitForMemory?: boolean | null;
@@ -1734,8 +1747,8 @@ function mergeStreamEventIntoCall(
       mcpConversation: data.mcpConversation || current?.mcpConversation,
       memory: {
         ...(current?.memory || {}),
-        conversationStored: data.mcpConversation?.stored ?? true,
-        status: "stored",
+        conversationStored: data.mcpConversation?.stored ?? null,
+        status: data.mcpConversation?.stored ? "stored" : "pending",
       },
       userMemWal: data.userMemWal || current?.userMemWal,
     };
@@ -1783,7 +1796,7 @@ function tryConversationId(
   agent: Agent,
   user: AuthUser,
 ) {
-  return `web-try-${access.hirerId || hirerIdFor(user)}-${agent.id}`;
+  return `web-try-v2-${access.hirerId || hirerIdFor(user)}-${agent.id}`;
 }
 
 function extractAgentCallText(call: GatewayAgentCallResponse) {
@@ -1838,6 +1851,7 @@ function tryChatTranscriptKey(
 
 function readTryChatTranscript(key: string): TryChatTranscriptRecord | null {
   try {
+    clearLegacyTryChatTranscripts();
     const raw = window.localStorage.getItem(tryChatTranscriptsStorageKey);
     if (!raw) return null;
     const store = JSON.parse(raw) as Record<string, TryChatTranscriptRecord>;
@@ -1850,6 +1864,16 @@ function readTryChatTranscript(key: string): TryChatTranscriptRecord | null {
     };
   } catch {
     return null;
+  }
+}
+
+function clearLegacyTryChatTranscripts() {
+  try {
+    legacyTryChatTranscriptsStorageKeys.forEach((key) => {
+      window.localStorage.removeItem(key);
+    });
+  } catch {
+    // Chat still works if browser storage is unavailable.
   }
 }
 
@@ -1916,15 +1940,18 @@ function buildTryConversationContext({
       call.conversationId ||
       conversationId,
     memWalStatus:
-      call.memory?.status ||
-      call.mcpConversation?.status ||
-      call.userMemWal?.status ||
-      call.ledgerEvent?.status ||
-      "unknown",
+      call.mcpConversation?.stored === true
+        ? "stored"
+        : call.mcpConversation?.status ||
+          call.memory?.status ||
+          call.ledgerEvent?.status ||
+          "unknown",
     conversationStored:
       typeof call.mcpConversation?.stored === "boolean"
         ? call.mcpConversation.stored
         : call.memory?.conversationStored ?? null,
+    mcpConversationStatus: call.mcpConversation?.status || null,
+    memWalBlobId: call.mcpConversation?.blobId || null,
     userMemWalStatus: call.userMemWal?.status || null,
     memoryJobId:
       call.mcpConversation?.memoryJobId ||
@@ -1939,17 +1966,18 @@ function buildTryConversationContext({
 function tryMemWalDisplayStatus(
   conversation: TryConversationContext,
 ): TryMemWalDisplayStatus | null {
-  if (
-    conversation.memWalStatus === "stored" ||
-    conversation.conversationStored === true ||
-    conversation.userMemWalStatus === "stored"
-  ) {
+  if (conversation.conversationStored === true) {
     return "stored";
   }
   if (
+    conversation.mcpConversationStatus === "failed" ||
+    conversation.memWalStatus === "failed"
+  ) {
+    return "failed";
+  }
+  if (
     conversation.memWalStatus === "pending" ||
-    conversation.conversationStored === false ||
-    conversation.userMemWalStatus === "pending"
+    conversation.conversationStored === false
   ) {
     return "pending";
   }
@@ -2093,10 +2121,9 @@ function relativeGatewayUrl(path: string) {
   return `${gatewayUrl}${path}`;
 }
 
-function formatNullableStoredStatus(value: boolean | null) {
-  if (value === true) return "stored";
-  if (value === false) return "pending";
-  return "not requested";
+function walrusExplorerBlobUrl(blobId?: string | null) {
+  if (!blobId) return null;
+  return `https://walruscan.com/mainnet/blob/${encodeURIComponent(blobId)}`;
 }
 
 function buildTryCodexSnippet({
@@ -2111,28 +2138,17 @@ function buildTryCodexSnippet({
   user: AuthUser;
 }) {
   const hirerId = access.hirerId || hirerIdFor(user);
-  if (!conversation) {
-    return `hireme_call_agent_stream({\n  "agent_id": "${agent.id}",\n  "task": "<your task>",\n  "hirer_id": "${hirerId}",\n  "hire_receipt_object_id": "${access.receiptObjectId}",\n  "wait_for_memory": false\n})`;
-  }
-
+  const conversationId =
+    conversation?.conversationId || tryConversationId(access, agent, user);
   const lines = [
-    `  "agent_id": "${conversation.agentId}"`,
-    `  "task": "<continue from the web chat>"`,
-    `  "hirer_id": "${hirerId}"`,
-    `  "hire_receipt_object_id": "${access.receiptObjectId}"`,
-    `  "conversation_id": "${conversation.conversationId}"`,
-    `  "wait_for_memory": false`,
+    "Ask HireMe to continue this web chat.",
+    "",
+    `  Agent: ${conversation?.agentId || agent.id}`,
+    `  Conversation id: ${conversationId}`,
+    `  User: ${user.email || hirerId}`,
+    "  Request: ",
   ];
-  const notes = [
-    `// memWal: ${conversation.memWalStatus}`,
-    `// conversation: ${formatNullableStoredStatus(conversation.conversationStored)}`,
-    `// user memWal: ${conversation.userMemWalStatus || "unknown"}`,
-  ];
-  if (conversation.memoryJobId) {
-    notes.push(`// memory_job_id: ${conversation.memoryJobId}`);
-  }
-
-  return `hireme_call_agent_stream({\n${lines.join(",\n")}\n})\n\n${notes.join("\n")}`;
+  return lines.join("\n");
 }
 
 async function copyTextToClipboard(value: string) {
@@ -5870,10 +5886,29 @@ function TryAgentChatPanel({
   }) {
     if (activeMemoryPollsRef.current.has(memoryJobId)) return;
     activeMemoryPollsRef.current.add(memoryJobId);
+    const markMemoryPollFailed = () => {
+      setConversationContext((current) =>
+        current?.memoryJobId === memoryJobId
+          ? {
+              ...current,
+              conversationStored: false,
+              mcpConversationStatus: "failed",
+              memWalStatus: "failed",
+            }
+          : current,
+      );
+      setMessages((current) =>
+        current.map((message) =>
+          message.id === messageId || message.memWalStatus === "pending"
+            ? { ...message, memWalStatus: "failed" }
+            : message,
+        ),
+      );
+    };
 
     try {
-      for (let attempt = 0; attempt < 8; attempt += 1) {
-        await wait(1500 + attempt * 500);
+      for (let attempt = 0; attempt < 24; attempt += 1) {
+        await wait(Math.min(5000, 1500 + attempt * 500));
         if (!isMountedRef.current) return;
 
         try {
@@ -5889,20 +5924,39 @@ function TryAgentChatPanel({
             setMessages((current) =>
               current.map((message) => {
                 if (message.id === messageId) {
-                  return { ...message, memWalStatus: nextStatus };
+                  return {
+                    ...message,
+                    memWalBlobId: nextConversationContext.memWalBlobId,
+                    memWalStatus: nextStatus,
+                  };
                 }
                 if (nextStatus === "stored" && message.memWalStatus === "pending") {
-                  return { ...message, memWalStatus: "stored" };
+                  return {
+                    ...message,
+                    memWalBlobId: nextConversationContext.memWalBlobId,
+                    memWalStatus: "stored",
+                  };
+                }
+                if (nextStatus === "failed" && message.memWalStatus === "pending") {
+                  return { ...message, memWalStatus: "failed" };
                 }
                 return message;
               }),
             );
           }
-          if (nextStatus === "stored" || result.status === "failed") return;
+          if (
+            nextStatus === "stored" ||
+            nextStatus === "failed" ||
+            result.status === "failed"
+          ) {
+            return;
+          }
         } catch {
+          markMemoryPollFailed();
           return;
         }
       }
+      markMemoryPollFailed();
     } finally {
       activeMemoryPollsRef.current.delete(memoryJobId);
     }
@@ -5925,6 +5979,7 @@ function TryAgentChatPanel({
     conversationContext?.conversationStored,
     conversationContext?.memoryJobId,
     conversationContext?.memWalStatus,
+    conversationContext?.mcpConversationStatus,
     conversationContext?.userMemWalStatus,
     messages,
   ]);
@@ -6011,6 +6066,7 @@ function TryAgentChatPanel({
                 text: extractAgentCallText(call),
               }
             : {}),
+          memWalBlobId: nextConversationContext.memWalBlobId,
           memWalStatus,
         });
         return { memWalStatus, nextConversationContext };
@@ -6103,6 +6159,7 @@ function TryAgentChatPanel({
             ? {
                 ...message,
                 attachments: extractTryImageAttachments(result),
+                memWalBlobId: nextConversationContext.memWalBlobId,
                 memWalStatus,
                 text: extractAgentCallText(result),
                 pending: false,
@@ -6210,7 +6267,10 @@ function TryAgentChatPanel({
                     <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] font-medium uppercase tracking-[0.08em] opacity-75">
                       {message.responseMode ? <span>{message.responseMode}</span> : null}
                       {message.memWalStatus ? (
-                        <TryMemWalMessageStatus status={message.memWalStatus} />
+                        <TryMemWalMessageStatus
+                          blobId={message.memWalBlobId}
+                          status={message.memWalStatus}
+                        />
                       ) : null}
                     </div>
                   ) : null}
@@ -6277,13 +6337,13 @@ function TryAgentChatPanel({
                       {callSnippet}
                     </code>
                     <button
-                      aria-label="Copy hireme_call_agent_stream"
+                      aria-label="Copy Run in Codex prompt"
                       className="absolute right-2 top-2 inline-flex size-7 items-center justify-center rounded-md border border-border bg-white text-[#273951] shadow-sm transition hover:bg-[#f8fafc]"
                       onClick={() => void handleCopyCallSnippet()}
                       title={
                         isCommandCopied
                           ? "Copied"
-                          : "Copy hireme_call_agent_stream"
+                          : "Copy Run in Codex prompt"
                       }
                       type="button"
                     >
@@ -6309,15 +6369,43 @@ function TryAgentChatPanel({
 }
 
 function TryMemWalMessageStatus({
+  blobId,
   status,
 }: {
+  blobId?: string | null;
   status: TryMemWalDisplayStatus;
 }) {
   if (status === "stored") {
+    const explorerUrl = walrusExplorerBlobUrl(blobId);
+    if (explorerUrl) {
+      return (
+        <a
+          className="inline-flex items-center gap-1 text-[#168a58] transition hover:text-[#0f6f47]"
+          href={explorerUrl}
+          rel="noreferrer"
+          target="_blank"
+          title={`Open Walrus blob ${blobId}`}
+        >
+          <CheckCircle2 className="size-3.5" />
+          memWal
+          <ExternalLink className="size-3" />
+        </a>
+      );
+    }
+
     return (
       <span className="inline-flex items-center gap-1 text-[#168a58]" title="memWal saved">
         <CheckCircle2 className="size-3.5" />
         memWal
+      </span>
+    );
+  }
+
+  if (status === "failed") {
+    return (
+      <span className="inline-flex items-center gap-1 text-[#b45309]" title="memWal save failed">
+        <AlertTriangle className="size-3.5" />
+        memWal failed
       </span>
     );
   }

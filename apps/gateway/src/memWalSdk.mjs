@@ -1,21 +1,6 @@
 import { createHash } from "node:crypto";
 import { MemWal } from "@mysten-incubation/memwal";
 
-const defaultServerUrl =
-  process.env.MEMWAL_SERVER_URL ||
-  process.env.HIREME_MEMWAL_SERVER_URL ||
-  "https://relayer.memory.walrus.xyz";
-const defaultNamespacePrefix =
-  process.env.HIREME_MEMWAL_NAMESPACE_PREFIX || "hireme-mcp";
-const defaultRecallLimit = Math.max(
-  1,
-  Math.trunc(Number(process.env.HIREME_MEMWAL_RECALL_LIMIT || "8") || 8),
-);
-const defaultRememberTimeoutMs = Math.max(
-  5_000,
-  Math.trunc(Number(process.env.HIREME_MEMWAL_REMEMBER_TIMEOUT_MS || "75000") || 75_000),
-);
-
 let cachedClient = null;
 let cachedConfigKey = "";
 
@@ -216,14 +201,14 @@ export async function appendMcpConversationTurn({
 export async function readMcpConversationSession({
   hirerId,
   sessionId,
-  limit = defaultRecallLimit,
+  limit = null,
   query,
 }) {
   const client = getMemWalClient();
   const safeHirerId = normalizeNamespaceSegment(hirerId || "local-hirer");
   const safeSessionId = normalizeNamespaceSegment(sessionId || "default");
   const namespace = conversationNamespace(safeHirerId, safeSessionId);
-  const recallLimit = normalizeLimit(limit, defaultRecallLimit);
+  const recallLimit = normalizeLimit(limit, defaultRecallLimit());
 
   if (!client) {
     return {
@@ -378,22 +363,27 @@ function getMemWalClient() {
 
 function readMemWalSdkConfig() {
   return {
-    key:
-      process.env.MEMWAL_PRIVATE_KEY ||
-      process.env.MEMWAL_DELEGATE_KEY ||
-      process.env.HIREME_MEMWAL_PRIVATE_KEY ||
-      process.env.HIREME_MEMWAL_DELEGATE_KEY ||
-      "",
+    key: resolveMemWalSdkKey(),
     accountId:
       process.env.MEMWAL_ACCOUNT_ID ||
       process.env.HIREME_MEMWAL_ACCOUNT_ID ||
       "",
-    serverUrl: defaultServerUrl,
+    serverUrl: defaultServerUrl(),
     namespace:
       process.env.MEMWAL_NAMESPACE ||
       process.env.HIREME_MEMWAL_NAMESPACE ||
-      defaultNamespacePrefix,
+      defaultNamespacePrefix(),
   };
+}
+
+function resolveMemWalSdkKey() {
+  return (
+    process.env.MEMWAL_DELEGATE_KEY ||
+    process.env.HIREME_MEMWAL_DELEGATE_KEY ||
+    process.env.MEMWAL_PRIVATE_KEY ||
+    process.env.HIREME_MEMWAL_PRIVATE_KEY ||
+    ""
+  );
 }
 
 async function rememberAndMaybeWait(client, text, namespace, options = {}) {
@@ -406,7 +396,7 @@ async function rememberAndMaybeWait(client, text, namespace, options = {}) {
   }
   return decorateRememberJob(
     await client.rememberAndWait(text, namespace, {
-      timeoutMs: defaultRememberTimeoutMs,
+      timeoutMs: defaultRememberTimeoutMs(),
       pollIntervalMs: Math.max(
         250,
         Math.trunc(Number(process.env.HIREME_MEMWAL_POLL_INTERVAL_MS || "1000") || 1000),
@@ -537,11 +527,11 @@ function readLineValue(text, key) {
 }
 
 function conversationNamespace(hirerId, sessionId) {
-  return `${defaultNamespacePrefix}:${hirerId}:${sessionId}`;
+  return `${defaultNamespacePrefix()}:${hirerId}:${sessionId}`;
 }
 
 function conversationIndexNamespace(hirerId) {
-  return `${defaultNamespacePrefix}:${hirerId}:index`;
+  return `${defaultNamespacePrefix()}:${hirerId}:index`;
 }
 
 function notConfiguredConversationResult({
@@ -619,6 +609,32 @@ function sanitizeMetadata(metadata) {
 
 function normalizeLimit(value, fallback) {
   return Math.min(100, Math.max(1, Math.trunc(Number(value ?? fallback) || fallback)));
+}
+
+function defaultServerUrl() {
+  return (
+    process.env.MEMWAL_SERVER_URL ||
+    process.env.HIREME_MEMWAL_SERVER_URL ||
+    "https://relayer.memory.walrus.xyz"
+  );
+}
+
+function defaultNamespacePrefix() {
+  return process.env.HIREME_MEMWAL_NAMESPACE_PREFIX || "hireme-mcp";
+}
+
+function defaultRecallLimit() {
+  return Math.max(
+    1,
+    Math.trunc(Number(process.env.HIREME_MEMWAL_RECALL_LIMIT || "8") || 8),
+  );
+}
+
+function defaultRememberTimeoutMs() {
+  return Math.max(
+    5_000,
+    Math.trunc(Number(process.env.HIREME_MEMWAL_REMEMBER_TIMEOUT_MS || "75000") || 75_000),
+  );
 }
 
 function readOptionalNumber(value) {

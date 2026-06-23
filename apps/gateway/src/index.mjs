@@ -33,6 +33,7 @@ import {
 import {
   appendMcpConversationTurn,
   createMcpConversationSession,
+  isMemWalSdkConfigured,
   listMcpConversationSessions,
   readMcpConversationSession,
 } from "./memWalSdk.mjs";
@@ -505,6 +506,7 @@ const server = createServer(async (req, res) => {
           (process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL) &&
             process.env.SUPABASE_SERVICE_ROLE_KEY,
         ),
+        memWalSdkConfigured: isMemWalSdkConfigured(),
         walrusNetwork: process.env.WALRUS_NETWORK || "testnet",
         walrusUploadRequired: isWalrusUploadRequired(),
         walrusSdkConfigured: true,
@@ -5861,7 +5863,7 @@ async function persistProtectedAgentMemoryAndLedger({
         responseDigest,
         userMessage: args.task || "",
         assistantMessage: extractMcpConversationAssistantMessage(safeResult, jsonOutput),
-        waitForStore: shouldWaitForMemory(args),
+        waitForStore: true,
         metadata: {
           responseMode,
           executionMode,
