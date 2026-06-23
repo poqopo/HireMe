@@ -5921,6 +5921,24 @@ function TryAgentChatPanel({
   }, []);
 
   useEffect(() => {
+    setMessages((current) => {
+      const latestAssistantId = latestAssistantMessageId(current);
+      let changed = false;
+      const nextMessages = current.map((message) => {
+        const nextMessage = recoverStoredTryChatMessage({
+          conversationContext,
+          isLatestAssistant: message.id === latestAssistantId,
+          message,
+          transcriptUpdatedAt: message.createdAt,
+        });
+        if (nextMessage !== message) changed = true;
+        return nextMessage;
+      });
+      return changed ? nextMessages : current;
+    });
+  }, [conversationContext]);
+
+  useEffect(() => {
     return () => {
       isMountedRef.current = false;
     };
