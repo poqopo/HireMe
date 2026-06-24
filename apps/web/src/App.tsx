@@ -526,6 +526,20 @@ type TryConversationContext = {
   waitForMemory?: boolean | null;
 };
 
+type TryClientConversationContext = {
+  agentId: string;
+  conversationId: string;
+  messages: Array<{
+    role: "user" | "assistant";
+    text: string;
+    createdAt?: string;
+    memWalStatus?: TryMemWalDisplayStatus | null;
+    memoryJobId?: string | null;
+  }>;
+  source: "web_try_local_transcript";
+  updatedAt: string;
+};
+
 type TryChatTranscriptRecord = {
   conversationContext: TryConversationContext | null;
   messages: TryChatMessage[];
@@ -1607,6 +1621,7 @@ async function loadGatewayMyAgentAccess(user: AuthUser) {
 async function callTryAgent({
   access,
   agent,
+  clientConversationContext,
   conversationId,
   onEvent,
   task,
@@ -1614,6 +1629,7 @@ async function callTryAgent({
 }: {
   access: AgentAccessRecord;
   agent: Agent;
+  clientConversationContext?: TryClientConversationContext | null;
   conversationId: string;
   onEvent?: (event: GatewayAgentStreamEvent) => void;
   task: string;
@@ -1631,6 +1647,7 @@ async function callTryAgent({
       email: user.email,
       response_mode: "direct_answer",
       conversation_id: conversationId,
+      client_conversation_context: clientConversationContext,
       conversation_context_limit: 12,
       conversation_title: `${agent.name} Try`,
       mcp_conversation: true,
@@ -1862,6 +1879,48 @@ function tryChatTranscriptKey(
     agent,
     user,
   )}`;
+}
+
+function buildTryClientConversationContext({
+  agent,
+  conversationId,
+  messages,
+}: {
+  agent: Agent;
+  conversationId: string;
+  messages: TryChatMessage[];
+}): TryClientConversationContext | null {
+  const transcriptMessages = messages
+    .filter((message) => {
+      if (message.pending || message.error) return false;
+      if (!message.text.trim()) return false;
+      if (
+        message.role === "assistant" &&
+        !message.memoryJobId &&
+        !message.responseMode &&
+        message.text.startsWith(`Ask ${agent.name} a small test task.`)
+      ) {
+        return false;
+      }
+      return true;
+    })
+    .slice(-12)
+    .map((message) => ({
+      role: message.role,
+      text: message.text.slice(0, 4000),
+      createdAt: message.createdAt,
+      memWalStatus: message.memWalStatus || null,
+      memoryJobId: message.memoryJobId || null,
+    }));
+
+  if (!transcriptMessages.length) return null;
+  return {
+    agentId: agent.id,
+    conversationId,
+    messages: transcriptMessages,
+    source: "web_try_local_transcript",
+    updatedAt: new Date().toISOString(),
+  };
 }
 
 function readTryChatTranscript(key: string): TryChatTranscriptRecord | null {
@@ -6142,6 +6201,13 @@ function TryAgentChatPanel({
     setConfirmPendingSend(false);
     setSendNotice(null);
 
+    const conversationId =
+      conversationContext?.conversationId || tryConversationId(access, agent, user);
+    const clientConversationContext = buildTryClientConversationContext({
+      agent,
+      conversationId,
+      messages,
+    });
     const userMessage: TryChatMessage = {
       id: `user-${Date.now().toString(36)}`,
       role: "user",
@@ -6162,11 +6228,6 @@ function TryAgentChatPanel({
     setIsSending(true);
 
     try {
-      const conversationId =
-        conversationContext &&
-        tryMemWalDisplayStatus(conversationContext) === "stored"
-          ? conversationContext.conversationId
-          : tryConversationId(access, agent, user);
       const updatePendingMessage = (patch: Partial<TryChatMessage>) => {
         setMessages((current) =>
           current.map((message) =>
@@ -6206,6 +6267,7 @@ function TryAgentChatPanel({
       const result = await callTryAgent({
         access,
         agent,
+        clientConversationContext,
         conversationId,
         onEvent: (streamEvent) => {
           if (streamEvent.event === "authorized") {

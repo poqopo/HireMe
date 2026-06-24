@@ -5445,7 +5445,9 @@ async function runProtectedAgent(args = {}) {
       }
     }
   }
+  const clientConversationContext = readClientConversationContext(args);
   const executionTask = buildTaskWithMcpConversationMemory({
+    clientConversationContext,
     conversationContext,
     conversationId,
     task: args.task || "",
@@ -5505,7 +5507,10 @@ async function runProtectedAgent(args = {}) {
         requestDigest,
         callId,
         harnessRuntimeContext: protectedTaskResult?.runtimeContext || null,
-        conversationContext: conversationContext?.messages || [],
+        conversationContext: [
+          ...(conversationContext?.messages || []),
+          ...clientConversationContext.messages,
+        ],
         responseMode,
       });
   const safeResult =
@@ -11136,39 +11141,76 @@ function buildMcpConversationRecallQuery({ agent, conversationId, task }) {
 }
 
 function buildTaskWithMcpConversationMemory({
+  clientConversationContext,
   conversationContext,
   conversationId,
   task,
 }) {
   const originalTask = String(task || "").trim();
   const memoryTurns = normalizeMcpConversationMemoryTurns(conversationContext);
-  if (!conversationId || !memoryTurns.length) return originalTask;
+  const clientMessages = normalizeClientConversationContextMessages(
+    clientConversationContext,
+  );
+  if (!conversationId || (!memoryTurns.length && !clientMessages.length)) {
+    return originalTask;
+  }
 
-  const memoryBlock = memoryTurns
-    .slice(0, 6)
-    .map((turn, index) => {
-      const excerpt = truncateTextPreserveLines(
-        extractConversationMemoryExcerpt(turn.content),
-        1_200,
-      );
-      const label = [
-        `Turn ${index + 1}`,
-        turn.createdAt ? `created_at=${turn.createdAt}` : null,
-        turn.agentId ? `agent_id=${turn.agentId}` : null,
-        turn.blobId ? `blob_id=${turn.blobId}` : null,
-      ]
-        .filter(Boolean)
-        .join(" ");
-      return `${label}\n${excerpt}`;
-    })
-    .join("\n\n---\n\n");
+  const sections = [];
+  if (memoryTurns.length) {
+    sections.push(
+      [
+        "[MemWal recalled turns]",
+        memoryTurns
+          .slice(0, 6)
+          .map((turn, index) => {
+            const excerpt = truncateTextPreserveLines(
+              extractConversationMemoryExcerpt(turn.content),
+              1_200,
+            );
+            const label = [
+              `Turn ${index + 1}`,
+              turn.createdAt ? `created_at=${turn.createdAt}` : null,
+              turn.agentId ? `agent_id=${turn.agentId}` : null,
+              turn.blobId ? `blob_id=${turn.blobId}` : null,
+            ]
+              .filter(Boolean)
+              .join(" ");
+            return `${label}\n${excerpt}`;
+          })
+          .join("\n\n---\n\n"),
+      ].join("\n"),
+    );
+  }
+  if (clientMessages.length) {
+    sections.push(
+      [
+        "[Web Try local transcript]",
+        "Use this browser-supplied transcript as continuity fallback when MemWal has not indexed the newest turn yet.",
+        clientMessages
+          .slice(-12)
+          .map((message, index) => {
+            const label = [
+              `Message ${index + 1}`,
+              `role=${message.role}`,
+              message.createdAt ? `created_at=${message.createdAt}` : null,
+              message.memWalStatus ? `memwal_status=${message.memWalStatus}` : null,
+            ]
+              .filter(Boolean)
+              .join(" ");
+            return `${label}\n${truncateTextPreserveLines(message.text, 1_200)}`;
+          })
+          .join("\n\n---\n\n"),
+      ].join("\n"),
+    );
+  }
 
   return [
-    `[Prior conversation memory loaded from MemWal]`,
+    "[Prior conversation memory]",
     `conversation_id: ${conversationId}`,
-    `returned_turns: ${memoryTurns.length}`,
+    `memwal_returned_turns: ${memoryTurns.length}`,
+    `client_transcript_messages: ${clientMessages.length}`,
     "",
-    memoryBlock,
+    sections.join("\n\n"),
     "",
     "[Instruction]",
     "Use the prior conversation memory above to resolve references, remember user-provided facts, constraints, decisions, and previous Agent answers. The current user request below is still the task to answer.",
@@ -11176,6 +11218,27 @@ function buildTaskWithMcpConversationMemory({
     "[Current user request]",
     originalTask,
   ].join("\n");
+}
+
+function readClientConversationContext(args = {}) {
+  const raw =
+    args.client_conversation_context ||
+    args.clientConversationContext ||
+    args.web_conversation_context ||
+    args.webConversationContext ||
+    args.prior_messages ||
+    args.priorMessages ||
+    null;
+  const messages = normalizeClientConversationContextMessages(raw);
+  return {
+    source:
+      typeof raw?.source === "string"
+        ? raw.source
+        : Array.isArray(raw)
+          ? "client_array"
+          : "none",
+    messages,
+  };
 }
 
 function normalizeMcpConversationMemoryTurns(conversationContext) {
@@ -11203,6 +11266,29 @@ function normalizeMcpConversationMemoryTurns(conversationContext) {
       blobId: message.blobId || null,
       content: String(message.content || ""),
       createdAt: message.createdAt || null,
+    }));
+}
+
+function normalizeClientConversationContextMessages(raw) {
+  const messages = Array.isArray(raw)
+    ? raw
+    : Array.isArray(raw?.messages)
+      ? raw.messages
+      : [];
+  return messages
+    .filter((message) => {
+      const role = String(message?.role || "").toLowerCase();
+      return (
+        (role === "user" || role === "assistant" || role === "memory") &&
+        String(message?.text || message?.content || "").trim()
+      );
+    })
+    .slice(-12)
+    .map((message) => ({
+      role: String(message.role || "memory").toLowerCase(),
+      text: String(message.text || message.content || "").trim(),
+      createdAt: message.createdAt || message.created_at || null,
+      memWalStatus: message.memWalStatus || message.memwal_status || null,
     }));
 }
 
