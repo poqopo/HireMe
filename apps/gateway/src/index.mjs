@@ -11148,9 +11148,12 @@ function buildTaskWithMcpConversationMemory({
 }) {
   const originalTask = String(task || "").trim();
   const memoryTurns = normalizeMcpConversationMemoryTurns(conversationContext);
-  const clientMessages = normalizeClientConversationContextMessages(
-    clientConversationContext,
+  const taskAlreadyIncludesClientTranscript = originalTask.includes(
+    "[Prior web Try transcript]",
   );
+  const clientMessages = taskAlreadyIncludesClientTranscript
+    ? []
+    : normalizeClientConversationContextMessages(clientConversationContext);
   if (!conversationId || (!memoryTurns.length && !clientMessages.length)) {
     return originalTask;
   }

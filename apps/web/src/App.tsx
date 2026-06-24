@@ -1635,12 +1635,16 @@ async function callTryAgent({
   task: string;
   user: AuthUser;
 }) {
+  const agentTask = buildTryAgentTaskWithClientContext(
+    task,
+    clientConversationContext,
+  );
   const response = await fetch(`${gatewayUrl}/v1/agent-call/stream`, {
     method: "POST",
     headers: gatewayRequestHeaders(),
     body: JSON.stringify({
       agent_id: agent.id,
-      task,
+      task: agentTask,
       hirer_id: access.hirerId || hirerIdFor(user),
       hire_receipt_object_id: access.receiptObjectId,
       wallet_address: user.wallet,
@@ -1921,6 +1925,41 @@ function buildTryClientConversationContext({
     source: "web_try_local_transcript",
     updatedAt: new Date().toISOString(),
   };
+}
+
+function buildTryAgentTaskWithClientContext(
+  task: string,
+  context?: TryClientConversationContext | null,
+) {
+  const originalTask = task.trim();
+  const transcriptMessages = context?.messages?.slice(-10) || [];
+  if (!context?.conversationId || !transcriptMessages.length) {
+    return originalTask;
+  }
+
+  const transcript = transcriptMessages
+    .map((message, index) => {
+      const metadata = [
+        `message=${index + 1}`,
+        `role=${message.role}`,
+        message.memWalStatus ? `memwal_status=${message.memWalStatus}` : null,
+      ]
+        .filter(Boolean)
+        .join(" ");
+      return `${metadata}\n${message.role}: ${message.text.slice(0, 1800)}`;
+    })
+    .join("\n\n---\n\n");
+
+  return [
+    "[Prior web Try transcript]",
+    `conversation_id: ${context.conversationId}`,
+    "Use these prior messages from the same browser chat as conversation memory. The current user request below is still the task to answer.",
+    "",
+    transcript,
+    "",
+    "[Current user request]",
+    originalTask,
+  ].join("\n");
 }
 
 function readTryChatTranscript(key: string): TryChatTranscriptRecord | null {
