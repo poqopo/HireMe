@@ -5426,6 +5426,11 @@ async function runProtectedAgent(args = {}) {
         hirerId,
         sessionId: conversationId,
         limit: args.conversation_context_limit ?? args.conversationContextLimit ?? 8,
+        query: buildMcpConversationRecallQuery({
+          agent,
+          conversationId,
+          task: args.task || "",
+        }),
       });
       mcpConversationSessions.set(installationId, conversationId);
     } catch (err) {
@@ -5440,6 +5445,11 @@ async function runProtectedAgent(args = {}) {
       }
     }
   }
+  const executionTask = buildTaskWithMcpConversationMemory({
+    conversationContext,
+    conversationId,
+    task: args.task || "",
+  });
   const callId = `call_${Date.now().toString(36)}_${sha256Hex(`${agent.id}:${args.task || ""}`).slice(0, 8)}`;
   const requestDigest = `sha256:${sha256Hex(JSON.stringify({
     agentId: agent.id,
@@ -5466,7 +5476,7 @@ async function runProtectedAgent(args = {}) {
   const protectedTaskResult = await runPlatformEncryptedArtifactTask({
     agent,
     artifact,
-    task: args.task || "",
+    task: executionTask,
     callId,
     requestDigest,
     hireReceiptObjectId: hireReceiptObjectId || access.receiptObjectId,
@@ -5481,7 +5491,7 @@ async function runProtectedAgent(args = {}) {
   });
   const protectedSafeResult =
     protectedTaskResult?.result ||
-    buildSafeResult(agent, args.task || "", responseMode);
+    buildSafeResult(agent, executionTask, responseMode);
   const executorExecution = protectedTaskResult?.finalResult
     ? {
         status: "skipped",
@@ -5490,7 +5500,7 @@ async function runProtectedAgent(args = {}) {
       }
     : await callGatewayExecutor({
         agent,
-        task: args.task || "",
+        task: executionTask,
         safeResult: protectedSafeResult,
         requestDigest,
         callId,
@@ -11114,6 +11124,111 @@ function isLocalOllamaBaseUrl(baseUrl) {
   } catch {
     return false;
   }
+}
+
+function buildMcpConversationRecallQuery({ agent, conversationId, task }) {
+  return [
+    `Recall prior HireMe MCP conversation turns for conversation_id=${conversationId}.`,
+    `Agent: ${agent.id} (${agent.name}).`,
+    "Use memories that help answer this current follow-up with continuity.",
+    `Current user request: ${truncateTextPreserveLines(task || "", 900)}`,
+  ].join("\n");
+}
+
+function buildTaskWithMcpConversationMemory({
+  conversationContext,
+  conversationId,
+  task,
+}) {
+  const originalTask = String(task || "").trim();
+  const memoryTurns = normalizeMcpConversationMemoryTurns(conversationContext);
+  if (!conversationId || !memoryTurns.length) return originalTask;
+
+  const memoryBlock = memoryTurns
+    .slice(0, 6)
+    .map((turn, index) => {
+      const excerpt = truncateTextPreserveLines(
+        extractConversationMemoryExcerpt(turn.content),
+        1_200,
+      );
+      const label = [
+        `Turn ${index + 1}`,
+        turn.createdAt ? `created_at=${turn.createdAt}` : null,
+        turn.agentId ? `agent_id=${turn.agentId}` : null,
+        turn.blobId ? `blob_id=${turn.blobId}` : null,
+      ]
+        .filter(Boolean)
+        .join(" ");
+      return `${label}\n${excerpt}`;
+    })
+    .join("\n\n---\n\n");
+
+  return [
+    `[Prior conversation memory loaded from MemWal]`,
+    `conversation_id: ${conversationId}`,
+    `returned_turns: ${memoryTurns.length}`,
+    "",
+    memoryBlock,
+    "",
+    "[Instruction]",
+    "Use the prior conversation memory above to resolve references, remember user-provided facts, constraints, decisions, and previous Agent answers. The current user request below is still the task to answer.",
+    "",
+    "[Current user request]",
+    originalTask,
+  ].join("\n");
+}
+
+function normalizeMcpConversationMemoryTurns(conversationContext) {
+  const turns = Array.isArray(conversationContext?.turns)
+    ? conversationContext.turns
+    : [];
+  if (turns.length) {
+    return turns
+      .filter((turn) => String(turn?.content || "").trim())
+      .map((turn) => ({
+        agentId: turn.agentId || null,
+        blobId: turn.blobId || null,
+        content: String(turn.content || ""),
+        createdAt: turn.createdAt || null,
+      }));
+  }
+
+  return (Array.isArray(conversationContext?.messages)
+    ? conversationContext.messages
+    : []
+  )
+    .filter((message) => String(message?.content || "").trim())
+    .map((message) => ({
+      agentId: message.agentId || null,
+      blobId: message.blobId || null,
+      content: String(message.content || ""),
+      createdAt: message.createdAt || null,
+    }));
+}
+
+function extractConversationMemoryExcerpt(content) {
+  const text = String(content || "").trim();
+  if (!text) return "";
+  const userMessage = extractLabeledConversationSection(text, "User message");
+  const assistantResponse = extractLabeledConversationSection(text, "Assistant response");
+  if (userMessage || assistantResponse) {
+    return [
+      userMessage ? `User: ${userMessage}` : null,
+      assistantResponse ? `Assistant: ${assistantResponse}` : null,
+    ]
+      .filter(Boolean)
+      .join("\n");
+  }
+  return text;
+}
+
+function extractLabeledConversationSection(text, label) {
+  const escaped = escapeRegExp(label);
+  const match = new RegExp(
+    `${escaped}:\\s*\\n([\\s\\S]*?)(?:\\n\\n[A-Z][A-Za-z ]+:|$)`,
+    "i",
+  ).exec(text || "");
+  return match?.[1]?.trim() || "";
 }
 
 function buildGatewayExecutorInput({

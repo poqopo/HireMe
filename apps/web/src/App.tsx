@@ -1631,7 +1631,10 @@ async function callTryAgent({
       email: user.email,
       response_mode: "direct_answer",
       conversation_id: conversationId,
+      conversation_context_limit: 12,
       conversation_title: `${agent.name} Try`,
+      mcp_conversation: true,
+      memwal_conversation: true,
       wait_for_memory: false,
       waitForMemory: false,
     }),
@@ -2267,7 +2270,11 @@ function TryChatMessageContent({ message }: { message: TryChatMessage }) {
     return <TryMarkdownContent text={message.text} />;
   }
 
-  return <div className="whitespace-pre-wrap">{message.text}</div>;
+  return (
+    <div className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+      {message.text}
+    </div>
+  );
 }
 
 function TryPendingAgentActivity({ label }: { label: string }) {
@@ -2313,7 +2320,7 @@ function TryPendingAgentActivity({ label }: { label: string }) {
 function TryMarkdownContent({ text }: { text: string }) {
   const blocks = parseMarkdownBlocks(text);
   return (
-    <div className="grid gap-2">
+    <div className="grid min-w-0 max-w-full gap-2 overflow-hidden break-words [overflow-wrap:anywhere]">
       {blocks.map((block, index) => {
         const key = `md-${index}`;
         if (block.type === "heading") {
@@ -2330,10 +2337,12 @@ function TryMarkdownContent({ text }: { text: string }) {
         if (block.type === "code") {
           return (
             <pre
-              className="max-h-72 overflow-auto rounded-md border border-border bg-white p-3 text-[11px] leading-5 text-[#1c1e54]"
+              className="max-h-72 max-w-full overflow-hidden whitespace-pre-wrap break-words rounded-md border border-border bg-white p-3 text-[11px] leading-5 text-[#1c1e54] [overflow-wrap:anywhere]"
               key={key}
             >
-              <code>{block.code}</code>
+              <code className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+                {block.code}
+              </code>
             </pre>
           );
         }
@@ -2365,7 +2374,10 @@ function TryMarkdownContent({ text }: { text: string }) {
           );
         }
         return (
-          <p className="whitespace-pre-wrap" key={key}>
+          <p
+            className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]"
+            key={key}
+          >
             {renderInlineMarkdown(block.text, key)}
           </p>
         );
@@ -2479,7 +2491,7 @@ function renderInlineMarkdown(text: string, keyPrefix: string): ReactNode[] {
     if (token.startsWith("`")) {
       nodes.push(
         <code
-          className="rounded bg-white px-1 py-0.5 font-mono text-[0.92em] text-[#1c1e54]"
+          className="break-words rounded bg-white px-1 py-0.5 font-mono text-[0.92em] text-[#1c1e54] [overflow-wrap:anywhere]"
           key={key}
         >
           {token.slice(1, -1)}
@@ -6353,7 +6365,7 @@ function TryAgentChatPanel({
             <div className="grid gap-3">
               {messages.map((message) => (
                 <div
-                  className={`max-w-[92%] rounded-lg border px-3 py-2.5 text-sm leading-6 ${
+                  className={`min-w-0 max-w-[92%] overflow-hidden break-words rounded-lg border px-3 py-2.5 text-sm leading-6 [overflow-wrap:anywhere] ${
                     message.role === "user"
                       ? "ml-auto border-primary/20 bg-primary text-white"
                       : message.error
