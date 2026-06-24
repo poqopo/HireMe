@@ -1644,7 +1644,7 @@ async function issueOAuthToken(req) {
   oauthCodes.delete(body.code);
   await deleteStoredOAuthAuthorizationCode(body.code);
   const accessToken = randomOAuthId("token");
-  const expiresIn = Number.parseInt(process.env.HIREME_OAUTH_TOKEN_TTL || "3600", 10);
+  const expiresIn = Number.parseInt(process.env.HIREME_OAUTH_TOKEN_TTL || "2592000", 10);
   const tokenSession = {
     accessToken,
     clientId: codeRecord.clientId,
