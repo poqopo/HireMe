@@ -1521,7 +1521,7 @@ async function callGateway(path, body = {}, options = {}) {
   const controller = new AbortController();
   const timeout = setTimeout(
     () => controller.abort(),
-    options.timeoutMs || Number(process.env.HIREME_MCP_GATEWAY_TIMEOUT_MS || 450),
+    options.timeoutMs || Number(process.env.HIREME_MCP_GATEWAY_TIMEOUT_MS || 10_000),
   );
 
   try {
