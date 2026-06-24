@@ -137,6 +137,7 @@ Use server-only secrets here.
 ```bash
 HIREME_GATEWAY_PORT=8787
 HIREME_GATEWAY_API_KEY=
+HIREME_OAUTH_TOKEN_TTL=2592000
 HIREME_WEB_APP_URL=https://your-web.example.com
 
 SUPABASE_URL=
