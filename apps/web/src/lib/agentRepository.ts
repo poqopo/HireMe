@@ -162,6 +162,8 @@ function mapMarketplaceCardToAgent(row: MarketplaceCardRow): Agent {
     activeUsers: row.active_user_count ?? undefined,
     createdAt: row.created_at ?? undefined,
     updatedAt: row.updated_at ?? row.created_at ?? undefined,
+    currentVersionNumber: row.current_version_number ?? undefined,
+    versionPublishedAt: row.current_version_published_at ?? undefined,
     resultPreview: {
       title: row.result_title || `${skills[0]} result`,
       summary:
@@ -193,7 +195,7 @@ export function sortAgentsNewestFirst(agents: Agent[]) {
 }
 
 function agentTimestampMs(agent: Agent) {
-  const timestamp = Date.parse(agent.createdAt || agent.updatedAt || "");
+  const timestamp = Date.parse(agent.updatedAt || agent.createdAt || "");
   return Number.isFinite(timestamp) ? timestamp : 0;
 }
 

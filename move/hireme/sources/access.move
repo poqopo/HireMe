@@ -207,21 +207,39 @@ fun init(ctx: &mut TxContext) {
 }
 
 entry fun create_wallet(ctx: &mut TxContext) {
-    let wallet = AccountWallet {
+    let wallet = new_account_wallet(ctx.sender(), ctx);
+    share_wallet(wallet);
+}
+
+entry fun create_wallet_for_owner(
+    _cap: &SettlementAdminCap,
+    owner: address,
+    ctx: &mut TxContext,
+) {
+    let wallet = new_account_wallet(owner, ctx);
+    share_wallet(wallet);
+}
+
+fun new_account_wallet(owner: address, ctx: &mut TxContext): AccountWallet {
+    AccountWallet {
         id: object::new(ctx),
-        owner: ctx.sender(),
+        owner,
         available: balance::zero<SUI>(),
         claimable: balance::zero<SUI>(),
         total_deposited_mist: 0,
         total_spent_mist: 0,
         total_earned_mist: 0,
         total_claimed_mist: 0,
-    };
+    }
+}
+
+fun share_wallet(wallet: AccountWallet) {
     let wallet_id = object::id(&wallet);
+    let owner = wallet.owner;
 
     event::emit(WalletCreated {
         wallet_id,
-        owner: wallet.owner,
+        owner,
     });
 
     transfer::share_object(wallet);
@@ -800,6 +818,20 @@ fun destroy_agent_version_for_testing(agent_version: AgentVersion) {
     } = agent_version;
 
     id.delete();
+}
+
+#[test]
+fun test_account_wallet_can_be_created_for_target_owner() {
+    let admin = @0xaaa;
+    let owner = @0xbbb;
+    let mut ctx = tx_context::new_from_hint(admin, 3, 0, 0, 0);
+    let wallet = new_account_wallet(owner, &mut ctx);
+
+    assert!(wallet_owner(&wallet) == owner, 0);
+    assert!(wallet_available_mist(&wallet) == 0, 0);
+    assert!(wallet_claimable_mist(&wallet) == 0, 0);
+
+    destroy_wallet_for_testing(wallet);
 }
 
 #[test]

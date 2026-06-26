@@ -6,10 +6,18 @@ const suiPath = process.env.SUI_CLI_PATH || "sui";
 const packagePath = process.argv[2] || "move/hireme";
 const outputPath = process.env.HIREME_SUI_PACKAGE_RECORD || ".hireme/sui/hireme-package.json";
 const gasBudget = process.env.SUI_PUBLISH_GAS_BUDGET;
+const pubfilePath = process.env.SUI_PUBLISH_PUBFILE_PATH || process.env.SUI_PUBFILE_PATH;
+const buildEnv = process.env.SUI_PUBLISH_BUILD_ENV || process.env.SUI_BUILD_ENV;
 
-const args = ["client", "publish", packagePath, "--json"];
+const args = ["client", pubfilePath ? "test-publish" : "publish", packagePath, "--json"];
 if (gasBudget) {
   args.push("--gas-budget", gasBudget);
+}
+if (pubfilePath) {
+  args.push("--pubfile-path", pubfilePath);
+}
+if (buildEnv) {
+  args.push("--build-env", buildEnv);
 }
 
 const result = spawnSync(suiPath, args, {
@@ -46,12 +54,22 @@ const record = {
   activeEnv: readStringResult([suiPath, "client", "active-env"]),
   activeAddress: readStringResult([suiPath, "client", "active-address"]),
   sealApproveTarget: `${packageId}::access::seal_approve`,
+  createWalletTarget: `${packageId}::access::create_wallet`,
+  createWalletForOwnerTarget: `${packageId}::access::create_wallet_for_owner`,
+  depositWalletTarget: `${packageId}::access::deposit_wallet`,
+  withdrawAvailableTarget: `${packageId}::access::withdraw_available`,
   createAgentTarget: `${packageId}::access::create_agent`,
   publishAgentVersionTarget: `${packageId}::access::publish_agent_version`,
   registerProtectedArtifactTarget: `${packageId}::access::register_protected_artifact`,
   hireAgentTarget: `${packageId}::access::hire_agent`,
+  openCallEscrowTarget: `${packageId}::access::open_call_escrow`,
+  settleCallEscrowTarget: `${packageId}::access::settle_call_escrow`,
+  cancelCallEscrowTarget: `${packageId}::access::cancel_call_escrow`,
+  expireCallEscrowTarget: `${packageId}::access::expire_call_escrow`,
+  claimEarningsTarget: `${packageId}::access::claim_earnings`,
   packageVersionObjectId: findCreatedObjectId(publishResult, "PackageVersion"),
   packageVersionCapObjectId: findCreatedObjectId(publishResult, "PackageVersionCap"),
+  settlementAdminCapObjectId: findCreatedObjectId(publishResult, "SettlementAdminCap"),
   digest: publishResult.digest,
   publishedAt: new Date().toISOString(),
 };
@@ -66,12 +84,24 @@ console.log(
       packageId,
       outputPath,
       env: {
+        HIREME_SUI_PACKAGE_ID: packageId,
         HIREME_SEAL_PACKAGE_ID: packageId,
         HIREME_SEAL_APPROVE_TARGET: record.sealApproveTarget,
+        HIREME_SETTLEMENT_ADMIN_CAP_ID: record.settlementAdminCapObjectId,
+        HIREME_CREATE_WALLET_FOR_OWNER_TARGET: record.createWalletForOwnerTarget,
       },
       objects: {
         packageVersionObjectId: record.packageVersionObjectId,
         packageVersionCapObjectId: record.packageVersionCapObjectId,
+        settlementAdminCapObjectId: record.settlementAdminCapObjectId,
+      },
+      targets: {
+        createWalletTarget: record.createWalletTarget,
+        createWalletForOwnerTarget: record.createWalletForOwnerTarget,
+        depositWalletTarget: record.depositWalletTarget,
+        openCallEscrowTarget: record.openCallEscrowTarget,
+        settleCallEscrowTarget: record.settleCallEscrowTarget,
+        claimEarningsTarget: record.claimEarningsTarget,
       },
     },
     null,

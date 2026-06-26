@@ -44,6 +44,8 @@ export type Database = {
           public_skills: string[];
           public_mcp_contract: string;
           current_version_id: string | null;
+          current_version_number: number | null;
+          current_version_published_at: string | null;
           accent: string | null;
           rating: number;
           historical_calls: number;

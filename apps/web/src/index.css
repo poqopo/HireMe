@@ -489,7 +489,12 @@ select {
 
 .page-shell {
   width: min(100%, 1200px);
+  min-width: 0;
   margin-inline: auto;
+}
+
+.page-shell > * {
+  min-width: 0;
 }
 
 .content-measure {
@@ -506,6 +511,17 @@ select {
 .hero-title-line {
   display: block;
   white-space: nowrap;
+}
+
+@media (max-width: 640px) {
+  .hero-title {
+    line-height: 1.08;
+    font-size: clamp(1.92rem, 7.8vw, 2.5rem);
+  }
+
+  .hero-title-line {
+    white-space: normal;
+  }
 }
 
 .section-title {

@@ -25,7 +25,9 @@ import {
   useConnectWallet,
   useCurrentAccount,
   useCurrentWallet,
+  useSuiClient,
   useSignAndExecuteTransaction,
+  useSignTransaction,
   useWallets,
 } from "@mysten/dapp-kit";
 import { Transaction } from "@mysten/sui/transactions";
@@ -49,6 +51,7 @@ import {
   LogOut,
   MessageCircle,
   PackageOpen,
+  RotateCcw,
   Search,
   ServerCog,
   ShieldCheck,
@@ -83,6 +86,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { CopyableCodeBlock } from "@/components/CopyableCodeBlock";
+import { DebugCallPage } from "../pages/DebugCallPage";
 import { DocsPage } from "../pages/DocsPage";
 
 const trialCallAllowance = 100;
@@ -207,22 +211,58 @@ function revealDelayStyle(delayMs: number): CSSProperties {
 const authStorageKey = "hireme-demo-auth-user";
 const accessStorageKey = "hireme-demo-agent-access-v1";
 const createdAgentsStorageKey = "hireme-demo-created-agents-v1";
+const tryChatSessionsStorageKey = "hireme-demo-try-chat-sessions-v1";
 const tryChatTranscriptsStorageKey = "hireme-demo-try-chat-transcripts-v2";
+const tryChatImageDbName = "hireme-demo-try-chat-images";
+const tryChatImageStoreName = "images";
+const tryChatImageDbVersion = 1;
 const legacyTryChatTranscriptsStorageKeys = [
   "hireme-demo-try-chat-transcripts-v1",
 ];
 const tryChatPendingRestoreTtlMs = 5 * 60 * 1000;
+const tryChatMemWalDebugThresholdMs = 2 * 60 * 1000;
+const tryMemWalMaxAutoPollTargets = 1;
+const tryMemWalPollMaxAttempts = 5;
+const tryMemWalInitialPollDelayMs = 30_000;
+const tryMemWalPollIntervalMs = 10_000;
 const typicalOutputStorageBucket =
   import.meta.env.VITE_HIREME_TYPICAL_OUTPUT_BUCKET || "hireme-agent-media";
 const gatewayUrl = (
   import.meta.env.VITE_HIREME_GATEWAY_URL || "http://localhost:8787"
 ).replace(/\/$/, "");
 const gatewayApiKey = import.meta.env.VITE_HIREME_GATEWAY_API_KEY || "";
+const tryChatDebugEnabled =
+  import.meta.env.DEV || import.meta.env.VITE_HIREME_DEBUG_TRY === "true";
 const hiddenMarketplaceAgentIds = new Set(["codex-builder"]);
 const hiddenMarketplaceAgentHandles = new Set(["@agents/codex-builder"]);
 const topicFilters = categories.filter(
   (category): category is Agent["category"] => category !== "All",
 );
+
+function debugTryChat(label: string, details?: Record<string, unknown>) {
+  if (!tryChatDebugEnabled) return;
+  if (details) {
+    console.info(`[HireMe Try] ${label}`, details);
+    return;
+  }
+  console.info(`[HireMe Try] ${label}`);
+}
+
+function warnTryChat(label: string, details?: Record<string, unknown>) {
+  if (!tryChatDebugEnabled) return;
+  if (details) {
+    console.warn(`[HireMe Try] ${label}`, details);
+    return;
+  }
+  console.warn(`[HireMe Try] ${label}`);
+}
+
+function tryMemWalPollDelayMs(attemptIndex: number) {
+  return attemptIndex === 0
+    ? tryMemWalInitialPollDelayMs
+    : tryMemWalPollIntervalMs;
+}
+
 const categoryPricing: Record<
   Agent["category"],
   {
@@ -315,6 +355,8 @@ type CreatedAgentRecord = {
   ciphertextDigest: string;
   fileCount: number;
   createdAt: string;
+  updatedAt?: string;
+  currentVersionNumber?: number;
   status: "Local Draft" | "Published";
   source: "local" | "gateway";
   gatewayError?: string;
@@ -404,8 +446,12 @@ type GatewayPublicAgent = {
   rating?: number;
   historicalCalls?: number;
   medianLatencyMs?: number;
+  avgInputTokens?: number | null;
+  avgOutputTokens?: number | null;
   createdAt?: string;
   updatedAt?: string;
+  currentVersionNumber?: number;
+  versionPublishedAt?: string;
 };
 
 type GatewayAccessPayload = Omit<Partial<AgentAccessRecord>, "source"> & {
@@ -418,6 +464,7 @@ type GatewayAgentCallResponse = {
   activeAgentId?: string;
   agentId?: string;
   callId?: string;
+  traceId?: string;
   attachments?: unknown[];
   codexView?: unknown;
   conversationId?: string | null;
@@ -483,6 +530,40 @@ type GatewayAgentCallResponse = {
   authorization?: {
     trialCallsRemaining?: number | null;
   };
+  suiEscrowSettlement?: {
+    status?: string;
+    reason?: string;
+    txDigest?: string;
+    escrowObjectId?: string;
+    actualMist?: string;
+    actualSui?: string;
+  } | null;
+};
+
+type GatewaySuiEscrowOpenIntentPayload = {
+  status?: string;
+  settlementRequired?: boolean;
+  packageId?: string;
+  openCallEscrowTarget?: string;
+  clockObjectId?: string;
+  agentVersionObjectId?: string;
+  hirerWalletObjectId?: string;
+  creatorWalletObjectId?: string;
+  maxMist?: string;
+  requestDigest?: string;
+  requestDigestBytes?: number[];
+  expiresAtMs?: string;
+};
+
+type SuiCallEscrowPayload = {
+  escrowObjectId: string;
+  openTxDigest: string;
+  agentVersionObjectId: string;
+  hirerWalletObjectId: string;
+  creatorWalletObjectId: string;
+  maxMist: string;
+  requestDigest: string;
+  expiresAtMs: string;
 };
 
 type GatewayAgentStreamEvent = {
@@ -495,6 +576,7 @@ type TryChatMessage = {
   role: "user" | "assistant";
   text: string;
   attachments?: TryChatAttachment[];
+  callId?: string | null;
   conversationId?: string | null;
   createdAt: string;
   pending?: boolean;
@@ -503,6 +585,7 @@ type TryChatMessage = {
   memoryJobId?: string | null;
   memWalStatus?: TryMemWalDisplayStatus | null;
   responseMode?: string | null;
+  traceId?: string | null;
 };
 
 type TryChatAttachment = {
@@ -510,12 +593,23 @@ type TryChatAttachment = {
   type: "image";
   url: string;
   label: string;
+  localImageKey?: string | null;
+  mimeType?: string | null;
+};
+
+type TryChatImageRecord = {
+  key: string;
+  url: string;
+  label: string;
+  mimeType: string | null;
+  updatedAt: string;
 };
 
 type TryMemWalDisplayStatus = "pending" | "stored" | "failed";
 
 type TryConversationContext = {
   agentId: string;
+  callId?: string | null;
   conversationId: string;
   memWalStatus: string;
   conversationStored: boolean | null;
@@ -523,6 +617,7 @@ type TryConversationContext = {
   memWalBlobId?: string | null;
   userMemWalStatus: string | null;
   memoryJobId?: string | null;
+  traceId?: string | null;
   waitForMemory?: boolean | null;
 };
 
@@ -534,6 +629,8 @@ type TryClientConversationContext = {
     text: string;
     createdAt?: string;
     memWalStatus?: TryMemWalDisplayStatus | null;
+    callId?: string | null;
+    traceId?: string | null;
     memoryJobId?: string | null;
   }>;
   source: "web_try_local_transcript";
@@ -749,8 +846,11 @@ function AppShell({
   onWalletLinked: (wallet: string) => void;
 }) {
   const location = useLocation();
+  const currentAccount = useCurrentAccount();
+  const signTransaction = useSignTransaction();
   const [showBackToTop, setShowBackToTop] = useState(false);
   const [reducedMotion, setReducedMotion] = useState(false);
+  const walletObjectEnsureAttemptsRef = useRef(new Set<string>());
 
   useEffect(() => {
     const mediaQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -780,6 +880,33 @@ function AppShell({
     };
   }, [location.pathname]);
 
+  useEffect(() => {
+    if (!authUser?.wallet || !currentAccount?.address) return;
+    const userWallet = normalizeSuiAddressForCompare(authUser.wallet);
+    const connectedWallet = normalizeSuiAddressForCompare(currentAccount.address);
+    if (!userWallet || userWallet !== connectedWallet) return;
+    const ensureKey = `${authUser.id}:${userWallet}`;
+    if (walletObjectEnsureAttemptsRef.current.has(ensureKey)) return;
+    walletObjectEnsureAttemptsRef.current.add(ensureKey);
+
+    void ensureSponsoredGatewaySuiWalletObject({
+      displayName: authUser.displayName,
+      signTransaction: signTransaction.mutateAsync,
+      suiAddress: authUser.wallet,
+    }).catch((error) => {
+      console.warn(
+        "[HireMe] Sui wallet object fallback failed",
+        error instanceof Error ? error.message : error,
+      );
+    });
+  }, [
+    authUser?.displayName,
+    authUser?.id,
+    authUser?.wallet,
+    currentAccount?.address,
+    signTransaction.mutateAsync,
+  ]);
+
   const scrollToTop = () => {
     window.scrollTo({
       top: 0,
@@ -798,6 +925,7 @@ function AppShell({
       <Routes>
         <Route path="/" element={<LandingPage />} />
         <Route path="/docs" element={<DocsPage />} />
+        <Route path="/debug/call" element={<DebugCallPage />} />
         <Route path="/login" element={<LoginPage onLogin={onLogin} />} />
         <Route
           path="/auth/callback"
@@ -969,6 +1097,71 @@ async function syncGatewaySuiWallet(suiAddress: string, displayName?: string) {
   await syncGatewayWebSession(data.session.access_token, suiAddress, displayName);
 }
 
+async function ensureSponsoredGatewaySuiWalletObject({
+  displayName,
+  signTransaction,
+  suiAddress,
+}: {
+  displayName?: string;
+  signTransaction: SignTransaction;
+  suiAddress: string;
+}) {
+  if (!supabase) {
+    throw new Error("Supabase Auth is not configured.");
+  }
+  const { data, error } = await supabase.auth.getSession();
+  if (error) throw error;
+  if (!data.session) {
+    throw new Error("Login before creating a Sui wallet object.");
+  }
+
+  const intentResponse = await fetch(
+    `${gatewayUrl}/v1/me/sui-wallet/sponsored-create-intent`,
+    {
+      method: "POST",
+      headers: gatewayRequestHeaders(),
+      body: JSON.stringify({
+        access_token: data.session.access_token,
+        sui_address: suiAddress,
+        display_name: displayName || undefined,
+      }),
+    },
+  );
+  if (!intentResponse.ok) {
+    throw new Error(`Gateway wallet object intent failed: ${await intentResponse.text()}`);
+  }
+
+  const intent = (await intentResponse.json()) as {
+    status?: string;
+    sponsoredRequired?: boolean;
+    digest?: string;
+    bytes?: string;
+  };
+  if (intent.status === "existing" || intent.sponsoredRequired === false) return;
+  if (!intent.digest || !intent.bytes) {
+    throw new Error("Gateway did not return a sponsored wallet creation transaction.");
+  }
+
+  const signed = await signTransaction({ transaction: intent.bytes });
+  const executeResponse = await fetch(
+    `${gatewayUrl}/v1/me/sui-wallet/sponsored-create-execute`,
+    {
+      method: "POST",
+      headers: gatewayRequestHeaders(),
+      body: JSON.stringify({
+        access_token: data.session.access_token,
+        sui_address: suiAddress,
+        display_name: displayName || undefined,
+        digest: intent.digest,
+        signature: signed.signature,
+      }),
+    },
+  );
+  if (!executeResponse.ok) {
+    throw new Error(`Gateway wallet object creation failed: ${await executeResponse.text()}`);
+  }
+}
+
 async function saveProfileDisplayName(displayName: string, suiAddress?: string) {
   const normalized = displayName.trim().replace(/\s+/g, " ");
   if (normalized.length < 2) {
@@ -1063,9 +1256,15 @@ function formatAuthCallbackError(err: unknown) {
 
 type EnokiWallets = ReturnType<typeof useWallets>;
 type ConnectWallet = ReturnType<typeof useConnectWallet>["mutateAsync"];
-type SignAndExecuteTransaction = ReturnType<
-  typeof useSignAndExecuteTransaction
->["mutateAsync"];
+type SignAndExecuteTransaction = (input: {
+  transaction: Transaction | string;
+}) => Promise<unknown>;
+type SignTransaction = (input: {
+  transaction: Transaction | string;
+}) => Promise<{
+  bytes: string;
+  signature: string;
+}>;
 
 async function connectEnokiGoogleAddress({
   connectWallet,
@@ -1337,6 +1536,8 @@ async function updateAgentMetadataWithGateway({
     price_per_1m_tokens_usd: tokenPrice,
     price_per_call_usd: tokenPrice,
     free_calls: agent.freeCalls,
+    version_number: Math.max(1, Math.trunc(agent.currentVersionNumber || 1)) + 1,
+    release_notes: "Updated from the HireMe web edit page.",
     storage_network: agent.sealedHarness.network,
     seal_policy_id: agent.sealedHarness.sealPolicyId,
     walrus_blob_id: agent.sealedHarness.walrusBlobId,
@@ -1441,7 +1642,9 @@ function readUserCreatedAgents(user: AuthUser) {
   const creatorId = creatorIdFor(user);
   return readAllCreatedAgents()
     .filter((record) => record.creatorId === creatorId)
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    .sort((a, b) =>
+      (b.updatedAt || b.createdAt).localeCompare(a.updatedAt || a.createdAt),
+    );
 }
 
 function writeCreatedAgentRecord(record: CreatedAgentRecord) {
@@ -1478,23 +1681,59 @@ async function createAgentAccessRecord({
   const endpoint = accessType === "trial" ? "/v1/agents/try" : "/v1/agents/hire";
 
   try {
+    debugTryChat("access/request", {
+      accessType,
+      agentId: agent.id,
+      endpoint,
+      gatewayUrl,
+      hasEmail: Boolean(user.email),
+      hasWallet: Boolean(user.wallet),
+      hirerId,
+    });
     const response = await fetch(`${gatewayUrl}${endpoint}`, {
       method: "POST",
       headers: gatewayRequestHeaders(),
       body: JSON.stringify(payload),
     });
+    debugTryChat("access/response", {
+      agentId: agent.id,
+      endpoint,
+      ok: response.ok,
+      status: response.status,
+    });
 
     if (response.ok) {
       const result = await response.json();
+      debugTryChat("access/gateway-record", {
+        accessId: result.access?.id,
+        agentId: result.access?.agentId || agent.id,
+        receiptObjectId: result.access?.receiptObjectId,
+        source: result.access?.source,
+        storageSource: result.access?.storageSource,
+        trialCallsRemaining: result.access?.trialCallsRemaining,
+      });
       return mapGatewayAccessRecord(result.access, agent, "gateway");
     }
+    const gatewayError = `Gateway ${response.status}: ${await response.text()}`;
+    warnTryChat("access/fallback-local", {
+      accessType,
+      agentId: agent.id,
+      error: gatewayError,
+      hirerId,
+    });
     return createLocalAccessRecord({
       accessType,
       agent,
       hirerId,
-      gatewayError: `Gateway ${response.status}: ${await response.text()}`,
+      gatewayError,
     });
   } catch (error) {
+    warnTryChat("access/request-failed", {
+      accessType,
+      agentId: agent.id,
+      error: error instanceof Error ? error.message : String(error),
+      hirerId,
+    });
     return createLocalAccessRecord({
       accessType,
       agent,
@@ -1561,7 +1800,7 @@ async function createPaidAgentAccessRecord({
   const [paymentCoin] = tx.splitCoins(tx.gas, [amountMist]);
   tx.transferObjects([paymentCoin], recipientAddress);
   const execution = await signAndExecuteTransaction({ transaction: tx });
-  const txDigest = "digest" in execution ? execution.digest : "";
+  const txDigest = readSuiTransactionDigest(execution);
   if (!txDigest) {
     throw new Error("SUI wallet did not return a transaction digest.");
   }
@@ -1618,12 +1857,113 @@ async function loadGatewayMyAgentAccess(user: AuthUser) {
   return { agents, records };
 }
 
+async function openSuiCallEscrowForPaidSend({
+  access,
+  agent,
+  agentTask,
+  conversationId,
+  signAndExecuteTransaction,
+  user,
+}: {
+  access: AgentAccessRecord;
+  agent: Agent;
+  agentTask: string;
+  conversationId: string;
+  signAndExecuteTransaction: SignAndExecuteTransaction;
+  user: AuthUser;
+}): Promise<SuiCallEscrowPayload | null> {
+  if (access.accessType !== "hired") return null;
+  if (!user.wallet) {
+    throw new Error("Connect your SUI wallet before sending a paid Agent call.");
+  }
+
+  const response = await fetch(`${gatewayUrl}/v1/settlements/sui/escrow/open-intent`, {
+    method: "POST",
+    headers: gatewayRequestHeaders(),
+    body: JSON.stringify({
+      agent_id: agent.id,
+      hirer_id: access.hirerId || hirerIdFor(user),
+      hire_receipt_object_id: access.receiptObjectId,
+      wallet_address: user.wallet,
+      email: user.email,
+      task: agentTask,
+      budget_calls: 1,
+      conversation_id: conversationId,
+    }),
+  });
+  if (!response.ok) {
+    throw new Error(`Gateway ${response.status}: ${await response.text()}`);
+  }
+
+  const intent = (await response.json()) as GatewaySuiEscrowOpenIntentPayload;
+  if (intent.settlementRequired === false || intent.status === "not_required") {
+    return null;
+  }
+  const missing = [
+    ["openCallEscrowTarget", intent.openCallEscrowTarget],
+    ["agentVersionObjectId", intent.agentVersionObjectId],
+    ["hirerWalletObjectId", intent.hirerWalletObjectId],
+    ["creatorWalletObjectId", intent.creatorWalletObjectId],
+    ["maxMist", intent.maxMist],
+    ["requestDigest", intent.requestDigest],
+    ["expiresAtMs", intent.expiresAtMs],
+  ].filter(([, value]) => !value);
+  if (missing.length) {
+    throw new Error(
+      `Gateway did not return complete Sui escrow details: ${missing
+        .map(([key]) => key)
+        .join(", ")}`,
+    );
+  }
+
+  const tx = new Transaction();
+  tx.moveCall({
+    target: intent.openCallEscrowTarget!,
+    arguments: [
+      tx.object(intent.agentVersionObjectId!),
+      tx.object(intent.hirerWalletObjectId!),
+      tx.pure.u64(intent.maxMist!),
+      tx.pure.vector(
+        "u8",
+        validU8Array(intent.requestDigestBytes)
+          ? intent.requestDigestBytes!
+          : utf8Bytes(intent.requestDigest!),
+      ),
+      tx.pure.u64(intent.expiresAtMs!),
+      tx.object(intent.clockObjectId || "0x6"),
+    ],
+  });
+  const execution = await signAndExecuteTransaction({
+    transaction: tx,
+  });
+  const openTxDigest = readSuiTransactionDigest(execution);
+  if (!openTxDigest) {
+    throw new Error("SUI wallet did not return an escrow transaction digest.");
+  }
+  const escrowObjectId = findCreatedSuiObjectId(execution, "CallEscrow");
+  if (!escrowObjectId) {
+    throw new Error("SUI wallet did not return the created CallEscrow object id.");
+  }
+
+  return {
+    escrowObjectId,
+    openTxDigest,
+    agentVersionObjectId: intent.agentVersionObjectId!,
+    hirerWalletObjectId: intent.hirerWalletObjectId!,
+    creatorWalletObjectId: intent.creatorWalletObjectId!,
+    maxMist: intent.maxMist!,
+    requestDigest: intent.requestDigest!,
+    expiresAtMs: intent.expiresAtMs!,
+  };
+}
+
 async function callTryAgent({
   access,
   agent,
   clientConversationContext,
   conversationId,
   onEvent,
+  signAndExecuteTransaction,
   task,
   user,
 }: {
@@ -1632,33 +1972,61 @@ async function callTryAgent({
   clientConversationContext?: TryClientConversationContext | null;
   conversationId: string;
   onEvent?: (event: GatewayAgentStreamEvent) => void;
+  signAndExecuteTransaction: SignAndExecuteTransaction;
   task: string;
   user: AuthUser;
 }) {
-  const agentTask = buildTryAgentTaskWithClientContext(
-    task,
-    clientConversationContext,
-  );
+  const agentTask = task.trim();
+  const suiCallEscrow = await openSuiCallEscrowForPaidSend({
+    access,
+    agent,
+    agentTask,
+    conversationId,
+    signAndExecuteTransaction,
+    user,
+  });
+  const streamPayload = {
+    agent_id: agent.id,
+    task: agentTask,
+    response_mode: "direct_answer",
+    source: access.accessType === "trial" ? "web_try" : "web_hire",
+    hirer_id: access.hirerId || hirerIdFor(user),
+    hire_receipt_object_id: access.receiptObjectId,
+    wallet_address: user.wallet,
+    email: user.email,
+    conversation_id: conversationId,
+    client_conversation_context: clientConversationContext,
+    conversation_context_limit: 12,
+    conversation_title: `${agent.name} Try`,
+    mcp_conversation: true,
+    memwal_conversation: true,
+    wait_for_memory: false,
+    waitForMemory: false,
+    sui_call_escrow: suiCallEscrow,
+    sui_call_escrow_required: access.accessType === "hired",
+  };
+  debugTryChat("stream/request", {
+    accessSource: access.source,
+    accessType: access.accessType,
+    agentId: agent.id,
+    clientContextMessages: clientConversationContext?.messages.length || 0,
+    conversationId,
+    gatewayUrl,
+    hasReceipt: Boolean(access.receiptObjectId),
+    hirerId: streamPayload.hirer_id,
+    requiresSuiEscrow: streamPayload.sui_call_escrow_required,
+    taskLength: agentTask.length,
+  });
   const response = await fetch(`${gatewayUrl}/v1/agent-call/stream`, {
     method: "POST",
     headers: gatewayRequestHeaders(),
-    body: JSON.stringify({
-      agent_id: agent.id,
-      task: agentTask,
-      hirer_id: access.hirerId || hirerIdFor(user),
-      hire_receipt_object_id: access.receiptObjectId,
-      wallet_address: user.wallet,
-      email: user.email,
-      response_mode: "direct_answer",
-      conversation_id: conversationId,
-      client_conversation_context: clientConversationContext,
-      conversation_context_limit: 12,
-      conversation_title: `${agent.name} Try`,
-      mcp_conversation: true,
-      memwal_conversation: true,
-      wait_for_memory: false,
-      waitForMemory: false,
-    }),
+    body: JSON.stringify(streamPayload),
+  });
+  debugTryChat("stream/response", {
+    agentId: agent.id,
+    contentType: response.headers.get("content-type"),
+    ok: response.ok,
+    status: response.status,
   });
 
   if (!response.ok) {
@@ -1680,6 +2048,7 @@ async function readAgentCallStream(
   let buffer = "";
   let finalCall: GatewayAgentCallResponse | null = null;
   let streamError: string | null = null;
+  debugTryChat("stream/read-start");
 
   while (true) {
     const { done, value } = await reader.read();
@@ -1690,6 +2059,18 @@ async function readAgentCallStream(
       for (const part of parts) {
         const event = parseAgentStreamEvent(part);
         if (!event) continue;
+        debugTryChat("stream/event", {
+          callId: event.data.callId,
+          dataKeys: Object.keys(event.data).slice(0, 16),
+          event: event.event,
+          memoryJobId: event.data.memoryJobId || event.data.memory?.jobId,
+          outputTextLength:
+            event.data.outputText?.length ||
+            event.data.result?.outputText?.length ||
+            event.data.jsonOutput?.payload?.outputText?.length ||
+            0,
+          traceId: event.data.traceId,
+        });
         onEvent?.(event);
         finalCall = mergeStreamEventIntoCall(finalCall, event);
         if (event.event === "error") {
@@ -1706,6 +2087,18 @@ async function readAgentCallStream(
   if (buffer.trim()) {
     const event = parseAgentStreamEvent(buffer);
     if (event) {
+      debugTryChat("stream/event", {
+        callId: event.data.callId,
+        dataKeys: Object.keys(event.data).slice(0, 16),
+        event: event.event,
+        memoryJobId: event.data.memoryJobId || event.data.memory?.jobId,
+        outputTextLength:
+          event.data.outputText?.length ||
+          event.data.result?.outputText?.length ||
+          event.data.jsonOutput?.payload?.outputText?.length ||
+          0,
+        traceId: event.data.traceId,
+      });
       onEvent?.(event);
       finalCall = mergeStreamEventIntoCall(finalCall, event);
       if (event.event === "error") {
@@ -1719,6 +2112,12 @@ async function readAgentCallStream(
 
   if (streamError) throw new Error(streamError);
   if (!finalCall) throw new Error("Agent stream ended without a result.");
+  debugTryChat("stream/read-complete", {
+    callId: finalCall.callId,
+    memoryJobId: finalCall.memoryJobId || finalCall.memory?.jobId,
+    outputTextLength: extractAgentCallText(finalCall).length,
+    traceId: finalCall.traceId,
+  });
   return finalCall;
 }
 
@@ -1741,7 +2140,12 @@ function parseAgentStreamEvent(raw: string): GatewayAgentStreamEvent | null {
       data: JSON.parse(dataLines.join("\n")) as GatewayAgentCallResponse,
       event,
     };
-  } catch {
+  } catch (error) {
+    warnTryChat("stream/parse-failed", {
+      error: error instanceof Error ? error.message : String(error),
+      event,
+      rawPreview: raw.slice(0, 500),
+    });
     return null;
   }
 }
@@ -1755,6 +2159,7 @@ function mergeStreamEventIntoCall(
     return {
       ...(current || {}),
       callId: data.callId || current?.callId,
+      traceId: data.traceId || current?.traceId,
       conversationId: data.conversationId || current?.conversationId,
       memory: {
         ...(current?.memory || {}),
@@ -1776,6 +2181,8 @@ function mergeStreamEventIntoCall(
     return {
       ...(current || {}),
       callId: data.callId || current?.callId,
+      traceId: data.traceId || current?.traceId,
+      memoryJobId: data.memoryJobId || current?.memoryJobId,
       conversationId:
         data.mcpConversation?.conversationId ||
         data.conversationId ||
@@ -1794,6 +2201,7 @@ function mergeStreamEventIntoCall(
       ...(current || {}),
       ...data,
       memory: data.memory || current?.memory,
+      traceId: data.traceId || current?.traceId,
     };
   }
   if (streamEvent.event === "output_fast" || streamEvent.event === "result") {
@@ -1803,12 +2211,51 @@ function mergeStreamEventIntoCall(
       result: data.result || current?.result,
       jsonOutput: data.jsonOutput || current?.jsonOutput,
       outputText: data.outputText || current?.outputText,
+      traceId: data.traceId || current?.traceId,
     };
   }
   return {
     ...(current || {}),
     ...data,
   };
+}
+
+function readSuiTransactionDigest(execution: unknown) {
+  return isPlainRecord(execution)
+    ? readRecordString(execution, ["digest", "txDigest", "transactionDigest"])
+    : "";
+}
+
+function findCreatedSuiObjectId(execution: unknown, objectTypeName: string) {
+  if (!isPlainRecord(execution) || !Array.isArray(execution.objectChanges)) {
+    return "";
+  }
+  for (const change of execution.objectChanges) {
+    if (!isPlainRecord(change)) continue;
+    const changeType = readRecordString(change, ["type"]);
+    const objectType = readRecordString(change, ["objectType", "object_type"]);
+    if (
+      changeType === "created" &&
+      (objectType.endsWith(`::${objectTypeName}`) ||
+        objectType.includes(`::${objectTypeName}<`))
+    ) {
+      return readRecordString(change, ["objectId", "object_id"]);
+    }
+  }
+  return "";
+}
+
+function utf8Bytes(value: string) {
+  return Array.from(new TextEncoder().encode(value));
+}
+
+function validU8Array(value: unknown): value is number[] {
+  return (
+    Array.isArray(value) &&
+    value.every(
+      (item) => Number.isInteger(item) && Number(item) >= 0 && Number(item) <= 255,
+    )
+  );
 }
 
 async function loadTryMemoryStatus(memoryJobId: string) {
@@ -1831,8 +2278,10 @@ function tryConversationId(
   access: AgentAccessRecord,
   agent: Agent,
   user: AuthUser,
+  sessionId = "",
 ) {
-  return `web-try-v2-${access.hirerId || hirerIdFor(user)}-${agent.id}`;
+  const baseConversationId = `web-try-v2-${access.hirerId || hirerIdFor(user)}-${agent.id}`;
+  return sessionId ? `${baseConversationId}-${sessionId}` : baseConversationId;
 }
 
 function extractAgentCallText(call: GatewayAgentCallResponse) {
@@ -1877,12 +2326,58 @@ function tryChatTranscriptKey(
   access: AgentAccessRecord,
   agent: Agent,
   user: AuthUser,
+  sessionId = "",
 ) {
   return `${access.hirerId || hirerIdFor(user)}:${agent.id}:${tryConversationId(
     access,
     agent,
     user,
+    sessionId,
   )}`;
+}
+
+function tryChatSessionStorageKey(
+  access: AgentAccessRecord,
+  agent: Agent,
+  user: AuthUser,
+) {
+  return `${access.hirerId || hirerIdFor(user)}:${agent.id}`;
+}
+
+function createTryChatSessionId() {
+  return `s-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function readTryChatSessionId(
+  access: AgentAccessRecord,
+  agent: Agent,
+  user: AuthUser,
+) {
+  try {
+    const raw = window.localStorage.getItem(tryChatSessionsStorageKey);
+    if (!raw) return "";
+    const store = JSON.parse(raw) as Record<string, string>;
+    const sessionId = store[tryChatSessionStorageKey(access, agent, user)];
+    return /^[a-z0-9-]+$/i.test(sessionId || "") ? sessionId : "";
+  } catch {
+    return "";
+  }
+}
+
+function writeTryChatSessionId(
+  access: AgentAccessRecord,
+  agent: Agent,
+  user: AuthUser,
+  sessionId: string,
+) {
+  try {
+    const raw = window.localStorage.getItem(tryChatSessionsStorageKey);
+    const store = raw ? (JSON.parse(raw) as Record<string, string>) : {};
+    store[tryChatSessionStorageKey(access, agent, user)] = sessionId;
+    window.localStorage.setItem(tryChatSessionsStorageKey, JSON.stringify(store));
+  } catch {
+    // Reset still works for the open modal even when browser storage is unavailable.
+  }
 }
 
 function buildTryClientConversationContext({
@@ -1913,8 +2408,10 @@ function buildTryClientConversationContext({
       role: message.role,
       text: message.text.slice(0, 4000),
       createdAt: message.createdAt,
+      callId: message.callId || null,
       memWalStatus: message.memWalStatus || null,
       memoryJobId: message.memoryJobId || null,
+      traceId: message.traceId || null,
     }));
 
   if (!transcriptMessages.length) return null;
@@ -1925,41 +2422,6 @@ function buildTryClientConversationContext({
     source: "web_try_local_transcript",
     updatedAt: new Date().toISOString(),
   };
-}
-
-function buildTryAgentTaskWithClientContext(
-  task: string,
-  context?: TryClientConversationContext | null,
-) {
-  const originalTask = task.trim();
-  const transcriptMessages = context?.messages?.slice(-10) || [];
-  if (!context?.conversationId || !transcriptMessages.length) {
-    return originalTask;
-  }
-
-  const transcript = transcriptMessages
-    .map((message, index) => {
-      const metadata = [
-        `message=${index + 1}`,
-        `role=${message.role}`,
-        message.memWalStatus ? `memwal_status=${message.memWalStatus}` : null,
-      ]
-        .filter(Boolean)
-        .join(" ");
-      return `${metadata}\n${message.role}: ${message.text.slice(0, 1800)}`;
-    })
-    .join("\n\n---\n\n");
-
-  return [
-    "[Prior web Try transcript]",
-    `conversation_id: ${context.conversationId}`,
-    "Use these prior messages from the same browser chat as conversation memory. The current user request below is still the task to answer.",
-    "",
-    transcript,
-    "",
-    "[Current user request]",
-    originalTask,
-  ].join("\n");
 }
 
 function readTryChatTranscript(key: string): TryChatTranscriptRecord | null {
@@ -2027,6 +2489,21 @@ function writeTryChatTranscript(key: string, record: TryChatTranscriptRecord) {
   }
 }
 
+function deleteTryChatTranscript(key: string) {
+  try {
+    const raw = window.localStorage.getItem(tryChatTranscriptsStorageKey);
+    if (!raw) return;
+    const store = JSON.parse(raw) as Record<string, TryChatTranscriptRecord>;
+    delete store[key];
+    window.localStorage.setItem(
+      tryChatTranscriptsStorageKey,
+      JSON.stringify(store),
+    );
+  } catch {
+    // Reset should not fail just because browser storage is unavailable.
+  }
+}
+
 function isTryChatMessage(value: unknown): value is TryChatMessage {
   if (!value || typeof value !== "object") return false;
   const candidate = value as Partial<TryChatMessage>;
@@ -2040,11 +2517,126 @@ function isTryChatMessage(value: unknown): value is TryChatMessage {
 function sanitizeTryChatMessageForStorage(message: TryChatMessage) {
   return {
     ...message,
-    attachments: message.attachments?.filter(
-      (attachment) => attachment.url.length < 200_000,
-    ),
+    attachments: message.attachments
+      ?.map(sanitizeTryChatAttachmentForStorage)
+      .filter((attachment): attachment is TryChatAttachment => Boolean(attachment)),
     pending: false,
   };
+}
+
+function sanitizeTryChatAttachmentForStorage(
+  attachment: TryChatAttachment,
+): TryChatAttachment | null {
+  const isLargeInlineImage =
+    isTryChatDataImageUrl(attachment.url) && attachment.url.length >= 200_000;
+  if (attachment.localImageKey) {
+    return {
+      ...attachment,
+      url: isLargeInlineImage ? "" : attachment.url,
+    };
+  }
+  if (attachment.url.length < 200_000) return attachment;
+  return null;
+}
+
+function tryChatImageStorageKey(messageId: string, attachmentId: string) {
+  return `${messageId}:${attachmentId}`;
+}
+
+function isTryChatDataImageUrl(value: string) {
+  return /^data:image\/[a-z0-9.+-]+;base64,/i.test(value.trim());
+}
+
+function tryChatDataImageMimeType(value: string) {
+  const match = /^data:([^;]+);base64,/i.exec(value.trim());
+  return match?.[1]?.toLowerCase() || null;
+}
+
+function tryChatImageDownloadName(attachment: TryChatAttachment) {
+  const base =
+    attachment.label
+      .trim()
+      .replace(/[^a-z0-9._-]+/gi, "-")
+      .replace(/^-+|-+$/g, "") || "hireme-agent-image";
+  if (/\.[a-z0-9]+$/i.test(base)) return base;
+  const mimeType =
+    attachment.mimeType ||
+    tryChatDataImageMimeType(attachment.url) ||
+    guessImageMimeType(attachment.url);
+  const extension =
+    mimeType === "image/jpeg"
+      ? "jpg"
+      : mimeType === "image/webp"
+        ? "webp"
+        : mimeType === "image/gif"
+          ? "gif"
+          : "png";
+  return `${base}.${extension}`;
+}
+
+function openTryChatImageDb(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    if (!("indexedDB" in window)) {
+      reject(new Error("IndexedDB is unavailable."));
+      return;
+    }
+    const request = window.indexedDB.open(
+      tryChatImageDbName,
+      tryChatImageDbVersion,
+    );
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(tryChatImageStoreName)) {
+        db.createObjectStore(tryChatImageStoreName, { keyPath: "key" });
+      }
+    };
+    request.onerror = () =>
+      reject(request.error || new Error("Could not open image storage."));
+    request.onsuccess = () => resolve(request.result);
+  });
+}
+
+function idbRequest<T>(request: IDBRequest<T>): Promise<T> {
+  return new Promise((resolve, reject) => {
+    request.onerror = () =>
+      reject(request.error || new Error("IndexedDB request failed."));
+    request.onsuccess = () => resolve(request.result);
+  });
+}
+
+async function writeTryChatImageRecord(record: TryChatImageRecord) {
+  if (!isTryChatDataImageUrl(record.url)) return false;
+  let db: IDBDatabase | null = null;
+  try {
+    db = await openTryChatImageDb();
+    const transaction = db.transaction(tryChatImageStoreName, "readwrite");
+    const store = transaction.objectStore(tryChatImageStoreName);
+    await idbRequest(store.put(record));
+    return true;
+  } catch {
+    return false;
+  } finally {
+    db?.close();
+  }
+}
+
+async function readTryChatImageRecord(
+  key: string,
+): Promise<TryChatImageRecord | null> {
+  let db: IDBDatabase | null = null;
+  try {
+    db = await openTryChatImageDb();
+    const transaction = db.transaction(tryChatImageStoreName, "readonly");
+    const store = transaction.objectStore(tryChatImageStoreName);
+    const record = await idbRequest<TryChatImageRecord | undefined>(
+      store.get(key),
+    );
+    return record || null;
+  } catch {
+    return null;
+  } finally {
+    db?.close();
+  }
 }
 
 function recoverStoredTryChatMessage({
@@ -2078,8 +2670,10 @@ function recoverStoredTryChatMessage({
     ) {
       return {
         ...message,
+        callId: conversationContext.callId || message.callId || null,
         conversationId: conversationContext.conversationId,
         memoryJobId: conversationContext.memoryJobId,
+        traceId: conversationContext.traceId || message.traceId || null,
       };
     }
     return { ...message, memWalStatus: "failed" as const };
@@ -2099,6 +2693,7 @@ function buildTryConversationContext({
 }): TryConversationContext {
   return {
     agentId,
+    callId: call.callId || null,
     conversationId:
       call.mcpConversation?.conversationId ||
       call.ledgerEvent?.mcpConversationId ||
@@ -2124,6 +2719,7 @@ function buildTryConversationContext({
       call.memory?.jobId ||
       call.memoryJobId ||
       null,
+    traceId: call.traceId || call.callId || null,
     waitForMemory: call.memory?.waitForMemory ?? null,
   };
 }
@@ -2167,6 +2763,7 @@ function pendingAssistantMemoryTargets(
         message.memWalStatus === "pending" &&
         Boolean(message.memoryJobId),
     )
+    .slice(-tryMemWalMaxAutoPollTargets)
     .map((message) => ({
       conversationId: message.conversationId || fallbackConversationId || "",
       memoryJobId: message.memoryJobId || "",
@@ -2210,6 +2807,7 @@ function tryImageAttachmentFromValue(
     return {
       id: `image-${index}`,
       label: `Image ${index + 1}`,
+      mimeType: tryChatDataImageMimeType(value) || guessImageMimeType(value) || null,
       type: "image",
       url: value,
     };
@@ -2231,6 +2829,7 @@ function tryImageAttachmentFromValue(
       label:
         readRecordString(value, ["filename", "fileName", "name", "title"]) ||
         `Image ${index + 1}`,
+      mimeType: mimeType || guessImageMimeType(url) || null,
       type: "image",
       url,
     };
@@ -2244,6 +2843,7 @@ function tryImageAttachmentFromValue(
       label:
         readRecordString(value, ["filename", "fileName", "name", "title"]) ||
         `Image ${index + 1}`,
+      mimeType: tryChatDataImageMimeType(data) || mimeType || null,
       type: "image",
       url: data,
     };
@@ -2254,6 +2854,7 @@ function tryImageAttachmentFromValue(
     label:
       readRecordString(value, ["filename", "fileName", "name", "title"]) ||
       `Image ${index + 1}`,
+    mimeType,
     type: "image",
     url: `data:${mimeType};base64,${data.replace(/^data:[^;]+;base64,/i, "")}`,
   };
@@ -2314,16 +2915,20 @@ function buildTryCodexSnippet({
   access,
   agent,
   conversation,
+  fallbackConversationId,
   user,
 }: {
   access: AgentAccessRecord;
   agent: Agent;
   conversation: TryConversationContext | null;
+  fallbackConversationId?: string;
   user: AuthUser;
 }) {
   const hirerId = access.hirerId || hirerIdFor(user);
   const conversationId =
-    conversation?.conversationId || tryConversationId(access, agent, user);
+    conversation?.conversationId ||
+    fallbackConversationId ||
+    tryConversationId(access, agent, user);
   const lines = [
     "Ask HireMe to continue this web chat.",
     "",
@@ -2372,6 +2977,84 @@ function TryChatMessageContent({ message }: { message: TryChatMessage }) {
     <div className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
       {message.text}
     </div>
+  );
+}
+
+function TryChatMessageMeta({
+  message,
+  nowMs,
+}: {
+  message: TryChatMessage;
+  nowMs: number;
+}) {
+  const showDebugLink = shouldShowTryDebugTraceLink(message, nowMs);
+  if (!message.responseMode && !message.memWalStatus && !showDebugLink) {
+    return null;
+  }
+
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] font-medium uppercase tracking-[0.08em] opacity-75">
+      {message.responseMode ? <span>{message.responseMode}</span> : null}
+      {message.memWalStatus ? (
+        <TryMemWalMessageStatus message={message} nowMs={nowMs} />
+      ) : null}
+      {showDebugLink ? <TryDebugTraceLink message={message} /> : null}
+    </div>
+  );
+}
+
+function shouldShowTryDebugTraceLink(
+  message: TryChatMessage,
+  nowMs: number,
+) {
+  return (
+    Boolean(tryDebugTraceSearch(message)) &&
+    message.error === true &&
+    !shouldShowTryMemWalDebugLink(message, nowMs)
+  );
+}
+
+function TryDebugTraceLink({ message }: { message: TryChatMessage }) {
+  const search = tryDebugTraceSearch(message);
+  if (!search) return null;
+  return (
+    <Link
+      className="inline-flex items-center gap-1 rounded-md border border-[#bfdbfe] bg-white/70 px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-[#1d4ed8] transition hover:bg-[#eef5ff]"
+      to={`/debug/call${search}`}
+    >
+      <ExternalLink className="size-3" />
+      Debug trace
+    </Link>
+  );
+}
+
+function tryDebugTraceSearch(message: TryChatMessage) {
+  if (message.role !== "assistant") return null;
+  if (message.callId) {
+    return `?call_id=${encodeURIComponent(message.callId)}`;
+  }
+  if (message.traceId) {
+    return `?trace_id=${encodeURIComponent(message.traceId)}`;
+  }
+  if (message.memoryJobId) {
+    return `?memory_job_id=${encodeURIComponent(message.memoryJobId)}`;
+  }
+  return null;
+}
+
+function shouldShowTryMemWalDebugLink(message: TryChatMessage, nowMs: number) {
+  return (
+    message.memWalStatus === "failed" ||
+    isTryMemWalDebugStale(message, nowMs)
+  );
+}
+
+function isTryMemWalDebugStale(message: TryChatMessage, nowMs: number) {
+  if (message.memWalStatus !== "pending") return false;
+  const createdAt = Date.parse(message.createdAt || "");
+  return (
+    Number.isFinite(createdAt) &&
+    nowMs - createdAt >= tryChatMemWalDebugThresholdMs
   );
 }
 
@@ -2808,10 +3491,12 @@ function mapGatewayPublicAgentToAgent(agent: GatewayPublicAgent | undefined): Ag
     rating: agent?.rating ?? 0,
     calls: agent?.historicalCalls ?? 0,
     latencyMs,
-    avgInputTokens: 800,
-    avgOutputTokens: 700,
+    avgInputTokens: agent?.avgInputTokens ?? 800,
+    avgOutputTokens: agent?.avgOutputTokens ?? 700,
     createdAt: agent?.createdAt,
     updatedAt: agent?.updatedAt || agent?.createdAt,
+    currentVersionNumber: agent?.currentVersionNumber,
+    versionPublishedAt: agent?.versionPublishedAt,
     resultPreview: {
       title: `${skills[0]} result`,
       summary: `Returns safe ${agent?.publicContract || "hireme_agent(task)"} output with gateway authorization metadata.`,
@@ -2886,7 +3571,8 @@ function createdAgentRecordToAgent(record: CreatedAgentRecord, user?: AuthUser |
     avgOutputTokens: 0,
     activeUsers: record.activeUsers,
     createdAt: record.createdAt,
-    updatedAt: record.createdAt,
+    updatedAt: record.updatedAt || record.createdAt,
+    currentVersionNumber: record.currentVersionNumber || 1,
     resultPreview: {
       title: "Sample Input",
       summary: record.typicalOutputSample || record.description,
@@ -3040,21 +3726,23 @@ function TopNav({
         {isLanding ? (
           <button
             aria-label="맨 위로 이동"
-            className="flex items-center gap-2 text-left transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(49,130,246,0.35)] focus-visible:ring-offset-2"
+            className="flex items-center text-left transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(49,130,246,0.35)] focus-visible:ring-offset-2"
             onClick={onHomeClick}
             type="button"
           >
-            <span className="flex size-9 items-center justify-center rounded-full bg-gradient-to-br from-[#0753d6] to-[#38a8f7] text-white shadow-[rgba(7,83,214,0.24)_0_8px_20px]">
-              <Bot className="size-4" />
-            </span>
-            <span className="text-sm font-medium text-[#082b63]">HireMe</span>
+            <img
+              alt="HireMe"
+              className="h-11 w-auto sm:h-12"
+              src="/assets/Logo.png"
+            />
           </button>
         ) : (
-          <Link className="flex items-center gap-2" to="/">
-            <span className="flex size-9 items-center justify-center rounded-full bg-[#1c1e54] text-white">
-              <Bot className="size-4" />
-            </span>
-            <span className="text-sm font-medium text-[#0d253d]">HireMe</span>
+          <Link className="flex items-center transition hover:opacity-90" to="/">
+            <img
+              alt="HireMe"
+              className="h-11 w-auto sm:h-12"
+              src="/assets/Logo.png"
+            />
           </Link>
         )}
 
@@ -3116,12 +3804,13 @@ function ConnectSuiButton({
   const currentAccount = useCurrentAccount();
   const currentWallet = useCurrentWallet();
   const connectWallet = useConnectWallet();
+  const signTransaction = useSignTransaction();
   const [error, setError] = useState<string | null>(null);
   const connectedWithGoogle =
     currentWallet.isConnected && isGoogleWallet(currentWallet.currentWallet);
   const linkedAddress =
     user?.wallet || (connectedWithGoogle ? currentAccount?.address : "");
-  const isBusy = connectWallet.isPending;
+  const isBusy = connectWallet.isPending || signTransaction.isPending;
 
   async function connectSui() {
     if (!user) return;
@@ -3138,6 +3827,11 @@ function ConnectSuiButton({
         });
       }
       await syncGatewaySuiWallet(address, user.displayName);
+      await ensureSponsoredGatewaySuiWalletObject({
+        displayName: user.displayName,
+        signTransaction: signTransaction.mutateAsync,
+        suiAddress: address,
+      });
       onWalletLinked(address);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Sui wallet connection failed.");
@@ -4378,7 +5072,7 @@ function AgentDetailPage({
 
   const catalogAgents = marketplaceAgents;
 
-  const agent = catalogAgents.find(
+  const marketplaceAgent = catalogAgents.find(
     (item) =>
       isMarketplaceAgentVisible(item) &&
       (item.id === agentId ||
@@ -4386,8 +5080,28 @@ function AgentDetailPage({
         item.handle === agentId),
   );
   const localCreatedRecord = createdAgentRecords.find(
-    (record) => record.agentSlug === agent?.id || record.id === agent?.id,
+    (record) =>
+      record.agentSlug === marketplaceAgent?.id ||
+      record.id === marketplaceAgent?.id ||
+      record.agentSlug === agentId ||
+      record.id === agentId,
   );
+  const localAgent = localCreatedRecord
+    ? createdAgentRecordToAgent(localCreatedRecord, user)
+    : null;
+  const agent =
+    marketplaceAgent && localAgent
+      ? {
+          ...marketplaceAgent,
+          ...localAgent,
+          calls: marketplaceAgent.calls,
+          rating: marketplaceAgent.rating,
+          latencyMs: marketplaceAgent.latencyMs,
+          avgInputTokens: marketplaceAgent.avgInputTokens,
+          avgOutputTokens: marketplaceAgent.avgOutputTokens,
+          activeUsers: marketplaceAgent.activeUsers,
+        }
+      : localAgent || marketplaceAgent;
   const agentOwnerKeys = agent
     ? [agent.creator, agent.team.owner, agent.handle, agent.id]
         .map((value) => value.trim().toLowerCase())
@@ -4512,7 +5226,13 @@ function AgentDetailPage({
             result.protectedArtifact?.ciphertextDigest ||
             localCreatedRecord.ciphertextDigest,
           fileCount: result.upload?.entryCount || localCreatedRecord.fileCount,
-          createdAt: result.registeredAt || new Date().toISOString(),
+          createdAt: localCreatedRecord.createdAt,
+          updatedAt: result.registeredAt || new Date().toISOString(),
+          currentVersionNumber:
+            result.version?.versionNumber ||
+            localCreatedRecord.currentVersionNumber ||
+            agent.currentVersionNumber ||
+            1,
           status: "Published",
           source: "gateway",
           gatewayError: result.supabase?.error,
@@ -4826,9 +5546,9 @@ function AgentDetailPage({
                   <dl className="mt-3 grid gap-3 text-sm">
                     {[
                       ["Average time", formatDuration(agent.latencyMs)],
-                      ["Average usage", formatTokens(averageTokens)],
-                      ["Last updated", "Current release"],
-                      ["Version", "v1.0"],
+                      ["Average token usage", formatTokens(averageTokens)],
+                      ["Last updated", formatAgentUpdatedDate(agent.updatedAt)],
+                      ["Version", formatAgentVersion(agent)],
                       ["Completed runs", formatRuns(agent.calls)],
                       ["Rating", agent.rating ? `${agent.rating.toFixed(1)} / 5` : "New"],
                     ].map(([label, value]) => (
@@ -6010,12 +6730,34 @@ function TryAgentChatPanel({
   onClose: () => void;
   user: AuthUser;
 }) {
-  const transcriptKey = tryChatTranscriptKey(access, agent, user);
-  const restoredTranscript = readTryChatTranscript(transcriptKey);
+  const suiClient = useSuiClient();
+  const signAndExecuteTransaction = useSignAndExecuteTransaction({
+    execute: ({ bytes, signature }) =>
+      suiClient.executeTransactionBlock({
+        transactionBlock: bytes,
+        signature,
+        options: {
+          showEffects: true,
+          showObjectChanges: true,
+        },
+      }),
+  });
+  const [sessionId, setSessionId] = useState(() =>
+    readTryChatSessionId(access, agent, user),
+  );
+  const transcriptKey = tryChatTranscriptKey(access, agent, user, sessionId);
+  const restoredTranscriptRef = useRef<TryChatTranscriptRecord | null | undefined>(
+    undefined,
+  );
+  if (restoredTranscriptRef.current === undefined) {
+    restoredTranscriptRef.current = readTryChatTranscript(transcriptKey);
+  }
+  const restoredTranscript = restoredTranscriptRef.current;
   const [input, setInput] = useState("");
   const [isCommandCopied, setIsCommandCopied] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [confirmPendingSend, setConfirmPendingSend] = useState(false);
+  const [memWalStatusNow, setMemWalStatusNow] = useState(() => Date.now());
   const [sendNotice, setSendNotice] = useState<string | null>(null);
   const [conversationContext, setConversationContext] =
     useState<TryConversationContext | null>(
@@ -6027,16 +6769,35 @@ function TryAgentChatPanel({
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const isMountedRef = useRef(true);
   const activeMemoryPollsRef = useRef(new Set<string>());
+  const memoryPollGenerationRef = useRef(0);
+  const persistingImageKeysRef = useRef(new Set<string>());
+  const sessionVersionRef = useRef(0);
   const transcriptRef = useRef<HTMLDivElement | null>(null);
+  const transcriptShouldAutoScrollRef = useRef(true);
+  const transcriptMessageCountRef = useRef(messages.length);
+  const fallbackConversationId = tryConversationId(
+    access,
+    agent,
+    user,
+    sessionId,
+  );
   const callSnippet = buildTryCodexSnippet({
     access,
     agent,
     conversation: conversationContext,
+    fallbackConversationId,
     user,
   });
 
   useEffect(() => {
     inputRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setMemWalStatusNow(Date.now());
+    }, 15_000);
+    return () => window.clearInterval(timer);
   }, []);
 
   useEffect(() => {
@@ -6064,11 +6825,27 @@ function TryAgentChatPanel({
     };
   }, []);
 
+  function updateTranscriptAutoScrollState() {
+    const transcript = transcriptRef.current;
+    if (!transcript) return;
+    const distanceFromBottom =
+      transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight;
+    transcriptShouldAutoScrollRef.current = distanceFromBottom < 80;
+  }
+
   useEffect(() => {
-    transcriptRef.current?.scrollTo({
-      top: transcriptRef.current.scrollHeight,
+    const messageCountChanged =
+      messages.length !== transcriptMessageCountRef.current;
+    transcriptMessageCountRef.current = messages.length;
+    if (!messageCountChanged && !transcriptShouldAutoScrollRef.current) return;
+
+    const transcript = transcriptRef.current;
+    if (!transcript) return;
+    transcript.scrollTo({
+      top: transcript.scrollHeight,
       behavior: prefersReducedMotion() ? "auto" : "smooth",
     });
+    window.requestAnimationFrame(updateTranscriptAutoScrollState);
   }, [messages]);
 
   useEffect(() => {
@@ -6078,6 +6855,155 @@ function TryAgentChatPanel({
       updatedAt: new Date().toISOString(),
     });
   }, [conversationContext, messages, transcriptKey]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const targets = messages.flatMap((message) =>
+      (message.attachments || [])
+        .filter(
+          (attachment) =>
+            isTryChatDataImageUrl(attachment.url) &&
+            !attachment.localImageKey,
+        )
+        .map((attachment) => ({ attachment, messageId: message.id })),
+    );
+    if (!targets.length) return;
+
+    void Promise.all(
+      targets.map(async ({ attachment, messageId }) => {
+        const localImageKey = tryChatImageStorageKey(messageId, attachment.id);
+        if (persistingImageKeysRef.current.has(localImageKey)) return null;
+        persistingImageKeysRef.current.add(localImageKey);
+        const mimeType =
+          attachment.mimeType || tryChatDataImageMimeType(attachment.url);
+        try {
+          const stored = await writeTryChatImageRecord({
+            key: localImageKey,
+            label: attachment.label,
+            mimeType,
+            updatedAt: new Date().toISOString(),
+            url: attachment.url,
+          });
+          if (!stored) return null;
+          return {
+            attachmentId: attachment.id,
+            localImageKey,
+            messageId,
+            mimeType,
+          };
+        } finally {
+          persistingImageKeysRef.current.delete(localImageKey);
+        }
+      }),
+    ).then((updates) => {
+      if (cancelled) return;
+      const applied = updates.filter(
+        (
+          update,
+        ): update is {
+          attachmentId: string;
+          localImageKey: string;
+          messageId: string;
+          mimeType: string | null;
+        } => Boolean(update),
+      );
+      if (!applied.length) return;
+      setMessages((current) =>
+        current.map((message) => {
+          const messageUpdates = applied.filter(
+            (update) => update.messageId === message.id,
+          );
+          if (!messageUpdates.length || !message.attachments?.length) {
+            return message;
+          }
+          let changed = false;
+          const attachments = message.attachments.map((attachment) => {
+            const update = messageUpdates.find(
+              (candidate) => candidate.attachmentId === attachment.id,
+            );
+            if (!update || attachment.localImageKey) return attachment;
+            changed = true;
+            return {
+              ...attachment,
+              localImageKey: update.localImageKey,
+              mimeType: attachment.mimeType || update.mimeType,
+            };
+          });
+          return changed ? { ...message, attachments } : message;
+        }),
+      );
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [messages]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const targets = messages.flatMap((message) =>
+      (message.attachments || [])
+        .filter((attachment) => attachment.localImageKey && !attachment.url)
+        .map((attachment) => ({
+          attachmentId: attachment.id,
+          localImageKey: attachment.localImageKey || "",
+          messageId: message.id,
+        })),
+    );
+    if (!targets.length) return;
+
+    void Promise.all(
+      targets.map(async (target) => {
+        const record = await readTryChatImageRecord(target.localImageKey);
+        if (!record?.url) return null;
+        return { ...target, record };
+      }),
+    ).then((updates) => {
+      if (cancelled) return;
+      const applied = updates.filter(
+        (
+          update,
+        ): update is {
+          attachmentId: string;
+          localImageKey: string;
+          messageId: string;
+          record: TryChatImageRecord;
+        } => Boolean(update),
+      );
+      if (!applied.length) return;
+      setMessages((current) =>
+        current.map((message) => {
+          const messageUpdates = applied.filter(
+            (update) => update.messageId === message.id,
+          );
+          if (!messageUpdates.length || !message.attachments?.length) {
+            return message;
+          }
+          let changed = false;
+          const attachments = message.attachments.map((attachment) => {
+            const update = messageUpdates.find(
+              (candidate) =>
+                candidate.attachmentId === attachment.id &&
+                candidate.localImageKey === attachment.localImageKey,
+            );
+            if (!update) return attachment;
+            changed = true;
+            return {
+              ...attachment,
+              label: attachment.label || update.record.label,
+              mimeType: attachment.mimeType || update.record.mimeType,
+              url: update.record.url,
+            };
+          });
+          return changed ? { ...message, attachments } : message;
+        }),
+      );
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [messages]);
 
   useEffect(() => {
     if (!conversationContext) return;
@@ -6097,8 +7023,29 @@ function TryAgentChatPanel({
     messageId: string;
   }) {
     if (activeMemoryPollsRef.current.has(memoryJobId)) return;
+    if (activeMemoryPollsRef.current.size > 0) {
+      debugTryChat("memory-poll/replace-active", {
+        activeMemoryJobIds: Array.from(activeMemoryPollsRef.current),
+        nextMemoryJobId: memoryJobId,
+      });
+      activeMemoryPollsRef.current.clear();
+      memoryPollGenerationRef.current += 1;
+    }
+    const pollGeneration = memoryPollGenerationRef.current;
     activeMemoryPollsRef.current.add(memoryJobId);
+    debugTryChat("memory-poll/start", {
+      conversationId,
+      memoryJobId,
+      messageId,
+    });
+    const pollSessionVersion = sessionVersionRef.current;
+    const isPollCurrent = () =>
+      isMountedRef.current &&
+      pollGeneration === memoryPollGenerationRef.current &&
+      pollSessionVersion === sessionVersionRef.current &&
+      activeMemoryPollsRef.current.has(memoryJobId);
     const markMemoryPollFailed = () => {
+      if (!isPollCurrent()) return;
       setConversationContext((current) =>
         current?.memoryJobId === memoryJobId
           ? {
@@ -6119,18 +7066,33 @@ function TryAgentChatPanel({
     };
 
     try {
-      for (let attempt = 0; attempt < 40; attempt += 1) {
-        await wait(Math.min(5000, 1500 + attempt * 500));
-        if (!isMountedRef.current) return;
+      for (let attempt = 0; attempt < tryMemWalPollMaxAttempts; attempt += 1) {
+        const delayMs = tryMemWalPollDelayMs(attempt);
+        debugTryChat("memory-poll/wait", {
+          attempt: attempt + 1,
+          delayMs,
+          memoryJobId,
+        });
+        await wait(delayMs);
+        if (!isPollCurrent()) return;
 
         try {
           const result = await loadTryMemoryStatus(memoryJobId);
+          if (!isPollCurrent()) return;
           const nextConversationContext = buildTryConversationContext({
             agentId: agent.id,
             call: result,
             conversationId,
           });
           const nextStatus = tryMemWalDisplayStatus(nextConversationContext);
+          debugTryChat("memory-poll/result", {
+            attempt: attempt + 1,
+            conversationId: nextConversationContext.conversationId,
+            memoryJobId,
+            status: nextStatus,
+            traceId: result.traceId,
+            userMemWalStatus: nextConversationContext.userMemWalStatus,
+          });
           setConversationContext((current) =>
             !current ||
             current.memoryJobId === memoryJobId ||
@@ -6144,10 +7106,16 @@ function TryAgentChatPanel({
                 if (message.id === messageId) {
                   return {
                     ...message,
+                    callId: result.callId || nextConversationContext.callId || message.callId || null,
                     conversationId: nextConversationContext.conversationId,
                     memoryJobId: nextConversationContext.memoryJobId,
                     memWalBlobId: nextConversationContext.memWalBlobId,
                     memWalStatus: nextStatus,
+                    traceId:
+                      result.traceId ||
+                      nextConversationContext.traceId ||
+                      message.traceId ||
+                      null,
                   };
                 }
                 return message;
@@ -6161,14 +7129,29 @@ function TryAgentChatPanel({
           ) {
             return;
           }
-        } catch {
+        } catch (error) {
+          warnTryChat("memory-poll/error", {
+            attempt: attempt + 1,
+            error: error instanceof Error ? error.message : String(error),
+            memoryJobId,
+          });
           markMemoryPollFailed();
           return;
         }
       }
+      warnTryChat("memory-poll/timeout", {
+        conversationId,
+        memoryJobId,
+      });
       markMemoryPollFailed();
     } finally {
-      activeMemoryPollsRef.current.delete(memoryJobId);
+      if (memoryPollGenerationRef.current === pollGeneration) {
+        activeMemoryPollsRef.current.delete(memoryJobId);
+      }
+      debugTryChat("memory-poll/end", {
+        conversationId,
+        memoryJobId,
+      });
     }
   }
 
@@ -6221,6 +7204,25 @@ function TryAgentChatPanel({
     }, 1500);
   }
 
+  function handleResetChat() {
+    if (isSending) return;
+    const nextSessionId = createTryChatSessionId();
+    deleteTryChatTranscript(transcriptKey);
+    writeTryChatSessionId(access, agent, user, nextSessionId);
+    activeMemoryPollsRef.current.clear();
+    memoryPollGenerationRef.current += 1;
+    sessionVersionRef.current += 1;
+    setSessionId(nextSessionId);
+    setConversationContext(null);
+    setMessages(initialTryChatMessages(agent));
+    setInput("");
+    setConfirmPendingSend(false);
+    setSendNotice(null);
+    window.requestAnimationFrame(() => {
+      inputRef.current?.focus();
+    });
+  }
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const task = input.trim();
@@ -6229,7 +7231,23 @@ function TryAgentChatPanel({
     const currentMemWalStatus = conversationContext
       ? tryMemWalDisplayStatus(conversationContext)
       : null;
+    debugTryChat("chat/send-requested", {
+      accessId: access.id,
+      accessSource: access.source,
+      accessType: access.accessType,
+      agentId: agent.id,
+      conversationId: conversationContext?.conversationId || fallbackConversationId,
+      currentMemWalStatus,
+      hasConversationContext: Boolean(conversationContext),
+      messageCount: messages.length,
+      taskLength: task.length,
+      trialCallsRemaining: access.trialCallsRemaining,
+    });
     if (currentMemWalStatus === "pending" && !confirmPendingSend) {
+      debugTryChat("chat/pending-memory-confirmation", {
+        conversationId: conversationContext?.conversationId,
+        memoryJobId: conversationContext?.memoryJobId,
+      });
       setConfirmPendingSend(true);
       setSendNotice(
         "The previous chat has not been saved to memWal yet. Send anyway?",
@@ -6240,12 +7258,17 @@ function TryAgentChatPanel({
     setConfirmPendingSend(false);
     setSendNotice(null);
 
-    const conversationId =
-      conversationContext?.conversationId || tryConversationId(access, agent, user);
+    const conversationId = conversationContext?.conversationId || fallbackConversationId;
     const clientConversationContext = buildTryClientConversationContext({
       agent,
       conversationId,
       messages,
+    });
+    debugTryChat("chat/send-start", {
+      agentId: agent.id,
+      clientContextMessages: clientConversationContext?.messages.length || 0,
+      conversationId,
+      pendingMemoryJobId: conversationContext?.memoryJobId || null,
     });
     const userMessage: TryChatMessage = {
       id: `user-${Date.now().toString(36)}`,
@@ -6286,6 +7309,7 @@ function TryAgentChatPanel({
         const memWalStatus = tryMemWalDisplayStatus(nextConversationContext);
         setConversationContext(nextConversationContext);
         updatePendingMessage({
+          callId: call.callId || nextConversationContext.callId || null,
           conversationId: nextConversationContext.conversationId,
           memoryJobId: nextConversationContext.memoryJobId,
           ...(options.showText
@@ -6299,10 +7323,14 @@ function TryAgentChatPanel({
             : {}),
           memWalBlobId: nextConversationContext.memWalBlobId,
           memWalStatus,
+          traceId: call.traceId || nextConversationContext.traceId || call.callId || null,
         });
         return { memWalStatus, nextConversationContext };
       };
 
+      if (access.accessType === "hired") {
+        updatePendingMessage({ text: "Opening Sui escrow..." });
+      }
       const result = await callTryAgent({
         access,
         agent,
@@ -6327,16 +7355,16 @@ function TryAgentChatPanel({
           if (streamEvent.event === "memwal_pending") {
             applyStreamCall(
               {
+                callId: streamEvent.data.callId,
                 conversationId: streamEvent.data.conversationId || conversationId,
                 memory: {
-                  conversationStored: Boolean(streamEvent.data.conversationId)
-                    ? false
-                    : null,
+                  conversationStored: streamEvent.data.conversationId ? false : null,
                   jobId: streamEvent.data.memoryJobId ?? undefined,
                   status: "pending",
                   waitForMemory: false,
                 },
                 memoryJobId: streamEvent.data.memoryJobId || null,
+                traceId: streamEvent.data.traceId || streamEvent.data.callId,
                 userMemWal: {
                   jobId: streamEvent.data.memoryJobId ?? undefined,
                   status: "pending",
@@ -6350,6 +7378,7 @@ function TryAgentChatPanel({
           if (streamEvent.event === "memwal_stored") {
             applyStreamCall(
               {
+                callId: streamEvent.data.callId,
                 conversationId:
                   streamEvent.data.mcpConversation?.conversationId ||
                   streamEvent.data.conversationId ||
@@ -6362,11 +7391,13 @@ function TryAgentChatPanel({
                   waitForMemory: false,
                 },
                 userMemWal: streamEvent.data.userMemWal,
+                traceId: streamEvent.data.traceId || streamEvent.data.callId,
               },
               { showText: false },
             );
           }
         },
+        signAndExecuteTransaction: signAndExecuteTransaction.mutateAsync,
         task,
         user,
       });
@@ -6391,6 +7422,7 @@ function TryAgentChatPanel({
             ? {
                 ...message,
                 attachments: extractTryImageAttachments(result),
+                callId: result.callId || nextConversationContext.callId || null,
                 conversationId: nextConversationContext.conversationId,
                 memoryJobId: nextConversationContext.memoryJobId,
                 memWalBlobId: nextConversationContext.memWalBlobId,
@@ -6398,6 +7430,11 @@ function TryAgentChatPanel({
                 text: extractAgentCallText(result),
                 pending: false,
                 responseMode: result.responseMode || result.jsonOutput?.responseMode || null,
+                traceId:
+                  result.traceId ||
+                  nextConversationContext.traceId ||
+                  result.callId ||
+                  null,
               }
             : message,
         ),
@@ -6412,6 +7449,11 @@ function TryAgentChatPanel({
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Protected Agent call failed.";
+      warnTryChat("chat/send-failed", {
+        agentId: agent.id,
+        conversationId,
+        error: message,
+      });
       setMessages((current) =>
         current.map((item) =>
           item.id === pendingId
@@ -6434,7 +7476,7 @@ function TryAgentChatPanel({
 
   return (
     <div className="fixed inset-0 z-50 bg-[#0f172a]/28 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label={`Try ${agent.name}`}>
-      <div className="absolute inset-x-0 bottom-0 max-h-[92svh] overflow-hidden rounded-t-lg border border-[#dbeafe] bg-white shadow-[0_-18px_50px_rgba(15,52,96,0.18)] md:inset-y-4 md:right-4 md:left-auto md:flex md:w-[460px] md:max-w-[calc(100vw-2rem)] md:flex-col md:rounded-lg">
+      <div className="absolute inset-x-0 bottom-0 flex max-h-[92svh] flex-col overflow-hidden rounded-t-lg border border-[#dbeafe] bg-white shadow-[0_-18px_50px_rgba(15,52,96,0.18)] md:inset-y-4 md:right-4 md:left-auto md:w-[460px] md:max-w-[calc(100vw-2rem)] md:rounded-lg">
         <div className="flex items-start justify-between gap-4 border-b border-border px-4 py-4">
           <div className="min-w-0">
             <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.08em] text-primary">
@@ -6461,8 +7503,20 @@ function TryAgentChatPanel({
           </button>
         </div>
 
-        <div className="flex max-h-[calc(92svh-86px)] min-h-0 flex-col md:flex-1">
-          <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4" ref={transcriptRef}>
+        <TryMemorySessionBar
+          access={access}
+          conversation={conversationContext}
+          conversationId={fallbackConversationId}
+          disabled={isSending}
+          onReset={handleResetChat}
+        />
+
+        <div className="flex min-h-0 flex-1 flex-col">
+          <div
+            className="min-h-0 flex-1 overflow-y-auto px-4 py-4"
+            onScroll={updateTranscriptAutoScrollState}
+            ref={transcriptRef}
+          >
             <div className="grid gap-3">
               {messages.map((message) => (
                 <div
@@ -6480,34 +7534,39 @@ function TryAgentChatPanel({
                   <TryChatMessageContent message={message} />
                   {message.attachments?.length ? (
                     <div className="mt-3 grid gap-2">
-                      {message.attachments.map((attachment) => (
-                        <a
-                          className="block overflow-hidden rounded-lg border border-border bg-white"
-                          href={attachment.url}
-                          key={attachment.id}
-                          rel="noreferrer"
-                          target="_blank"
-                        >
-                          <img
-                            alt={attachment.label}
-                            className="max-h-72 w-full object-contain"
-                            src={attachment.url}
-                          />
-                        </a>
-                      ))}
+                      {message.attachments.map((attachment) =>
+                        attachment.url ? (
+                          <a
+                            className="block overflow-hidden rounded-lg border border-border bg-white"
+                            download={
+                              isTryChatDataImageUrl(attachment.url)
+                                ? tryChatImageDownloadName(attachment)
+                                : undefined
+                            }
+                            href={attachment.url}
+                            key={attachment.id}
+                            rel="noreferrer"
+                            target="_blank"
+                          >
+                            <img
+                              alt={attachment.label}
+                              className="max-h-72 w-full object-contain"
+                              src={attachment.url}
+                            />
+                          </a>
+                        ) : (
+                          <div
+                            className="flex items-center gap-2 rounded-lg border border-dashed border-border bg-white px-3 py-3 text-xs text-muted-foreground"
+                            key={attachment.id}
+                          >
+                            <ImageIcon className="size-4" />
+                            Loading saved image...
+                          </div>
+                        ),
+                      )}
                     </div>
                   ) : null}
-                  {message.responseMode || message.memWalStatus ? (
-                    <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] font-medium uppercase tracking-[0.08em] opacity-75">
-                      {message.responseMode ? <span>{message.responseMode}</span> : null}
-                      {message.memWalStatus ? (
-                        <TryMemWalMessageStatus
-                          blobId={message.memWalBlobId}
-                          status={message.memWalStatus}
-                        />
-                      ) : null}
-                    </div>
-                  ) : null}
+                  <TryChatMessageMeta message={message} nowMs={memWalStatusNow} />
                 </div>
               ))}
             </div>
@@ -6561,23 +7620,23 @@ function TryAgentChatPanel({
                   ) : null}
                 </div>
               ) : null}
-              <div className="flex items-center justify-between gap-3">
+              <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <details className="min-w-0 flex-1">
                   <summary className="cursor-pointer list-none text-xs font-semibold text-primary [&::-webkit-details-marker]:hidden">
-                    Run in Codex
+                    Continue this chat in Codex
                   </summary>
                   <div className="relative mt-2 rounded-md border border-border bg-secondary">
                     <code className="block whitespace-pre-wrap break-all py-2 pl-2 pr-10 text-[11px] leading-5 text-[#1c1e54]">
                       {callSnippet}
                     </code>
                     <button
-                      aria-label="Copy Run in Codex prompt"
+                      aria-label="Copy Continue this chat in Codex prompt"
                       className="absolute right-2 top-2 inline-flex size-7 items-center justify-center rounded-md border border-border bg-white text-[#273951] shadow-sm transition hover:bg-[#f8fafc]"
                       onClick={() => void handleCopyCallSnippet()}
                       title={
                         isCommandCopied
                           ? "Copied"
-                          : "Copy Run in Codex prompt"
+                          : "Copy Continue this chat in Codex prompt"
                       }
                       type="button"
                     >
@@ -6589,7 +7648,11 @@ function TryAgentChatPanel({
                     </button>
                   </div>
                 </details>
-                <Button disabled={!input.trim() || isSending} type="submit">
+                <Button
+                  className="w-full sm:w-auto"
+                  disabled={!input.trim() || isSending}
+                  type="submit"
+                >
                   <MessageCircle />
                   {isSending ? "Running" : "Send"}
                 </Button>
@@ -6602,14 +7665,161 @@ function TryAgentChatPanel({
   );
 }
 
-function TryMemWalMessageStatus({
-  blobId,
-  status,
+function TryMemorySessionBar({
+  access,
+  conversation,
+  conversationId,
+  disabled,
+  onReset,
 }: {
-  blobId?: string | null;
-  status: TryMemWalDisplayStatus;
+  access: AgentAccessRecord;
+  conversation: TryConversationContext | null;
+  conversationId: string;
+  disabled: boolean;
+  onReset: () => void;
 }) {
+  const status = conversation ? tryMemWalDisplayStatus(conversation) : null;
+  const activeConversationId = conversation?.conversationId || conversationId;
+  const explorerUrl =
+    status === "stored" ? walrusExplorerBlobUrl(conversation?.memWalBlobId) : null;
+  const isLocalOnly = access.source === "local" && !conversation;
+  const label =
+    status === "stored"
+      ? "Memory saved"
+      : status === "pending"
+        ? "Saving memory"
+        : status === "failed"
+          ? "Memory failed"
+          : isLocalOnly
+            ? "Local only"
+            : "Memory ready";
+  const detail =
+    status === "stored"
+      ? "MemWal is ready for this session."
+      : status === "pending"
+        ? "Output returned. MemWal is catching up."
+        : status === "failed"
+          ? "This chat can continue locally, but memory was not saved."
+          : isLocalOnly
+            ? "Gateway memory is unavailable in local preview."
+            : "Send a message to start a remembered session.";
+  const toneClass =
+    status === "stored"
+      ? "border-[#bbf7d0] bg-[#f0fdf4] text-[#15803d]"
+      : status === "pending"
+        ? "border-[#bfdbfe] bg-[#eff6ff] text-[#1d4ed8]"
+        : status === "failed"
+          ? "border-[#fed7aa] bg-[#fff7ed] text-[#c2410c]"
+          : "border-[#dbeafe] bg-[#f8fbff] text-[#1d4ed8]";
+  const Icon =
+    status === "stored"
+      ? CheckCircle2
+      : status === "pending"
+        ? LoaderCircle
+        : status === "failed"
+          ? AlertTriangle
+          : ShieldCheck;
+
+  return (
+    <div className="border-b border-border bg-[#f8fbff] px-4 py-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex min-w-0 items-start gap-2.5">
+          <span
+            className={`mt-0.5 inline-flex size-8 shrink-0 items-center justify-center rounded-md border ${toneClass}`}
+          >
+            <Icon
+              className={`size-4 ${status === "pending" ? "animate-spin" : ""}`}
+            />
+          </span>
+          <div className="min-w-0">
+            <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs font-semibold text-[#1c1e54]">
+              <span>{label}</span>
+              <span
+                className="max-w-full truncate font-mono text-[11px] font-medium text-muted-foreground"
+                title={activeConversationId}
+              >
+                {shortAddress(activeConversationId)}
+              </span>
+              {explorerUrl ? (
+                <a
+                  className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#168a58] transition hover:text-[#0f6f47]"
+                  href={explorerUrl}
+                  rel="noreferrer"
+                  target="_blank"
+                >
+                  Walrus
+                  <ExternalLink className="size-3" />
+                </a>
+              ) : null}
+            </div>
+            <p className="mt-0.5 text-xs leading-5 text-muted-foreground">
+              {detail}
+            </p>
+          </div>
+        </div>
+        <button
+          className="inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-md border border-border bg-white px-2.5 text-xs font-semibold text-[#273951] transition hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-50"
+          disabled={disabled}
+          onClick={onReset}
+          title={
+            disabled
+              ? "Wait until the current run finishes before resetting."
+              : "Reset this Try chat"
+          }
+          type="button"
+        >
+          <RotateCcw className="size-3.5" />
+          Reset
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function TryMemWalMessageStatus({
+  message,
+  nowMs,
+}: {
+  message: TryChatMessage;
+  nowMs: number;
+}) {
+  const status = message.memWalStatus;
+  if (!status) return null;
+  const debugSearch = tryDebugTraceSearch(message);
+  if (shouldShowTryMemWalDebugLink(message, nowMs)) {
+    const title =
+      status === "failed"
+        ? "memWal save failed. Open debug trace."
+        : "memWal has been pending for more than 2 minutes. Open debug trace.";
+    const content = (
+      <>
+        <X className="size-3.5" />
+        memWal
+      </>
+    );
+    if (debugSearch) {
+      return (
+        <Link
+          className="inline-flex items-center gap-1 rounded-md border border-[#fecaca] bg-[#fff5f5] px-2 py-1 text-[#b91c1c] transition hover:bg-[#fee2e2]"
+          title={title}
+          to={`/debug/call${debugSearch}`}
+        >
+          {content}
+        </Link>
+      );
+    }
+    return (
+      <span
+        className="inline-flex items-center gap-1 rounded-md border border-[#fecaca] bg-[#fff5f5] px-2 py-1 text-[#b91c1c]"
+        title={title}
+      >
+        {content}
+      </span>
+    );
+  }
+
   if (status === "stored") {
+    const blobId = message.memWalBlobId;
     const explorerUrl = walrusExplorerBlobUrl(blobId);
     if (explorerUrl) {
       return (
@@ -6631,15 +7841,6 @@ function TryMemWalMessageStatus({
       <span className="inline-flex items-center gap-1 text-[#168a58]" title="memWal saved">
         <CheckCircle2 className="size-3.5" />
         memWal
-      </span>
-    );
-  }
-
-  if (status === "failed") {
-    return (
-      <span className="inline-flex items-center gap-1 text-[#b45309]" title="memWal save failed">
-        <AlertTriangle className="size-3.5" />
-        memWal failed
       </span>
     );
   }
@@ -7026,6 +8227,21 @@ function formatAgentPriceShort(price: number) {
   return `${displayPrice} SUI`;
 }
 
+function formatAgentUpdatedDate(value: string | undefined) {
+  if (!value) return "Not published";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Not published";
+  return date.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+function formatAgentVersion(agent: Agent) {
+  return `v${Math.max(1, Math.trunc(agent.currentVersionNumber || 1))}.0`;
+}
+
 function formatSuiBalance(value: string | number | null | undefined) {
   const amount = readSuiNumber(value);
   const displayPrice =
@@ -7101,6 +8317,13 @@ function isExplorerReadyWalrusBlobId(value: string) {
 
 function isSuiObjectId(value: string) {
   return /^0x[0-9a-f]{64}$/i.test(value);
+}
+
+function normalizeSuiAddressForCompare(value?: string | null) {
+  const text = String(value || "").trim().toLowerCase();
+  if (!text) return "";
+  const normalized = text.startsWith("0x") ? text : `0x${text}`;
+  return /^0x[0-9a-f]{64}$/.test(normalized) ? normalized : "";
 }
 
 function formatAccessDate(value: string | null) {
@@ -7474,6 +8697,12 @@ function CreateAgentPage({
                 : editingRecord.ciphertextDigest,
             fileCount: harnessFile ? 1 : editingRecord.fileCount,
             createdAt: editingRecord.createdAt,
+            updatedAt: gatewayRegistration.registeredAt || new Date().toISOString(),
+            currentVersionNumber:
+              gatewayRegistration.version?.versionNumber ||
+              editingRecord.currentVersionNumber ||
+              nextAgent.currentVersionNumber ||
+              1,
             status: "Published",
             source: "gateway",
           });
@@ -7578,6 +8807,8 @@ function CreateAgentPage({
         ciphertextDigest: registeredArtifact.ciphertextDigest,
         fileCount: record.fileCount,
         createdAt: record.createdAt,
+        updatedAt: record.createdAt,
+        currentVersionNumber: gatewayRegistration.version?.versionNumber || 1,
         status: "Published",
         source: "gateway",
       });

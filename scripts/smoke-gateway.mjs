@@ -16,6 +16,8 @@ const gateway = spawn("node", ["apps/gateway/src/index.mjs"], {
     HIREME_OAUTH_ALLOW_DEMO_LOGIN: "1",
     HIREME_LLM_PROVIDER: "ollama",
     HIREME_OLLAMA_DISABLED: "1",
+    HIREME_RESPONSE_MODE_CLASSIFIER: "fixture",
+    HIREME_RESPONSE_MODE_CLASSIFIER_FIXTURE_MODE: "local_codex_execution_brief",
     SUPABASE_SERVICE_ROLE_KEY: "",
   },
   stdio: ["ignore", "pipe", "inherit"],
@@ -75,9 +77,9 @@ try {
   if (
     directCall.jsonOutput?.schema !== "hireme.protected_agent_json_output.v1" ||
     directCall.jsonOutput?.responseMode !== "local_codex_execution_brief" ||
-    directCall.jsonOutput?.localCodex?.shouldAct !== false
+    directCall.jsonOutput?.localCodex?.shouldAct !== true
   ) {
-    throw new Error("Gateway REST call did not return display-only Agent output JSON");
+    throw new Error("Gateway REST call did not mark local execution brief as actionable");
   }
 
   const streamDescriptor = await postJson(`${gatewayUrl}/v1/agent-call`, gatewayKey, {
@@ -114,6 +116,7 @@ try {
     agent_id: "codex-builder",
     hirer_id: "smoke-hirer",
     task: "안녕이라고 인사해줘",
+    response_mode: "direct_answer",
     budget_calls: 1,
   });
   if (
@@ -121,7 +124,36 @@ try {
     greetingCall.jsonOutput?.responseMode !== "direct_answer" ||
     greetingCall.jsonOutput?.localCodex?.shouldAct !== false
   ) {
-    throw new Error("Gateway greeting call did not return a direct answer mode");
+    throw new Error("Gateway explicit direct answer override did not win over classifier");
+  }
+
+  const classifierNoSourceCall = await postJson(`${gatewayUrl}/v1/agent-call`, gatewayKey, {
+    agent_id: "codex-builder",
+    hirer_id: "smoke-hirer",
+    task: "안녕이라고 인사해줘",
+    budget_calls: 1,
+  });
+  if (
+    classifierNoSourceCall.jsonOutput?.schema !== "hireme.protected_agent_json_output.v1" ||
+    classifierNoSourceCall.jsonOutput?.responseMode !== "local_codex_execution_brief" ||
+    classifierNoSourceCall.jsonOutput?.localCodex?.shouldAct !== true
+  ) {
+    throw new Error("Gateway no-source Agent call did not use the response mode classifier");
+  }
+
+  const webDefaultCall = await postJson(`${gatewayUrl}/v1/agent-call`, gatewayKey, {
+    agent_id: "codex-builder",
+    hirer_id: "smoke-hirer",
+    task: "안녕이라고 인사해줘",
+    source: "web_try",
+    budget_calls: 1,
+  });
+  if (
+    webDefaultCall.jsonOutput?.schema !== "hireme.protected_agent_json_output.v1" ||
+    webDefaultCall.jsonOutput?.responseMode !== "direct_answer" ||
+    webDefaultCall.jsonOutput?.localCodex?.shouldAct !== false
+  ) {
+    throw new Error("Gateway web Try request did not default to direct_answer");
   }
 
   const protectedInternalsCall = await postJson(`${gatewayUrl}/v1/agent-call`, gatewayKey, {
@@ -228,12 +260,12 @@ try {
     throw new Error("HTTP MCP OAuth flow did not list the connected user's Agents");
   }
   if (
-    !httpMcpCallText.includes('"type": "hireme_agent_call_stream"') ||
-    !httpMcpCallText.includes("/v1/agent-call/stream") ||
-    !httpMcpCallText.includes('"output_fast"') ||
-    !httpMcpCallText.includes('"heartbeat"')
+    !httpMcpCallText.includes('"type": "hireme_agent_call_mcp_result"') ||
+    !httpMcpCallText.includes('"streamConsumed": true') ||
+    !httpMcpCallText.includes('"codexAction": "EXECUTE_LOCAL_WORKSPACE_BRIEF_NOW"') ||
+    !httpMcpCallText.includes('"responseMode": "local_codex_execution_brief"')
   ) {
-    throw new Error("HTTP MCP OAuth flow did not return the Agent stream descriptor");
+    throw new Error("HTTP MCP OAuth flow did not consume the Agent stream output");
   }
 
   const pluginOutput = await runPluginThroughGateway(gatewayUrl, gatewayKey);
@@ -255,12 +287,12 @@ try {
   const whoamiText = whoamiResult?.result?.content?.[0]?.text || "";
 
   if (
-    !text.includes('"type": "hireme_agent_call_stream"') ||
-    !text.includes("/v1/agent-call/stream") ||
-    !text.includes('"output_fast"') ||
-    !text.includes('"heartbeat"')
+    !text.includes('"type": "hireme_agent_call_mcp_result"') ||
+    !text.includes('"streamConsumed": true') ||
+    !text.includes('"codexAction": "EXECUTE_LOCAL_WORKSPACE_BRIEF_NOW"') ||
+    !text.includes('"responseMode": "local_codex_execution_brief"')
   ) {
-    throw new Error("Plugin MCP call did not return the Agent stream descriptor");
+    throw new Error("Plugin MCP call did not consume the Agent stream output");
   }
   if (
     !naturalText.includes('"inferredAgentId": "launch-operator"') ||

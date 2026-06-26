@@ -79,5 +79,11 @@ services:
         sync: false
       - key: OLLAMA_MODEL
         value: gemma4:31b-cloud
+      - key: HIREME_RESPONSE_MODE_CLASSIFIER
+        value: llm
+      - key: HIREME_RESPONSE_MODE_CLASSIFIER_PROVIDER
+        value: ollama
+      - key: HIREME_RESPONSE_MODE_CLASSIFIER_MODEL
+        value: gemma4:31b-cloud
       - key: HIREME_IMAGE_GENERATION_PROVIDER
         value: openai

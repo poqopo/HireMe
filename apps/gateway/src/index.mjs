@@ -19,10 +19,17 @@ import {
 import { basename, dirname, extname, join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
 import { createClient } from "@supabase/supabase-js";
+import { EnokiClient } from "@mysten/enoki";
 import {
   getJsonRpcFullnodeUrl,
   SuiJsonRpcClient,
 } from "@mysten/sui/jsonRpc";
+import { decodeSuiPrivateKey } from "@mysten/sui/cryptography";
+import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
+import { Secp256k1Keypair } from "@mysten/sui/keypairs/secp256k1";
+import { Secp256r1Keypair } from "@mysten/sui/keypairs/secp256r1";
+import { Transaction } from "@mysten/sui/transactions";
+import { toBase64 } from "@mysten/sui/utils";
 import {
   validateSealedArtifact,
 } from "./localSealedArtifact.mjs";
@@ -90,6 +97,7 @@ const defaultSuiFullnodeUrl =
   process.env.HIREME_SUI_FULLNODE_URL ||
   process.env.VITE_SUI_FULLNODE_URL ||
   getJsonRpcFullnodeUrl(defaultSuiNetwork);
+const suiClockObjectId = "0x6";
 const defaultSuiPaymentVerificationMode = String(
   process.env.HIREME_SUI_PAYMENT_VERIFICATION_MODE ||
     process.env.HIREME_SUI_PAYMENT_VERIFY_MODE ||
@@ -213,6 +221,17 @@ const defaultModelTimeoutMs = Math.max(
     ) || 60_000,
   ),
 );
+const defaultResponseModeClassifierTimeoutMs = Math.max(
+  1_000,
+  Math.trunc(Number(process.env.HIREME_RESPONSE_MODE_CLASSIFIER_TIMEOUT_MS || "10000") || 10_000),
+);
+const defaultResponseModeClassifierMaxOutputTokens = Math.max(
+  32,
+  Math.trunc(
+    Number(process.env.HIREME_RESPONSE_MODE_CLASSIFIER_MAX_OUTPUT_TOKENS || "160") ||
+      160,
+  ),
+);
 const defaultHarnessContextMaxChars = Math.max(
   4_000,
   Math.trunc(Number(process.env.HIREME_HARNESS_CONTEXT_MAX_CHARS || "24000") || 24_000),
@@ -246,6 +265,7 @@ const protectedHarnessImageGenerationDisabled =
   );
 const execFileAsync = promisify(execFile);
 let gatewayLogQueue = Promise.resolve();
+let agentCallTraceWriteQueue = Promise.resolve();
 const trialCallAllowance = 100;
 let fixtureExecutorOutputIndex = 0;
 
@@ -399,6 +419,8 @@ const mcpConversationSessions = new Map();
 const ledger = [];
 const agentJobs = new Map();
 const memoryJobs = new Map();
+const agentCallTraces = new Map();
+const agentCallTraceAliases = new Map();
 const agentResultAttachmentBlobs = new Map();
 const agentEntitlements = new Map();
 const suiPaymentIntents = new Map();
@@ -413,6 +435,13 @@ const oauthScopes = ["hireme:agents", "hireme:call", "hireme:manage"];
 const defaultAgentJobTtlMs = Math.max(
   60_000,
   Math.trunc(Number(process.env.HIREME_AGENT_JOB_TTL_MS || "7200000") || 7_200_000),
+);
+const defaultAgentCallTraceTtlMs = Math.max(
+  60_000,
+  Math.trunc(
+    Number(process.env.HIREME_AGENT_CALL_TRACE_TTL_MS || defaultAgentJobTtlMs) ||
+      defaultAgentJobTtlMs,
+  ),
 );
 const defaultAgentResultDownloadTtlMs = Math.max(
   60_000,
@@ -666,6 +695,16 @@ const server = createServer(async (req, res) => {
       return;
     }
 
+    if (req.method === "POST" && url.pathname === "/v1/settlements/sui/escrow/open-intent") {
+      sendJson(res, 200, await createSuiCallEscrowOpenIntent(body));
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/v1/settlements/sui/escrow/settle") {
+      sendJson(res, 200, await settleSuiCallEscrow(body));
+      return;
+    }
+
     if (req.method === "POST" && url.pathname === "/v1/my/agents") {
       sendJson(res, 200, await listMyAgents(body));
       return;
@@ -698,6 +737,21 @@ const server = createServer(async (req, res) => {
 
     if (req.method === "POST" && url.pathname === "/v1/me/wallet") {
       sendJson(res, 200, await linkSuiWallet(body));
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/v1/me/sui-wallet/ensure") {
+      sendJson(res, 200, await ensureMySuiAccountWallet(body));
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/v1/me/sui-wallet/sponsored-create-intent") {
+      sendJson(res, 200, await createMySuiAccountWalletSponsoredIntent(body));
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/v1/me/sui-wallet/sponsored-create-execute") {
+      sendJson(res, 200, await executeMySuiAccountWalletSponsoredCreation(body));
       return;
     }
 
@@ -785,7 +839,17 @@ const server = createServer(async (req, res) => {
     }
 
     if (req.method === "POST" && url.pathname === "/v1/agent-memory-status") {
-      sendJson(res, 200, getProtectedAgentMemoryStatus(body));
+      sendJson(res, 200, await getProtectedAgentMemoryStatus(body));
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/v1/agent-call/trace") {
+      sendJson(res, 200, await getAgentCallTrace(body));
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/v1/memwal/reconcile") {
+      sendJson(res, 200, await reconcileAgentCallMemory(body));
       return;
     }
 
@@ -1097,6 +1161,42 @@ const httpMcpTools = [
     },
   },
   {
+    name: "hireme_continue_conversation",
+    title: "Continue a HireMe conversation",
+    description:
+      "Return a stream descriptor for a natural follow-up on an existing memWal conversation. The gateway auto-selects direct answer vs local Codex execution brief.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        agent_id: { type: "string" },
+        conversation_id: { type: "string" },
+        request: { type: "string", minLength: 1 },
+        response_mode: {
+          type: "string",
+          enum: ["auto", "direct_answer", "local_codex_execution_brief"],
+        },
+        conversation_context_limit: {
+          type: "integer",
+          minimum: 1,
+          maximum: 100,
+        },
+        client_conversation_context: {
+          type: ["object", "array"],
+          description:
+            "Optional client-held transcript fallback for turns not yet indexed in memWal.",
+        },
+        prior_messages: {
+          type: "array",
+          items: { type: "object" },
+        },
+        budget_calls: { type: "integer", minimum: 1 },
+        hire_receipt_object_id: { type: "string" },
+        wait_for_memory: { type: "boolean" },
+      },
+      required: ["request"],
+    },
+  },
+  {
     name: "hireme_call_agent_stream",
     title: "Stream a HireMe agent call",
     description:
@@ -1110,6 +1210,20 @@ const httpMcpTools = [
         response_mode: {
           type: "string",
           enum: ["direct_answer", "local_codex_execution_brief"],
+        },
+        conversation_context_limit: {
+          type: "integer",
+          minimum: 1,
+          maximum: 100,
+        },
+        client_conversation_context: {
+          type: ["object", "array"],
+          description:
+            "Optional client-held transcript fallback for turns not yet indexed in memWal.",
+        },
+        prior_messages: {
+          type: "array",
+          items: { type: "object" },
         },
         budget_calls: { type: "integer", minimum: 1 },
         hire_receipt_object_id: { type: "string" },
@@ -1139,6 +1253,52 @@ const httpMcpTools = [
         job_id: {
           type: "string",
           description: "Alias for memory_job_id.",
+        },
+      },
+    },
+  },
+  {
+    name: "hireme_get_agent_call_trace",
+    title: "Get HireMe agent call trace",
+    description:
+      "Return gateway trace stages for a streamed Agent call by call_id, trace_id, or memory_job_id.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        call_id: {
+          type: "string",
+          description: "Agent call id returned as output_fast.callId.",
+        },
+        trace_id: {
+          type: "string",
+          description: "Trace id returned as output_fast.traceId.",
+        },
+        memory_job_id: {
+          type: "string",
+          description: "Memory job id returned as output_fast.memoryJobId.",
+        },
+      },
+    },
+  },
+  {
+    name: "hireme_reconcile_memwal",
+    title: "Reconcile HireMe memWal storage",
+    description:
+      "Check a call trace, background memory job, local memWal record, local ledger, and Supabase rows for the same Agent call.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        call_id: {
+          type: "string",
+          description: "Agent call id returned as output_fast.callId.",
+        },
+        trace_id: {
+          type: "string",
+          description: "Trace id returned as output_fast.traceId.",
+        },
+        memory_job_id: {
+          type: "string",
+          description: "Memory job id returned as output_fast.memoryJobId.",
         },
       },
     },
@@ -1310,8 +1470,11 @@ const httpMcpAdvertisedToolNames = new Set([
   "hireme_get_agent",
   "hireme_select_agent",
   "hireme_current_agent",
+  "hireme_continue_conversation",
   "hireme_call_agent_stream",
   "hireme_get_memory_status",
+  "hireme_get_agent_call_trace",
+  "hireme_reconcile_memwal",
 ]);
 
 const httpMcpAdvertisedTools = httpMcpTools.filter((tool) =>
@@ -1802,7 +1965,7 @@ async function handleHttpMcpMessage(message, session) {
           capabilities: { tools: { listChanged: false } },
           serverInfo: { name: "hireme", version: "0.1.0" },
           instructions:
-            "HireMe's default Codex profile is streaming-first. Use hireme_whoami, hireme_list_hired_agents, hireme_list_my_agents, hireme_get_agent, hireme_select_agent, and hireme_current_agent for identity and Agent management. Use hireme_call_agent_stream for Agent answers: the output_fast event contains the Agent output immediately, then memWal/Walrus-backed storage events follow. Use hireme_get_memory_status only if a client needs to poll a returned memory_job_id. Legacy direct call, wait call, async result polling, loop, team, registry, validation, and read tools are compatibility-only and are not advertised in this profile. Creator workflows belong in the local hireme-creator stdio plugin or the web upload flow. Do not reveal creator private Agent folders.",
+            "HireMe's default Codex profile is streaming-first. Use hireme_whoami, hireme_list_hired_agents, hireme_list_my_agents, hireme_get_agent, hireme_select_agent, and hireme_current_agent for identity and Agent management. Use hireme_continue_conversation for natural follow-ups on an existing memWal conversation, and hireme_call_agent_stream for explicit Agent calls: the output_fast event contains the Agent output immediately, then memWal/Walrus-backed storage events follow. Use hireme_get_memory_status to poll a returned memory_job_id, hireme_get_agent_call_trace to inspect gateway stages, and hireme_reconcile_memwal to verify MemWal/ledger storage for a call. Legacy direct call, wait call, async result polling, loop, team, registry, validation, and read tools are compatibility-only and are not advertised in this profile. Creator workflows belong in the local hireme-creator stdio plugin or the web upload flow. Do not reveal creator private Agent folders.",
         });
       case "tools/list":
         return rpcResult(message.id, { tools: httpMcpAdvertisedTools });
@@ -1945,19 +2108,42 @@ async function callHttpMcpTool(name, args = {}, session) {
       return mcpTextResult(await currentMcpConversation(scopedArgs));
     case "hireme_list_conversations":
       return mcpTextResult(await listMcpConversations(scopedArgs));
+    case "hireme_continue_conversation": {
+      const callArgs = buildContinueConversationCallArgs(args, {
+        agentId: args.agent_id || sessions.get(sessionKey) || "walrus-researcher",
+        hirerId: session.hirerId,
+        hirerEmail: session.email,
+        suiAddress: session.suiAddress,
+        codexInstallationId: sessionKey,
+        conversationId: selectedConversationId,
+      });
+      sessions.set(sessionKey, callArgs.agent_id);
+      if (shouldReturnAgentCallStreamDescriptor(args)) {
+        return mcpTextResult(buildAgentCallStreamDescriptor(callArgs));
+      }
+      return mcpTextResult(await runAgentCallForMcpTool(callArgs));
+    }
     case "hireme_call_agent_stream": {
       const callArgs = {
         ...scopedArgs,
         agent_id: args.agent_id || sessions.get(sessionKey) || "walrus-researcher",
         wait_for_memory:
-          readOptionalBoolean(args.wait_for_memory ?? args.waitForMemory) ?? true,
+          readOptionalBoolean(args.wait_for_memory ?? args.waitForMemory) ?? false,
         waitForMemory:
-          readOptionalBoolean(args.wait_for_memory ?? args.waitForMemory) ?? true,
+          readOptionalBoolean(args.wait_for_memory ?? args.waitForMemory) ?? false,
       };
-      return mcpTextResult(buildAgentCallStreamDescriptor(callArgs));
+      sessions.set(sessionKey, callArgs.agent_id);
+      if (shouldReturnAgentCallStreamDescriptor(args)) {
+        return mcpTextResult(buildAgentCallStreamDescriptor(callArgs));
+      }
+      return mcpTextResult(await runAgentCallForMcpTool(callArgs));
     }
     case "hireme_get_memory_status":
-      return mcpTextResult(getProtectedAgentMemoryStatus(scopedArgs));
+      return mcpTextResult(await getProtectedAgentMemoryStatus(scopedArgs));
+    case "hireme_get_agent_call_trace":
+      return mcpTextResult(await getAgentCallTrace(scopedArgs));
+    case "hireme_reconcile_memwal":
+      return mcpTextResult(await reconcileAgentCallMemory(scopedArgs));
     case "hireme_register_agent":
       return mcpTextResult(await registerAgentFromMcp(scopedArgs));
     case "hireme_create_agent_from_folder":
@@ -2961,13 +3147,306 @@ async function linkSuiWallet(args = {}) {
     }
   }
 
+  const suiAccountWallet = await tryEnsureSuiAccountWalletAfterLogin({
+    profileId: profile?.id || user.id,
+    ownerSuiAddress: suiAddress,
+  });
+
   return {
     gatewayCall: true,
     linked: true,
     hirerId,
     email,
     suiAddress: profile?.sui_address || suiAddress,
+    suiAccountWallet,
   };
+}
+
+async function ensureMySuiAccountWallet(args = {}) {
+  const { ownerSuiAddress, profile, user } = await prepareSuiWalletProfile(args);
+  const result = await ensureSuiAccountWalletForProfile({
+    profileId: profile?.id || user.id,
+    ownerSuiAddress,
+  });
+
+  return {
+    gatewayCall: true,
+    ...result,
+  };
+}
+
+async function createMySuiAccountWalletSponsoredIntent(args = {}) {
+  const { ownerSuiAddress, profile, user } = await prepareSuiWalletProfile(args);
+  const profileId = profile?.id || user.id;
+  const admin = requireSupabaseAdminForSuiWalletObjects();
+  const existing = await readProfileSuiAccountWallet(admin, profileId);
+  if (existing?.walletObjectId) {
+    return {
+      gatewayCall: true,
+      status: "existing",
+      sponsoredRequired: false,
+      profileId,
+      ownerSuiAddress,
+      walletObjectId: existing.walletObjectId,
+      txDigest: existing.txDigest,
+      createdAt: existing.createdAt,
+      network: defaultSuiPaymentNetwork,
+    };
+  }
+
+  const config = readSuiSettlementConfig({ requireAdminCap: false });
+  const client = new SuiJsonRpcClient({
+    url: defaultSuiFullnodeUrl,
+    network: defaultSuiNetwork,
+  });
+  const tx = new Transaction();
+  tx.setSender(ownerSuiAddress);
+  tx.moveCall({ target: config.createWalletTarget, arguments: [] });
+  const transactionKindBytes = toBase64(
+    await tx.build({ client, onlyTransactionKind: true }),
+  );
+  const enoki = readEnokiSponsorClient();
+  let sponsored;
+  try {
+    sponsored = await enoki.createSponsoredTransaction({
+      network: defaultSuiNetwork,
+      sender: ownerSuiAddress,
+      transactionKindBytes,
+      allowedAddresses: [ownerSuiAddress],
+      allowedMoveCallTargets: [config.createWalletTarget],
+    });
+  } catch (err) {
+    writeGatewayLog("enoki_sponsored_wallet_create_intent_failed", {
+      ownerSuiAddress,
+      packageId: config.packageId,
+      target: config.createWalletTarget,
+      status: err?.status || null,
+      code: err?.code || null,
+      errors: err?.errors || null,
+      message: err instanceof Error ? err.message : String(err),
+    });
+    throw Object.assign(
+      new Error(enokiErrorMessage(err, "Enoki sponsored wallet transaction failed")),
+      {
+        statusCode: err?.status || 502,
+        code: err?.code || "enoki_sponsor_failed",
+        details: {
+          status: err?.status || null,
+          errors: err?.errors || null,
+          target: config.createWalletTarget,
+        },
+      },
+    );
+  }
+
+  writeGatewayLog("sui_account_wallet_sponsored_intent_created", {
+    profileId,
+    ownerSuiAddress,
+    digest: sponsored.digest,
+    packageId: config.packageId,
+  });
+
+  return {
+    gatewayCall: true,
+    status: "signature_required",
+    sponsoredRequired: true,
+    profileId,
+    ownerSuiAddress,
+    network: defaultSuiPaymentNetwork,
+    packageId: config.packageId,
+    createWalletTarget: config.createWalletTarget,
+    digest: sponsored.digest,
+    bytes: sponsored.bytes,
+  };
+}
+
+async function executeMySuiAccountWalletSponsoredCreation(args = {}) {
+  const { ownerSuiAddress, profile, user } = await prepareSuiWalletProfile(args);
+  const profileId = profile?.id || user.id;
+  const admin = requireSupabaseAdminForSuiWalletObjects();
+  const existing = await readProfileSuiAccountWallet(admin, profileId);
+  if (existing?.walletObjectId) {
+    return {
+      gatewayCall: true,
+      status: "existing",
+      profileId,
+      ownerSuiAddress,
+      walletObjectId: existing.walletObjectId,
+      txDigest: existing.txDigest,
+      createdAt: existing.createdAt,
+      network: defaultSuiPaymentNetwork,
+    };
+  }
+
+  const digest = String(args.digest || args.sponsored_digest || args.sponsoredDigest || "").trim();
+  const signature = String(args.signature || "").trim();
+  if (!digest || !signature) {
+    throw Object.assign(new Error("digest and signature are required"), {
+      statusCode: 400,
+      code: "bad_sponsored_transaction",
+    });
+  }
+
+  const enoki = readEnokiSponsorClient();
+  let executed;
+  try {
+    executed = await enoki.executeSponsoredTransaction({ digest, signature });
+  } catch (err) {
+    writeGatewayLog("enoki_sponsored_wallet_create_execute_failed", {
+      digest,
+      status: err?.status || null,
+      code: err?.code || null,
+      errors: err?.errors || null,
+      message: err instanceof Error ? err.message : String(err),
+    });
+    throw Object.assign(
+      new Error(enokiErrorMessage(err, "Enoki sponsored wallet execution failed")),
+      {
+        statusCode: err?.status || 502,
+        code: err?.code || "enoki_sponsored_execute_failed",
+        details: {
+          status: err?.status || null,
+          errors: err?.errors || null,
+        },
+      },
+    );
+  }
+  const txDigest = executed.digest || digest;
+  const client = new SuiJsonRpcClient({
+    url: defaultSuiFullnodeUrl,
+    network: defaultSuiNetwork,
+  });
+  const transaction = await client.waitForTransaction({
+    digest: txDigest,
+    timeout: defaultSuiPaymentVerificationTimeoutMs,
+    pollInterval: 1_000,
+    options: {
+      showEffects: true,
+      showObjectChanges: true,
+      showEvents: true,
+    },
+  });
+  const status = transaction.effects?.status?.status || "unknown";
+  if (status !== "success") {
+    throw Object.assign(
+      new Error(transaction.effects?.status?.error || `Sui AccountWallet sponsored creation failed: ${status}`),
+      {
+        statusCode: 502,
+        code: "sui_account_wallet_sponsored_create_failed",
+        details: {
+          digest: txDigest,
+          status: transaction.effects?.status || null,
+        },
+      },
+    );
+  }
+
+  const walletObjectId = findCreatedSuiObjectId(transaction, "AccountWallet");
+  if (!walletObjectId) {
+    throw Object.assign(
+      new Error("Sponsored transaction succeeded but did not return an AccountWallet object id."),
+      {
+        statusCode: 502,
+        code: "sui_account_wallet_object_missing",
+        details: { digest: txDigest },
+      },
+    );
+  }
+  const persisted = await persistProfileSuiAccountWallet(admin, {
+    profileId,
+    ownerSuiAddress,
+    walletObjectId,
+    txDigest,
+  });
+
+  writeGatewayLog("sui_account_wallet_sponsored_created", {
+    profileId,
+    ownerSuiAddress,
+    walletObjectId,
+    txDigest,
+  });
+
+  return {
+    gatewayCall: true,
+    status: "created",
+    profileId,
+    ownerSuiAddress,
+    walletObjectId,
+    txDigest,
+    createdAt: persisted?.createdAt || new Date().toISOString(),
+    network: defaultSuiPaymentNetwork,
+  };
+}
+
+async function prepareSuiWalletProfile(args = {}) {
+  const accessToken = String(args.access_token || args.accessToken || "");
+  const ownerSuiAddress = normalizeSuiAddress(
+    args.sui_address ||
+      args.suiAddress ||
+      args.wallet_address ||
+      args.walletAddress ||
+      args.owner_sui_address ||
+      args.ownerSuiAddress,
+  );
+  if (!accessToken) {
+    throw Object.assign(new Error("access_token is required"), {
+      statusCode: 400,
+      code: "bad_request",
+    });
+  }
+  if (!ownerSuiAddress) {
+    throw Object.assign(new Error("valid sui_address is required"), {
+      statusCode: 400,
+      code: "bad_sui_address",
+    });
+  }
+
+  const user = await verifySupabaseUserAccessToken(accessToken);
+  const profile = await upsertSupabaseProfileForOAuthUser(user, {
+    suiAddress: ownerSuiAddress,
+    displayName: args.display_name || args.displayName || args.name,
+  });
+  return { ownerSuiAddress, profile, user };
+}
+
+function requireSupabaseAdminForSuiWalletObjects() {
+  const admin = createSupabaseAdminClient();
+  if (!admin) {
+    throw Object.assign(new Error("Supabase is required to persist Sui wallet object ids."), {
+      statusCode: 503,
+      code: "wallet_storage_unavailable",
+    });
+  }
+  return admin;
+}
+
+async function tryEnsureSuiAccountWalletAfterLogin({ profileId, ownerSuiAddress }) {
+  if (!hasSuiObjectCreationSignerEnv()) {
+    return {
+      status: "skipped",
+      reason: hasEnokiSponsorClientEnv()
+        ? "Sponsored wallet creation requires the connected wallet signature."
+        : "HIREME_SUI_OBJECT_CREATOR_PRIVATE_KEY is not configured.",
+    };
+  }
+  try {
+    return await ensureSuiAccountWalletForProfile({
+      profileId,
+      ownerSuiAddress,
+    });
+  } catch (err) {
+    writeGatewayLog("sui_account_wallet_ensure_after_login_failed", {
+      profileId,
+      ownerSuiAddress,
+      code: err?.code || null,
+      message: err instanceof Error ? err.message : String(err),
+    });
+    return {
+      status: "failed",
+      code: err?.code || "sui_account_wallet_create_failed",
+      message: err instanceof Error ? err.message : String(err),
+    };
+  }
 }
 
 async function persistOAuthClient(client) {
@@ -3433,6 +3912,10 @@ function publicAgent(agent) {
             mediaType: agent.resultMediaType || null,
           }
         : null,
+    createdAt: agent.createdAt || null,
+    updatedAt: agent.updatedAt || agent.createdAt || null,
+    currentVersionNumber: agent.currentVersionNumber || null,
+    versionPublishedAt: agent.versionPublishedAt || null,
     hired: true,
   };
 }
@@ -3752,6 +4235,1180 @@ async function suiSettlementSummary(args = {}) {
     },
     events: events.map(publicSuiSettlementEvent),
   };
+}
+
+async function createSuiCallEscrowOpenIntent(args = {}) {
+  const config = readSuiSettlementConfig({ requireAdminCap: false });
+  const agent = await findOrHydrateAgent(args.agent_id || args.agentId);
+  const hirerId = readHirerId(args);
+  const hirerIds = readHirerIdentityCandidates(args);
+  const access = await readActiveAgentEntitlementForCall({
+    agent,
+    hirerId,
+    hirerIds,
+  });
+  if (access.accessType !== "hired") {
+    return {
+      gatewayCall: true,
+      status: "not_required",
+      settlementRequired: false,
+      reason: "trial_access",
+      accessType: access.accessType,
+    };
+  }
+
+  const databaseRefs = await resolveSuiCallSettlementRefsFromDatabase({
+    args,
+    access,
+    agent,
+    hirerId,
+  });
+  const refs = resolveSuiCallSettlementRefs({
+    args: { ...databaseRefs, ...args },
+    access,
+    agent,
+    hirerId,
+  });
+  const task = String(args.task || "");
+  const budgetCalls = Math.max(
+    1,
+    Math.trunc(readOptionalNumber(args.budget_calls ?? args.budgetCalls, 1)),
+  );
+  const requestDigest =
+    args.request_digest ||
+    args.requestDigest ||
+    `sha256:${sha256Hex(JSON.stringify({
+      agentId: agent.id,
+      task,
+      budgetCalls,
+    }))}`;
+  const agentVersion = await readSuiAgentVersionObject(refs.agentVersionObjectId);
+  const priceMist = parseMist(agentVersion?.priceMist || "0");
+  const requestedMaxMist = parseMist(args.max_mist ?? args.maxMist ?? "0");
+  const defaultMaxMist = parseMist(config.defaultEscrowMaxMist || "0");
+  const maxMist =
+    requestedMaxMist > 0n
+      ? requestedMaxMist
+      : defaultMaxMist > 0n
+        ? defaultMaxMist
+        : priceMist;
+  if (maxMist <= 0n) {
+    throw Object.assign(
+      new Error("Could not determine a positive Sui escrow max amount."),
+      { statusCode: 503, code: "sui_escrow_max_not_configured" },
+    );
+  }
+  if (priceMist > 0n && maxMist > priceMist) {
+    throw Object.assign(
+      new Error("Requested escrow max exceeds the AgentVersion price_mist."),
+      {
+        statusCode: 400,
+        code: "sui_escrow_max_exceeds_agent_price",
+        details: {
+          maxMist: maxMist.toString(),
+          agentVersionPriceMist: priceMist.toString(),
+        },
+      },
+    );
+  }
+
+  const nowMs = Date.now();
+  const ttlMs = Math.max(
+    60_000,
+    Math.trunc(
+      readOptionalNumber(
+        args.expires_in_ms ?? args.expiresInMs ?? config.openEscrowTtlMs,
+        15 * 60_000,
+      ),
+    ),
+  );
+  const expiresAtMs = Math.trunc(
+    readOptionalNumber(args.expires_at_ms ?? args.expiresAtMs, nowMs + ttlMs),
+  );
+  if (expiresAtMs <= nowMs) {
+    throw Object.assign(new Error("Sui call escrow expiry must be in the future."), {
+      statusCode: 400,
+      code: "bad_sui_escrow_expiry",
+    });
+  }
+
+  writeGatewayLog("sui_escrow_open_intent_created", {
+    agentId: agent.id,
+    hirerId,
+    accessId: access.id,
+    agentVersionObjectId: refs.agentVersionObjectId,
+    hirerWalletObjectId: refs.hirerWalletObjectId,
+    creatorWalletObjectId: refs.creatorWalletObjectId,
+    maxMist: maxMist.toString(),
+    requestDigest,
+    expiresAtMs,
+  });
+
+  return {
+    gatewayCall: true,
+    status: "ready",
+    settlementRequired: true,
+    network: defaultSuiPaymentNetwork,
+    packageId: config.packageId,
+    openCallEscrowTarget: config.openCallEscrowTarget,
+    clockObjectId: suiClockObjectId,
+    agentId: agent.id,
+    hirerId,
+    accessId: access.id,
+    accessType: access.accessType,
+    agentVersionObjectId: refs.agentVersionObjectId,
+    hirerWalletObjectId: refs.hirerWalletObjectId,
+    creatorWalletObjectId: refs.creatorWalletObjectId,
+    maxMist: maxMist.toString(),
+    maxSui: formatMistAsSui(maxMist),
+    agentVersionPriceMist: priceMist > 0n ? priceMist.toString() : null,
+    agentVersionPriceSui: priceMist > 0n ? formatMistAsSui(priceMist) : null,
+    requestDigest,
+    requestDigestBytes: [...Buffer.from(String(requestDigest), "utf8")],
+    expiresAtMs: String(expiresAtMs),
+  };
+}
+
+async function settleSuiCallEscrow(args = {}) {
+  const config = readSuiSettlementConfig();
+  const escrowObjectId = readRequiredSuiObjectId(
+    args,
+    ["escrow_object_id", "escrowObjectId", "escrow_id", "escrowId"],
+    "escrow_object_id",
+  );
+  const agentVersionObjectId = readRequiredSuiObjectId(
+    args,
+    ["agent_version_object_id", "agentVersionObjectId", "agent_version_id", "agentVersionId"],
+    "agent_version_object_id",
+  );
+  const hirerWalletObjectId = readRequiredSuiObjectId(
+    args,
+    ["hirer_wallet_object_id", "hirerWalletObjectId", "client_wallet_object_id", "clientWalletObjectId"],
+    "hirer_wallet_object_id",
+  );
+  const creatorWalletObjectId = readRequiredSuiObjectId(
+    args,
+    ["creator_wallet_object_id", "creatorWalletObjectId"],
+    "creator_wallet_object_id",
+  );
+  const actualMist = readPositiveMist(
+    args.actual_mist ?? args.actualMist ?? args.amount_mist ?? args.amountMist,
+    "actual_mist",
+  );
+  const responseDigestBytes = readSuiBytes(
+    args.response_digest ?? args.responseDigest ?? args.response_digest_bytes ?? args.responseDigestBytes,
+    "response_digest",
+  );
+
+  const tx = new Transaction();
+  tx.moveCall({
+    target: config.settleCallEscrowTarget,
+    arguments: [
+      tx.object(config.settlementAdminCapObjectId),
+      tx.object(escrowObjectId),
+      tx.object(agentVersionObjectId),
+      tx.object(hirerWalletObjectId),
+      tx.object(creatorWalletObjectId),
+      tx.pure.u64(actualMist.toString()),
+      tx.pure.vector("u8", responseDigestBytes),
+    ],
+  });
+  if (config.gasBudgetMist) {
+    tx.setGasBudget(config.gasBudgetMist);
+  }
+
+  const client = new SuiJsonRpcClient({
+    url: defaultSuiFullnodeUrl,
+    network: defaultSuiNetwork,
+  });
+  const signer = readSuiSettlementSigner();
+  const result = await client.signAndExecuteTransaction({
+    signer,
+    transaction: tx,
+    options: {
+      showBalanceChanges: true,
+      showEffects: true,
+      showObjectChanges: true,
+    },
+  });
+  const status = result.effects?.status?.status || "unknown";
+  if (status !== "success") {
+    throw Object.assign(
+      new Error(result.effects?.status?.error || `Sui escrow settlement failed: ${status}`),
+      {
+        statusCode: 502,
+        code: "sui_escrow_settlement_failed",
+        details: {
+          digest: result.digest || null,
+          status: result.effects?.status || null,
+        },
+      },
+    );
+  }
+
+  writeGatewayLog("sui_escrow_settled", {
+    txDigest: result.digest,
+    escrowObjectId,
+    agentVersionObjectId,
+    hirerWalletObjectId,
+    creatorWalletObjectId,
+    actualMist: actualMist.toString(),
+    packageId: config.packageId,
+  });
+
+  return {
+    gatewayCall: true,
+    status: "settled",
+    network: defaultSuiPaymentNetwork,
+    packageId: config.packageId,
+    txDigest: result.digest,
+    escrowObjectId,
+    agentVersionObjectId,
+    hirerWalletObjectId,
+    creatorWalletObjectId,
+    actualMist: actualMist.toString(),
+    actualSui: formatMistAsSui(actualMist),
+    effectsStatus: result.effects?.status || null,
+    objectChanges: result.objectChanges || [],
+    balanceChanges: result.balanceChanges || [],
+  };
+}
+
+async function ensureSuiAccountWalletForProfile({
+  profileId,
+  ownerSuiAddress,
+}) {
+  const admin = createSupabaseAdminClient();
+  if (!admin) {
+    throw Object.assign(new Error("Supabase is required to persist Sui wallet object ids."), {
+      statusCode: 503,
+      code: "wallet_storage_unavailable",
+    });
+  }
+  if (!profileId) {
+    throw Object.assign(new Error("profile_id is required"), {
+      statusCode: 400,
+      code: "wallet_profile_missing",
+    });
+  }
+  if (!ownerSuiAddress) {
+    throw Object.assign(new Error("valid owner Sui address is required"), {
+      statusCode: 400,
+      code: "bad_sui_address",
+    });
+  }
+
+  const existing = await readProfileSuiAccountWallet(admin, profileId);
+  if (existing?.ownerSuiAddress && existing.ownerSuiAddress !== ownerSuiAddress) {
+    throw Object.assign(
+      new Error("Profile already has a different Sui address linked."),
+      {
+        statusCode: 409,
+        code: "sui_wallet_owner_mismatch",
+        details: {
+          profileId,
+          existingOwnerSuiAddress: existing.ownerSuiAddress,
+          requestedOwnerSuiAddress: ownerSuiAddress,
+        },
+      },
+    );
+  }
+  if (existing?.walletObjectId) {
+    return {
+      status: "existing",
+      profileId,
+      ownerSuiAddress,
+      walletObjectId: existing.walletObjectId,
+      txDigest: existing.txDigest,
+      createdAt: existing.createdAt,
+      network: defaultSuiPaymentNetwork,
+    };
+  }
+
+  const created = await createSuiAccountWalletForOwner({ ownerSuiAddress });
+  const persisted = await persistProfileSuiAccountWallet(admin, {
+    profileId,
+    ownerSuiAddress,
+    walletObjectId: created.walletObjectId,
+    txDigest: created.txDigest,
+  });
+
+  writeGatewayLog("sui_account_wallet_created", {
+    profileId,
+    ownerSuiAddress,
+    walletObjectId: created.walletObjectId,
+    txDigest: created.txDigest,
+    packageId: created.packageId,
+  });
+
+  return {
+    status: "created",
+    profileId,
+    ownerSuiAddress,
+    walletObjectId: created.walletObjectId,
+    txDigest: created.txDigest,
+    createdAt: persisted?.createdAt || new Date().toISOString(),
+    signerAddress: created.signerAddress,
+    packageId: created.packageId,
+    network: created.network,
+  };
+}
+
+async function readProfileSuiAccountWallet(admin, profileId, options = {}) {
+  try {
+    const { data, error } = await admin
+      .from("profiles")
+      .select(
+        "id,sui_address,sui_account_wallet_object_id,sui_account_wallet_created_tx_digest,sui_account_wallet_created_at",
+      )
+      .eq("id", profileId)
+      .maybeSingle();
+    if (error) throw error;
+    return mapProfileSuiAccountWalletRow(data);
+  } catch (err) {
+    if (options.soft) return null;
+    throw Object.assign(
+      new Error(
+        `Could not read profile Sui wallet object fields. Run the Sui wallet Supabase migration first: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      ),
+      {
+        statusCode: 503,
+        code: "sui_wallet_profile_fields_unavailable",
+      },
+    );
+  }
+}
+
+async function persistProfileSuiAccountWallet(admin, {
+  profileId,
+  ownerSuiAddress,
+  walletObjectId,
+  txDigest,
+}) {
+  const createdAt = new Date().toISOString();
+  const { data, error } = await admin
+    .from("profiles")
+    .update({
+      sui_address: ownerSuiAddress,
+      sui_account_wallet_object_id: walletObjectId,
+      sui_account_wallet_created_tx_digest: txDigest,
+      sui_account_wallet_created_at: createdAt,
+    })
+    .eq("id", profileId)
+    .select(
+      "id,sui_address,sui_account_wallet_object_id,sui_account_wallet_created_tx_digest,sui_account_wallet_created_at",
+    )
+    .single();
+  if (error) {
+    throw Object.assign(
+      new Error(`Could not persist Sui wallet object id: ${error.message}`),
+      {
+        statusCode: 503,
+        code: "sui_wallet_profile_update_failed",
+      },
+    );
+  }
+  return mapProfileSuiAccountWalletRow(data);
+}
+
+function mapProfileSuiAccountWalletRow(row) {
+  if (!row) return null;
+  return {
+    profileId: row.id || null,
+    ownerSuiAddress: normalizeSuiAddress(row.sui_address) || null,
+    walletObjectId: normalizeSuiObjectId(row.sui_account_wallet_object_id) || null,
+    txDigest: row.sui_account_wallet_created_tx_digest || null,
+    createdAt: row.sui_account_wallet_created_at || null,
+  };
+}
+
+async function createSuiAccountWalletForOwner({ ownerSuiAddress }) {
+  const config = readSuiSettlementConfig();
+  const signer = readSuiObjectCreationSigner();
+  const tx = new Transaction();
+  tx.moveCall({
+    target: config.createWalletForOwnerTarget,
+    arguments: [
+      tx.object(config.settlementAdminCapObjectId),
+      tx.pure.address(ownerSuiAddress),
+    ],
+  });
+  if (config.gasBudgetMist) {
+    tx.setGasBudget(config.gasBudgetMist);
+  }
+
+  const client = new SuiJsonRpcClient({
+    url: defaultSuiFullnodeUrl,
+    network: defaultSuiNetwork,
+  });
+  const result = await client.signAndExecuteTransaction({
+    signer,
+    transaction: tx,
+    options: {
+      showEffects: true,
+      showObjectChanges: true,
+      showEvents: true,
+    },
+  });
+  const status = result.effects?.status?.status || "unknown";
+  if (status !== "success") {
+    throw Object.assign(
+      new Error(result.effects?.status?.error || `Sui AccountWallet creation failed: ${status}`),
+      {
+        statusCode: 502,
+        code: "sui_account_wallet_create_failed",
+        details: {
+          digest: result.digest || null,
+          status: result.effects?.status || null,
+        },
+      },
+    );
+  }
+
+  const walletObjectId = findCreatedSuiObjectId(result, "AccountWallet");
+  if (!walletObjectId) {
+    throw Object.assign(
+      new Error("Sui transaction succeeded but did not return an AccountWallet object id."),
+      {
+        statusCode: 502,
+        code: "sui_account_wallet_object_missing",
+        details: {
+          digest: result.digest || null,
+        },
+      },
+    );
+  }
+
+  return {
+    status: "created",
+    network: defaultSuiPaymentNetwork,
+    packageId: config.packageId,
+    ownerSuiAddress,
+    walletObjectId,
+    txDigest: result.digest,
+    signerAddress: signer.toSuiAddress(),
+    effectsStatus: result.effects?.status || null,
+    objectChanges: result.objectChanges || [],
+    events: result.events || [],
+  };
+}
+
+function findCreatedSuiObjectId(result, typeName) {
+  const expectedSuffix = `::access::${typeName}`;
+  return result?.objectChanges?.find(
+    (change) =>
+      change?.type === "created" &&
+      typeof change.objectType === "string" &&
+      change.objectType.endsWith(expectedSuffix) &&
+      normalizeSuiObjectId(change.objectId),
+  )?.objectId || null;
+}
+
+async function resolveSuiCallSettlementRefsFromDatabase({
+  args = {},
+  access = {},
+  agent = {},
+  hirerId = "",
+}) {
+  const admin = createSupabaseAdminClient();
+  if (!admin) return {};
+
+  const refs = {};
+  try {
+    const walletAddress = normalizeSuiAddress(
+      args.wallet_address ||
+        args.walletAddress ||
+        args.sui_address ||
+        args.suiAddress ||
+        access.ownerSuiAddress,
+    );
+    const context = await resolveWalletAccountContext(admin, {
+      ...args,
+      hirer_id: hirerId,
+      wallet_address: walletAddress || args.wallet_address || args.walletAddress,
+    });
+    for (const profileId of context.profileIds) {
+      const row = await readProfileSuiAccountWallet(admin, profileId, { soft: true });
+      if (row?.walletObjectId) {
+        refs.hirerWalletObjectId = row.walletObjectId;
+        break;
+      }
+    }
+  } catch (err) {
+    writeGatewayLog("sui_hirer_wallet_ref_lookup_failed", {
+      hirerId,
+      message: err instanceof Error ? err.message : String(err),
+    });
+  }
+
+  try {
+    const agentRow = await readSupabaseAgentRowBySlug(admin, agent.id);
+    const agentVersionObjectId = await readCurrentAgentVersionSuiObjectId(admin, agentRow);
+    if (agentVersionObjectId) refs.agentVersionObjectId = agentVersionObjectId;
+    if (agentRow?.creator_id) {
+      const creatorWallet = await readProfileSuiAccountWallet(admin, agentRow.creator_id, {
+        soft: true,
+      });
+      if (creatorWallet?.walletObjectId) {
+        refs.creatorWalletObjectId = creatorWallet.walletObjectId;
+      }
+    }
+  } catch (err) {
+    writeGatewayLog("sui_agent_settlement_ref_lookup_failed", {
+      agentId: agent.id || null,
+      message: err instanceof Error ? err.message : String(err),
+    });
+  }
+
+  return refs;
+}
+
+async function readCurrentAgentVersionSuiObjectId(admin, agentRow) {
+  if (!agentRow?.current_version_id) return null;
+  const { data, error } = await admin
+    .from("agent_versions")
+    .select("id,sui_agent_version_object_id")
+    .eq("id", agentRow.current_version_id)
+    .maybeSingle();
+  if (error || !data) return null;
+  return normalizeSuiObjectId(data.sui_agent_version_object_id) || null;
+}
+
+async function maybeSettleSuiCallEscrowForAgentCall({
+  access,
+  agent,
+  args = {},
+  callId,
+  hirerId,
+  requestDigest,
+  responseDigest,
+  settlementCharge,
+}) {
+  const actualMist = parseMist(settlementCharge?.amountMist || "0");
+  if (access?.accessType === "trial") {
+    return {
+      status: "skipped",
+      reason: "trial_access",
+      billableCalls: 0,
+      actualMist: "0",
+    };
+  }
+  if (actualMist <= 0n || Number(settlementCharge?.billableCalls || 0) <= 0) {
+    return {
+      status: "skipped",
+      reason: settlementCharge?.nonBillableReason || "zero_amount",
+      billableCalls: settlementCharge?.billableCalls || 0,
+      actualMist: "0",
+    };
+  }
+
+  const escrowPayload = readSuiCallEscrowPayload(args);
+  if (!escrowPayload) {
+    if (isSuiCallEscrowRequired(args)) {
+      throw Object.assign(
+        new Error("Paid Agent calls require a Sui call escrow payload."),
+        { statusCode: 402, code: "sui_call_escrow_required" },
+      );
+    }
+    return {
+      status: "skipped",
+      reason: "missing_sui_call_escrow",
+      billableCalls: settlementCharge?.billableCalls || 1,
+      actualMist: actualMist.toString(),
+    };
+  }
+
+  const refs = resolveSuiCallSettlementRefs({
+    args: escrowPayload,
+    access,
+    agent,
+    hirerId,
+  });
+  const escrowObjectId = readRequiredSuiObjectId(
+    escrowPayload,
+    ["escrow_object_id", "escrowObjectId", "escrow_id", "escrowId"],
+    "escrow_object_id",
+  );
+  const settlement = await settleSuiCallEscrow({
+    ...escrowPayload,
+    escrowObjectId,
+    agentVersionObjectId: refs.agentVersionObjectId,
+    hirerWalletObjectId: refs.hirerWalletObjectId,
+    creatorWalletObjectId: refs.creatorWalletObjectId,
+    actualMist: actualMist.toString(),
+    responseDigest,
+  });
+
+  writeGatewayLog("agent_call_sui_escrow_settled", {
+    callId,
+    agentId: agent.id,
+    hirerId,
+    accessId: access?.id || null,
+    escrowObjectId,
+    requestDigest,
+    responseDigest,
+    actualMist: actualMist.toString(),
+    txDigest: settlement.txDigest,
+    openTxDigest:
+      escrowPayload.open_tx_digest ||
+      escrowPayload.openTxDigest ||
+      escrowPayload.tx_digest ||
+      escrowPayload.txDigest ||
+      null,
+  });
+
+  return {
+    status: "settled",
+    txDigest: settlement.txDigest,
+    escrowObjectId,
+    agentVersionObjectId: refs.agentVersionObjectId,
+    hirerWalletObjectId: refs.hirerWalletObjectId,
+    creatorWalletObjectId: refs.creatorWalletObjectId,
+    actualMist: actualMist.toString(),
+    actualSui: formatMistAsSui(actualMist),
+    effectsStatus: settlement.effectsStatus,
+  };
+}
+
+function readSuiCallEscrowPayload(args = {}) {
+  const payload =
+    args.sui_call_escrow ||
+    args.suiCallEscrow ||
+    args.call_escrow ||
+    args.callEscrow ||
+    null;
+  return isRecord(payload) ? payload : null;
+}
+
+function isSuiCallEscrowRequired(args = {}) {
+  const value =
+    args.sui_call_escrow_required ??
+    args.suiCallEscrowRequired ??
+    process.env.HIREME_REQUIRE_SUI_CALL_ESCROW;
+  return /^(1|true|yes|required)$/i.test(String(value || ""));
+}
+
+function readSuiSettlementConfig(options = {}) {
+  const record = readSuiPackageRecord();
+  const packageId = normalizeSuiObjectId(
+    process.env.HIREME_SUI_PACKAGE_ID ||
+      process.env.HIREME_SEAL_PACKAGE_ID ||
+      record?.packageId,
+  );
+  if (!packageId) {
+    throw Object.assign(
+      new Error("HIREME_SUI_PACKAGE_ID or .hireme/sui/hireme-package.json packageId is required"),
+      { statusCode: 503, code: "sui_package_not_configured" },
+    );
+  }
+  const settlementAdminCapObjectId = normalizeSuiObjectId(
+    process.env.HIREME_SETTLEMENT_ADMIN_CAP_ID ||
+      record?.settlementAdminCapObjectId,
+  );
+  if (!settlementAdminCapObjectId && options.requireAdminCap !== false) {
+    throw Object.assign(
+      new Error("HIREME_SETTLEMENT_ADMIN_CAP_ID or settlementAdminCapObjectId is required"),
+      { statusCode: 503, code: "sui_settlement_cap_not_configured" },
+    );
+  }
+
+  const gasBudgetMist = readOptionalPositiveInteger(
+    process.env.HIREME_SUI_SETTLEMENT_GAS_BUDGET_MIST,
+    null,
+  );
+  return {
+    packageId,
+    settlementAdminCapObjectId,
+    createWalletTarget:
+      process.env.HIREME_CREATE_WALLET_TARGET ||
+      record?.createWalletTarget ||
+      `${packageId}::access::create_wallet`,
+    openCallEscrowTarget:
+      process.env.HIREME_OPEN_CALL_ESCROW_TARGET ||
+      record?.openCallEscrowTarget ||
+      `${packageId}::access::open_call_escrow`,
+    createWalletForOwnerTarget:
+      process.env.HIREME_CREATE_WALLET_FOR_OWNER_TARGET ||
+      record?.createWalletForOwnerTarget ||
+      `${packageId}::access::create_wallet_for_owner`,
+    settleCallEscrowTarget:
+      process.env.HIREME_SETTLE_CALL_ESCROW_TARGET ||
+      record?.settleCallEscrowTarget ||
+      `${packageId}::access::settle_call_escrow`,
+    defaultEscrowMaxMist:
+      process.env.HIREME_SUI_ESCROW_MAX_MIST ||
+      process.env.HIREME_SUI_DEFAULT_ESCROW_MAX_MIST ||
+      record?.defaultEscrowMaxMist ||
+      null,
+    openEscrowTtlMs:
+      process.env.HIREME_SUI_ESCROW_TTL_MS ||
+      record?.openEscrowTtlMs ||
+      null,
+    gasBudgetMist,
+  };
+}
+
+function readSuiPackageRecord() {
+  const candidates = [
+    process.env.HIREME_SUI_PACKAGE_RECORD,
+    resolve(repoRootDir, ".hireme/sui/hireme-package.json"),
+    ".hireme/sui/hireme-package.json",
+  ].filter(Boolean);
+  for (const candidate of candidates) {
+    try {
+      return JSON.parse(readFileSync(resolve(candidate), "utf8"));
+    } catch (err) {
+      if (err?.code === "ENOENT") continue;
+      writeGatewayLog("sui_package_record_read_failed", {
+        path: candidate,
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+  return null;
+}
+
+async function readActiveAgentEntitlementForCall({
+  agent,
+  hirerId,
+  hirerIds,
+}) {
+  const candidateHirerIds = uniqueHirerIds([hirerId, ...(hirerIds || [])]);
+  const record =
+    (await readStoredAgentEntitlementForHirerIds(agent, candidateHirerIds)) ||
+    readMemoryAgentEntitlementForHirerIds(agent, candidateHirerIds);
+  if (!record || record.status !== "active") {
+    const checkedHirerIds = candidateHirerIds.join(", ");
+    throw Object.assign(
+      new Error(
+        `No active Try/Hire entitlement for agent_id=${agent.id} and hirer_id=${hirerId}. Checked identities: ${checkedHirerIds}`,
+      ),
+      {
+        statusCode: 402,
+        code: "agent_access_required",
+      },
+    );
+  }
+  if (record.expiresAt && Date.parse(record.expiresAt) < Date.now()) {
+    record.status = "expired";
+    record.updatedAt = new Date().toISOString();
+    await persistAgentEntitlement(record, agent);
+    agentEntitlements.set(entitlementKey(record.hirerId, agent.id), record);
+    throw Object.assign(new Error(`Agent access expired for ${agent.id}`), {
+      statusCode: 403,
+      code: "agent_access_expired",
+    });
+  }
+  return record;
+}
+
+function resolveSuiCallSettlementRefs({
+  args = {},
+  access = {},
+  agent = {},
+  hirerId = "",
+}) {
+  const registry = readSuiSettlementObjectRegistry();
+  const walletAddress = normalizeSuiAddress(
+    args.wallet_address ||
+      args.walletAddress ||
+      args.sui_address ||
+      args.suiAddress ||
+      access.ownerSuiAddress,
+  );
+  const agentKeys = uniqueRegistryKeys([
+    agent.id,
+    agent.slug,
+    agent.handle,
+    normalizeEnvKey(agent.id),
+  ]);
+  const creatorKeys = uniqueRegistryKeys([
+    agent.id,
+    agent.slug,
+    agent.creatorId,
+    agent.creator,
+    agent.creatorSuiAddress,
+    normalizeEnvKey(agent.id),
+  ]);
+  const hirerKeys = uniqueRegistryKeys([
+    hirerId,
+    access.hirerId,
+    walletAddress,
+    normalizeEnvKey(hirerId),
+  ]);
+
+  const agentVersionObjectId =
+    readOptionalSuiObjectId(
+      args.agent_version_object_id ||
+        args.agentVersionObjectId ||
+        args.agent_version_id ||
+        args.agentVersionId,
+    ) ||
+    lookupSuiSettlementObjectId(registry, "agentVersionObjectIds", agentKeys, [
+      "agentVersionObjectId",
+      "agent_version_object_id",
+      "agentVersionId",
+      "agent_version_id",
+    ]) ||
+    lookupSuiSettlementObjectId(registry, "agents", agentKeys, [
+      "agentVersionObjectId",
+      "agent_version_object_id",
+      "agentVersionId",
+      "agent_version_id",
+    ]);
+  const hirerWalletObjectId =
+    readOptionalSuiObjectId(
+      args.hirer_wallet_object_id ||
+        args.hirerWalletObjectId ||
+        args.client_wallet_object_id ||
+        args.clientWalletObjectId,
+    ) ||
+    lookupSuiSettlementObjectId(registry, "hirerWalletObjectIds", hirerKeys, [
+      "hirerWalletObjectId",
+      "hirer_wallet_object_id",
+      "clientWalletObjectId",
+      "client_wallet_object_id",
+    ]) ||
+    lookupSuiSettlementObjectId(registry, "wallets", hirerKeys, [
+      "hirerWalletObjectId",
+      "hirer_wallet_object_id",
+      "clientWalletObjectId",
+      "client_wallet_object_id",
+      "walletObjectId",
+      "wallet_object_id",
+    ]);
+  const creatorWalletObjectId =
+    readOptionalSuiObjectId(
+      args.creator_wallet_object_id ||
+        args.creatorWalletObjectId,
+    ) ||
+    lookupSuiSettlementObjectId(registry, "creatorWalletObjectIds", creatorKeys, [
+      "creatorWalletObjectId",
+      "creator_wallet_object_id",
+      "walletObjectId",
+      "wallet_object_id",
+    ]) ||
+    lookupSuiSettlementObjectId(registry, "agents", agentKeys, [
+      "creatorWalletObjectId",
+      "creator_wallet_object_id",
+    ]) ||
+    lookupSuiSettlementObjectId(registry, "wallets", creatorKeys, [
+      "creatorWalletObjectId",
+      "creator_wallet_object_id",
+      "walletObjectId",
+      "wallet_object_id",
+    ]);
+
+  const missing = [];
+  if (!agentVersionObjectId) missing.push("agent_version_object_id");
+  if (!hirerWalletObjectId) missing.push("hirer_wallet_object_id");
+  if (!creatorWalletObjectId) missing.push("creator_wallet_object_id");
+  if (missing.length) {
+    throw Object.assign(
+      new Error(
+        `Missing Sui settlement object mapping: ${missing.join(", ")}. Configure body fields, HIREME_SUI_*_OBJECT_IDS, or .hireme/sui/settlement-objects.json.`,
+      ),
+      {
+        statusCode: 503,
+        code: "sui_settlement_objects_not_configured",
+        details: { missing },
+      },
+    );
+  }
+
+  return {
+    agentVersionObjectId,
+    hirerWalletObjectId,
+    creatorWalletObjectId,
+  };
+}
+
+function readSuiSettlementObjectRegistry() {
+  const record = readSuiPackageRecord();
+  const fileRegistry = readJsonFileIfExists(
+    process.env.HIREME_SUI_SETTLEMENT_OBJECTS ||
+      resolve(repoRootDir, ".hireme/sui/settlement-objects.json"),
+  );
+  return mergeSuiSettlementRegistries(
+    record?.settlementObjects || {},
+    fileRegistry || {},
+    {
+      agents: parseJsonObjectEnv(process.env.HIREME_SUI_AGENT_SETTLEMENT_OBJECTS),
+      agentVersionObjectIds: {
+        ...parseJsonObjectEnv(process.env.HIREME_SUI_AGENT_VERSION_OBJECT_IDS),
+        ...(process.env.HIREME_SUI_AGENT_VERSION_OBJECT_ID
+          ? { default: process.env.HIREME_SUI_AGENT_VERSION_OBJECT_ID }
+          : {}),
+      },
+      hirerWalletObjectIds: {
+        ...parseJsonObjectEnv(
+          process.env.HIREME_SUI_HIRER_WALLET_OBJECT_IDS ||
+            process.env.HIREME_SUI_CLIENT_WALLET_OBJECT_IDS,
+        ),
+        ...(process.env.HIREME_SUI_HIRER_WALLET_OBJECT_ID
+          ? { default: process.env.HIREME_SUI_HIRER_WALLET_OBJECT_ID }
+          : {}),
+      },
+      creatorWalletObjectIds: {
+        ...parseJsonObjectEnv(process.env.HIREME_SUI_CREATOR_WALLET_OBJECT_IDS),
+        ...(process.env.HIREME_SUI_CREATOR_WALLET_OBJECT_ID
+          ? { default: process.env.HIREME_SUI_CREATOR_WALLET_OBJECT_ID }
+          : {}),
+      },
+    },
+  );
+}
+
+function mergeSuiSettlementRegistries(...registries) {
+  const merged = {};
+  for (const registry of registries) {
+    if (!isRecord(registry)) continue;
+    for (const [key, value] of Object.entries(registry)) {
+      if (isRecord(value) && isRecord(merged[key])) {
+        merged[key] = { ...merged[key], ...value };
+      } else if (isRecord(value)) {
+        merged[key] = { ...value };
+      } else if (value !== undefined) {
+        merged[key] = value;
+      }
+    }
+  }
+  return merged;
+}
+
+function readJsonFileIfExists(path) {
+  try {
+    return JSON.parse(readFileSync(resolve(path), "utf8"));
+  } catch (err) {
+    if (err?.code !== "ENOENT") {
+      writeGatewayLog("json_file_read_failed", {
+        path,
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+    return null;
+  }
+}
+
+function parseJsonObjectEnv(value) {
+  const text = String(value || "").trim();
+  if (!text) return {};
+  try {
+    const parsed = JSON.parse(text);
+    return isRecord(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function lookupSuiSettlementObjectId(registry, groupName, keys, fieldNames = []) {
+  const group = isRecord(registry?.[groupName]) ? registry[groupName] : null;
+  if (!group) return null;
+  for (const key of [...keys, "default"]) {
+    const value = lookupRegistryKey(group, key);
+    const objectId = normalizeSuiSettlementObjectValue(value, fieldNames);
+    if (objectId) return objectId;
+  }
+  return null;
+}
+
+function lookupRegistryKey(group, key) {
+  if (!isRecord(group)) return null;
+  const candidates = uniqueRegistryKeys([key]);
+  for (const candidate of candidates) {
+    if (Object.prototype.hasOwnProperty.call(group, candidate)) {
+      return group[candidate];
+    }
+  }
+  return null;
+}
+
+function normalizeSuiSettlementObjectValue(value, fieldNames = []) {
+  const direct = readOptionalSuiObjectId(value);
+  if (direct) return direct;
+  if (!isRecord(value)) return null;
+  for (const fieldName of fieldNames) {
+    const objectId = readOptionalSuiObjectId(value[fieldName]);
+    if (objectId) return objectId;
+  }
+  return null;
+}
+
+function uniqueRegistryKeys(values) {
+  const keys = [];
+  for (const value of values) {
+    const text = String(value || "").trim();
+    if (!text) continue;
+    keys.push(text, text.toLowerCase(), normalizeEnvKey(text));
+  }
+  return [...new Set(keys.filter(Boolean))];
+}
+
+function readOptionalSuiObjectId(value) {
+  return normalizeSuiObjectId(value);
+}
+
+async function readSuiAgentVersionObject(agentVersionObjectId) {
+  try {
+    const client = new SuiJsonRpcClient({
+      url: defaultSuiFullnodeUrl,
+      network: defaultSuiNetwork,
+    });
+    const object = await client.getObject({
+      id: agentVersionObjectId,
+      options: { showContent: true },
+    });
+    const fields = object?.data?.content?.fields || {};
+    return {
+      objectId: agentVersionObjectId,
+      agentId: normalizeSuiObjectId(fields.agent_id) || null,
+      creator: normalizeSuiAddress(fields.creator) || null,
+      version: fields.version ? String(fields.version) : null,
+      priceMist: fields.price_mist ? String(fields.price_mist) : null,
+      active: fields.active === undefined ? null : fields.active === true,
+    };
+  } catch (err) {
+    writeGatewayLog("sui_agent_version_read_failed", {
+      agentVersionObjectId,
+      message: err instanceof Error ? err.message : String(err),
+    });
+    return null;
+  }
+}
+
+function readSuiSettlementSigner() {
+  const privateKey =
+    process.env.HIREME_SETTLEMENT_SIGNER_PRIVATE_KEY ||
+    process.env.HIREME_SUI_SETTLEMENT_PRIVATE_KEY ||
+    process.env.HIREME_SUI_PRIVATE_KEY ||
+    "";
+  if (!privateKey) {
+    throw Object.assign(
+      new Error("HIREME_SETTLEMENT_SIGNER_PRIVATE_KEY is required for Sui escrow settlement"),
+      { statusCode: 503, code: "sui_settlement_signer_not_configured" },
+    );
+  }
+  return keypairFromSuiPrivateKey(privateKey, process.env.HIREME_SETTLEMENT_SIGNER_KEY_SCHEME);
+}
+
+function hasSuiObjectCreationSignerEnv() {
+  return Boolean(
+    process.env.HIREME_SUI_OBJECT_CREATOR_PRIVATE_KEY ||
+      process.env.HIREME_SUI_PRIVATE_KEY,
+  );
+}
+
+function readSuiObjectCreationSigner() {
+  const privateKey =
+    process.env.HIREME_SUI_OBJECT_CREATOR_PRIVATE_KEY ||
+    process.env.HIREME_SUI_PRIVATE_KEY ||
+    "";
+  if (!privateKey) {
+    throw Object.assign(
+      new Error("HIREME_SUI_OBJECT_CREATOR_PRIVATE_KEY is required for direct gateway Sui object creation"),
+      { statusCode: 503, code: "sui_object_creator_not_configured" },
+    );
+  }
+  return keypairFromSuiPrivateKey(
+    privateKey,
+    process.env.HIREME_SUI_OBJECT_CREATOR_KEY_SCHEME ||
+      "ED25519",
+  );
+}
+
+function hasEnokiSponsorClientEnv() {
+  return Boolean(
+    process.env.ENOKI_PRIVATE_KEY ||
+      process.env.HIREME_ENOKI_PRIVATE_KEY ||
+      process.env.ENOKI_API_KEY ||
+      process.env.HIREME_ENOKI_API_KEY,
+  );
+}
+
+function readEnokiSponsorClient() {
+  const apiKey =
+    process.env.ENOKI_PRIVATE_KEY ||
+    process.env.HIREME_ENOKI_PRIVATE_KEY ||
+    process.env.ENOKI_API_KEY ||
+    process.env.HIREME_ENOKI_API_KEY ||
+    "";
+  if (!apiKey) {
+    throw Object.assign(
+      new Error("ENOKI_PRIVATE_KEY is required for Enoki sponsored Sui transactions"),
+      { statusCode: 503, code: "enoki_sponsor_not_configured" },
+    );
+  }
+  return new EnokiClient({
+    apiKey,
+    apiUrl: process.env.ENOKI_API_URL || process.env.HIREME_ENOKI_API_URL || undefined,
+  });
+}
+
+function enokiErrorMessage(err, fallback) {
+  const first = Array.isArray(err?.errors) ? err.errors[0] : null;
+  return first?.message || (err instanceof Error ? err.message : String(err || fallback));
+}
+
+function keypairFromSuiPrivateKey(value, fallbackScheme = "ED25519") {
+  const parsed = parseSuiPrivateKey(value, fallbackScheme);
+  const scheme = String(parsed.scheme || "").toLowerCase();
+  if (scheme === "ed25519") return Ed25519Keypair.fromSecretKey(parsed.secretKey);
+  if (scheme === "secp256k1") return Secp256k1Keypair.fromSecretKey(parsed.secretKey);
+  if (scheme === "secp256r1") return Secp256r1Keypair.fromSecretKey(parsed.secretKey);
+  throw Object.assign(new Error(`Unsupported Sui key scheme: ${parsed.scheme}`), {
+    statusCode: 503,
+    code: "unsupported_sui_key_scheme",
+  });
+}
+
+function parseSuiPrivateKey(value, fallbackScheme = "ED25519") {
+  const trimmed = String(value || "").trim();
+  if (trimmed.startsWith("suiprivkey")) {
+    return decodeSuiPrivateKey(trimmed);
+  }
+  const bytes = decodePrivateKeyBytes(trimmed);
+  if (bytes.length === 33) {
+    return {
+      scheme: suiKeySchemeFromFlag(bytes[0]),
+      secretKey: bytes.subarray(1),
+    };
+  }
+  if (bytes.length === 32) {
+    return {
+      scheme: fallbackScheme || "ED25519",
+      secretKey: bytes,
+    };
+  }
+  throw Object.assign(
+    new Error("Sui private key must be suiprivkey, 32-byte raw key, or 33-byte keystore key"),
+    { statusCode: 503, code: "bad_sui_private_key" },
+  );
+}
+
+function decodePrivateKeyBytes(value) {
+  const normalized = String(value || "").trim().replace(/^0x/, "");
+  if (/^[0-9a-fA-F]+$/.test(normalized) && normalized.length % 2 === 0) {
+    return Buffer.from(normalized, "hex");
+  }
+  if (/^[A-Za-z0-9+/]+={0,2}$/.test(value)) {
+    return Buffer.from(value, "base64");
+  }
+  throw Object.assign(new Error("Unsupported Sui private key encoding"), {
+    statusCode: 503,
+    code: "bad_sui_private_key",
+  });
+}
+
+function suiKeySchemeFromFlag(flag) {
+  if (flag === 0) return "ED25519";
+  if (flag === 1) return "Secp256k1";
+  if (flag === 2) return "Secp256r1";
+  throw Object.assign(new Error(`Unsupported Sui private key scheme flag: ${flag}`), {
+    statusCode: 503,
+    code: "unsupported_sui_key_scheme",
+  });
 }
 
 async function grantAgentAccess(args = {}) {
@@ -4651,6 +6308,8 @@ function deprecatedRestEndpointResponse({
       canonicalStreamEndpoint: "/v1/agent-call/stream",
       jsonFallbackEndpoint: "/v1/agent-call",
       memoryStatusEndpoint: "/v1/agent-memory-status",
+      traceEndpoint: "/v1/agent-call/trace",
+      reconcileEndpoint: "/v1/memwal/reconcile",
       replacementEndpoint,
       replacementTool,
     },
@@ -4693,8 +6352,11 @@ async function runCurrentRestAgentCall(args = {}) {
       canonicalStreamEndpoint: "/v1/agent-call/stream",
       jsonFallbackEndpoint: "/v1/agent-call",
       memoryStatusEndpoint: "/v1/agent-memory-status",
+      traceEndpoint: "/v1/agent-call/trace",
+      reconcileEndpoint: "/v1/memwal/reconcile",
       outputEvent: "output_fast",
       memoryJobId: result.memoryJobId || result.memory?.jobId || null,
+      traceId: result.traceId || result.callId || null,
     },
   };
 }
@@ -4931,7 +6593,9 @@ async function streamProtectedAgentCall(args = {}, req, res) {
     stream.writeEvent("done", {
       ok: true,
       callId: result.callId || null,
+      traceId: result.traceId || result.callId || null,
       activeAgentId: result.activeAgentId || null,
+      memoryJobId: result.memoryJobId || result.memory?.jobId || null,
       memory: result.memory || null,
       codexView: result.codexView || null,
     });
@@ -5196,6 +6860,68 @@ function readOptionalBoolean(value) {
   return null;
 }
 
+function normalizeMcpResponseModeOverride(value) {
+  return normalizeResponseModeOverride(value);
+}
+
+function normalizeResponseModeOverride(value) {
+  const text = String(value || "").trim().toLowerCase();
+  if (!text || text === "auto") return null;
+  if (text === "direct" || text === "answer" || text === "direct_answer") {
+    return "direct_answer";
+  }
+  if (
+    text === "brief" ||
+    text === "execution_brief" ||
+    text === "codex_brief" ||
+    text === "local_codex" ||
+    text === "delegate" ||
+    text === "local_codex_execution_brief"
+  ) {
+    return "local_codex_execution_brief";
+  }
+  return null;
+}
+
+function buildContinueConversationCallArgs(args = {}, defaults = {}) {
+  const task = String(args.request || args.task || "").trim();
+  if (!task) {
+    throw Object.assign(new Error("request is required to continue a HireMe conversation"), {
+      statusCode: 400,
+      code: "bad_request",
+    });
+  }
+  const waitForMemory =
+    readOptionalBoolean(args.wait_for_memory ?? args.waitForMemory) ?? false;
+  const responseMode = normalizeMcpResponseModeOverride(
+    args.response_mode || args.responseMode,
+  );
+  const callArgs = {
+    agent_id: args.agent_id || args.agentId || defaults.agentId,
+    hirer_id: args.hirer_id || args.hirerId || defaults.hirerId,
+    hirer_email: args.hirer_email || args.hirerEmail || defaults.hirerEmail,
+    sui_address: args.sui_address || args.suiAddress || defaults.suiAddress,
+    codex_installation_id:
+      args.codex_installation_id || args.codexInstallationId || defaults.codexInstallationId,
+    task,
+    conversation_id:
+      args.conversation_id || args.conversationId || defaults.conversationId,
+    conversation_context_limit:
+      args.conversation_context_limit ?? args.conversationContextLimit ?? 12,
+    client_conversation_context:
+      args.client_conversation_context || args.clientConversationContext,
+    prior_messages: args.prior_messages || args.priorMessages,
+    budget_calls: args.budget_calls || args.budgetCalls || 1,
+    hire_receipt_object_id:
+      args.hire_receipt_object_id || args.hireReceiptObjectId,
+    save_local_result: args.save_local_result || args.saveLocalResult,
+    wait_for_memory: waitForMemory,
+    waitForMemory,
+  };
+  if (responseMode) callArgs.response_mode = responseMode;
+  return callArgs;
+}
+
 function shouldWaitForMemory(args = {}) {
   const explicit = readOptionalBoolean(
     args.wait_for_memory ??
@@ -5222,6 +6948,536 @@ function emitAgentCallEvent(args = {}, event, data = {}) {
   }
 }
 
+function createAgentCallTrace({
+  callId,
+  agentId,
+  hirerId,
+  installationId,
+  conversationId,
+  requestDigest,
+  budgetCalls,
+  responseMode,
+  waitForMemory,
+  access,
+}) {
+  pruneAgentCallTraces();
+  const now = new Date().toISOString();
+  const record = {
+    schema: "hireme.agent_call_trace.v1",
+    traceId: callId,
+    callId,
+    status: "running",
+    createdAt: now,
+    updatedAt: now,
+    completedAt: null,
+    failedAt: null,
+    activeAgentId: agentId,
+    hirerId,
+    codexInstallationId: installationId,
+    conversationId: conversationId || null,
+    memoryJobId: null,
+    request: {
+      requestDigest,
+      budgetCalls,
+      responseMode,
+      waitForMemory,
+      accessId: access?.id || null,
+      accessType: access?.accessType || null,
+    },
+    stages: {},
+    events: [],
+  };
+  agentCallTraces.set(callId, record);
+  agentCallTraceAliases.set(callId, callId);
+  appendAgentCallTraceEvent(record, "trace", "created", {
+    requestDigest,
+    budgetCalls,
+    responseMode,
+    waitForMemory,
+  });
+  persistAgentCallTrace(record);
+  return record;
+}
+
+function linkAgentCallTrace(callId, fields = {}) {
+  const record = agentCallTraces.get(agentCallTraceAliases.get(callId) || callId);
+  if (!record) return null;
+  if (fields.memoryJobId) {
+    record.memoryJobId = fields.memoryJobId;
+    agentCallTraceAliases.set(fields.memoryJobId, record.callId);
+  }
+  if (fields.conversationId !== undefined) {
+    record.conversationId = fields.conversationId || null;
+  }
+  appendAgentCallTraceEvent(record, "trace", "linked", fields);
+  persistAgentCallTrace(record);
+  return record;
+}
+
+function updateAgentCallTrace(callId, stage, status, fields = {}) {
+  const record = agentCallTraces.get(agentCallTraceAliases.get(callId) || callId);
+  if (!record) return null;
+  if (
+    status === "failed" &&
+    !["mcp_conversation", "supabase_ledger", "reconcile"].includes(stage)
+  ) {
+    record.status = "failed";
+    record.failedAt ||= new Date().toISOString();
+  } else if (stage === "output" && status === "ready") {
+    record.status = "output_ready";
+  } else if (stage === "memory" && status === "pending") {
+    record.status = "memory_pending";
+  }
+  appendAgentCallTraceEvent(record, stage, status, fields);
+  persistAgentCallTrace(record);
+  return record;
+}
+
+function completeAgentCallTrace(callId, fields = {}) {
+  const record = agentCallTraces.get(agentCallTraceAliases.get(callId) || callId);
+  if (!record) return null;
+  const now = new Date().toISOString();
+  record.status = "completed";
+  record.completedAt ||= now;
+  record.updatedAt = now;
+  appendAgentCallTraceEvent(record, "trace", "completed", fields);
+  persistAgentCallTrace(record);
+  return record;
+}
+
+function failAgentCallTrace(callId, err, fields = {}) {
+  const record = agentCallTraces.get(agentCallTraceAliases.get(callId) || callId);
+  if (!record) return null;
+  const now = new Date().toISOString();
+  record.status = "failed";
+  record.failedAt ||= now;
+  record.updatedAt = now;
+  appendAgentCallTraceEvent(record, "trace", "failed", {
+    ...fields,
+    error: publicError(err),
+  });
+  persistAgentCallTrace(record);
+  return record;
+}
+
+function appendAgentCallTraceEvent(record, stage, status, fields = {}) {
+  const now = new Date().toISOString();
+  const details = sanitizeTraceFields(fields);
+  record.updatedAt = now;
+  record.stages[stage] = {
+    ...(record.stages[stage] || {}),
+    ...details,
+    status,
+    updatedAt: now,
+  };
+  record.events.push({
+    ts: now,
+    stage,
+    status,
+    ...details,
+  });
+  if (record.events.length > 120) {
+    record.events.splice(0, record.events.length - 120);
+  }
+  writeGatewayLog("agent_call_trace_event", {
+    callId: record.callId,
+    stage,
+    status,
+    ...details,
+  });
+}
+
+function sanitizeTraceFields(value) {
+  if (Array.isArray(value)) {
+    return value.slice(0, 50).map((item) => sanitizeTraceFields(item));
+  }
+  if (typeof value === "bigint") return value.toString();
+  if (typeof value === "string") {
+    return value.length > 1024 ? `${value.slice(0, 1024)}...` : value;
+  }
+  if (!value || typeof value !== "object") return value;
+  const blockedKeys = new Set([
+    "task",
+    "prompt",
+    "input",
+    "result",
+    "safeResult",
+    "jsonOutput",
+    "plaintext",
+    "raw",
+    "content",
+    "files",
+    "outputText",
+    "assistantMessage",
+    "userMessage",
+  ]);
+  const output = {};
+  for (const [key, child] of Object.entries(value)) {
+    if (blockedKeys.has(key)) {
+      output[`${key}Redacted`] = true;
+      continue;
+    }
+    output[key] = sanitizeTraceFields(child);
+  }
+  return output;
+}
+
+function publicAgentCallTrace(record) {
+  if (!record) return null;
+  return {
+    schema: record.schema || "hireme.agent_call_trace.v1",
+    traceId: record.traceId || record.callId,
+    trace_id: record.traceId || record.callId,
+    callId: record.callId,
+    call_id: record.callId,
+    status: record.status,
+    activeAgentId: record.activeAgentId || null,
+    hirerId: record.hirerId || null,
+    codexInstallationId: record.codexInstallationId || null,
+    conversationId: record.conversationId || null,
+    memoryJobId: record.memoryJobId || null,
+    createdAt: record.createdAt || null,
+    updatedAt: record.updatedAt || null,
+    completedAt: record.completedAt || null,
+    failedAt: record.failedAt || null,
+    request: record.request || null,
+    stages: record.stages || {},
+    events: record.events || [],
+    restApi: {
+      traceEndpoint: "/v1/agent-call/trace",
+      reconcileEndpoint: "/v1/memwal/reconcile",
+      memoryStatusEndpoint: "/v1/agent-memory-status",
+    },
+  };
+}
+
+function agentCallTraceDir() {
+  return resolve(process.env.HIREME_GATEWAY_TRACE_DIR || ".hireme/gateway/traces");
+}
+
+function agentCallTracePath(callId) {
+  return join(agentCallTraceDir(), `${safeUploadName(callId)}.trace.json`);
+}
+
+function persistAgentCallTrace(record) {
+  if (!record?.callId) return;
+  const tracePath = agentCallTracePath(record.callId);
+  const snapshot = publicAgentCallTrace(record);
+  agentCallTraceWriteQueue = agentCallTraceWriteQueue
+    .catch(() => {
+      // A previous trace write failure should not stop future trace writes.
+    })
+    .then(() => mkdir(dirname(tracePath), { recursive: true }))
+    .then(() => writeFile(tracePath, `${JSON.stringify(snapshot, null, 2)}\n`, "utf8"))
+    .catch((err) => {
+      writeGatewayLog("agent_call_trace_write_failed", {
+        callId: record.callId,
+        code: err?.code || "trace_write_failed",
+        message: err?.message || String(err),
+      });
+    });
+}
+
+function pruneAgentCallTraces() {
+  const cutoff = Date.now() - defaultAgentCallTraceTtlMs;
+  for (const [callId, record] of agentCallTraces) {
+    if (record.status === "running" || record.status === "memory_pending") continue;
+    const updatedAt = Date.parse(record.updatedAt || record.createdAt || "");
+    if (Number.isFinite(updatedAt) && updatedAt < cutoff) {
+      agentCallTraces.delete(callId);
+      agentCallTraceAliases.delete(callId);
+      if (record.memoryJobId) agentCallTraceAliases.delete(record.memoryJobId);
+    }
+  }
+}
+
+function readTraceLookupIds(args = {}) {
+  const callId =
+    args.call_id ||
+    args.callId ||
+    args.trace_id ||
+    args.traceId ||
+    args.id ||
+    null;
+  const memoryJobId =
+    args.memory_job_id ||
+    args.memoryJobId ||
+    args.job_id ||
+    args.jobId ||
+    null;
+  return {
+    callId: callId ? String(callId) : null,
+    memoryJobId: memoryJobId ? String(memoryJobId) : null,
+  };
+}
+
+function findMemoryJobByCallId(callId) {
+  for (const record of memoryJobs.values()) {
+    if (record.callId === callId) return record;
+  }
+  return null;
+}
+
+async function readAgentCallTraceFromFile(callId) {
+  if (!callId) return null;
+  try {
+    return JSON.parse(await readFile(agentCallTracePath(callId), "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+async function findAgentCallTrace(args = {}) {
+  pruneAgentCallTraces();
+  const ids = readTraceLookupIds(args);
+  let callId = ids.callId ? agentCallTraceAliases.get(ids.callId) || ids.callId : null;
+  const memoryJobId = ids.memoryJobId;
+  if (!callId && memoryJobId) {
+    callId =
+      agentCallTraceAliases.get(memoryJobId) ||
+      memoryJobs.get(memoryJobId)?.callId ||
+      null;
+  }
+  let record = callId ? agentCallTraces.get(callId) : null;
+  if (!record && callId) {
+    record = await readAgentCallTraceFromFile(callId);
+  }
+  if (!record && memoryJobId) {
+    const memoryJob = memoryJobs.get(memoryJobId);
+    if (memoryJob?.callId) {
+      callId = memoryJob.callId;
+      record = agentCallTraces.get(callId) || (await readAgentCallTraceFromFile(callId));
+    }
+  }
+  return {
+    callId: record?.callId || callId,
+    memoryJobId: record?.memoryJobId || memoryJobId || null,
+    record,
+  };
+}
+
+async function getAgentCallTrace(args = {}) {
+  const found = await findAgentCallTrace(args);
+  if (!found.callId) {
+    throw Object.assign(new Error("call_id, trace_id, or memory_job_id is required"), {
+      statusCode: 400,
+      code: "bad_trace_lookup",
+    });
+  }
+  if (!found.record) {
+    throw Object.assign(new Error(`Unknown agent call trace: ${found.callId}`), {
+      statusCode: 404,
+      code: "unknown_agent_call_trace",
+    });
+  }
+  return {
+    gatewayCall: true,
+    type: "hireme_agent_call_trace",
+    status: found.record.status,
+    callId: found.record.callId,
+    traceId: found.record.traceId || found.record.callId,
+    memoryJobId: found.record.memoryJobId || found.memoryJobId || null,
+    trace: publicAgentCallTrace(found.record),
+  };
+}
+
+async function reconcileAgentCallMemory(args = {}) {
+  const found = await findAgentCallTrace(args);
+  if (!found.callId) {
+    throw Object.assign(new Error("call_id, trace_id, or memory_job_id is required"), {
+      statusCode: 400,
+      code: "bad_reconcile_lookup",
+    });
+  }
+  const memoryJob =
+    (found.memoryJobId ? memoryJobs.get(found.memoryJobId) : null) ||
+    findMemoryJobByCallId(found.callId);
+  const localLedgerEvent = findLedgerEventByCallId(found.callId);
+  const localMemWal = await readLocalMemWalRecordForTrace(found.record, memoryJob);
+  const supabaseRows = await readSupabaseCallStorageRows(found.callId);
+  const userMemWalStored = Boolean(
+    localMemWal?.exists ||
+      supabaseRows.userMemWalResult ||
+      memoryJob?.memoryPersistence?.userMemWal?.stored === true,
+  );
+  const ledgerStored = Boolean(
+    localLedgerEvent ||
+      supabaseRows.ledger ||
+      ["recorded", "mock_recorded"].includes(
+        memoryJob?.memoryPersistence?.supabaseLedger?.status,
+      ),
+  );
+  const conversationStored = Boolean(
+    memoryJob?.memoryPersistence?.mcpConversation?.stored === true ||
+      found.record?.stages?.mcp_conversation?.stored === true ||
+      found.record?.stages?.mcp_conversation?.status === "stored",
+  );
+  const status =
+    userMemWalStored && ledgerStored
+      ? "reconciled"
+      : memoryJob?.status === "running"
+        ? "pending"
+        : "incomplete";
+  updateAgentCallTrace(found.callId, "reconcile", status, {
+    memoryJobId: memoryJob?.jobId || found.memoryJobId || null,
+    userMemWalStored,
+    ledgerStored,
+    conversationStored,
+    localMemWalExists: localMemWal?.exists ?? null,
+    supabaseLedgerFound: Boolean(supabaseRows.ledger),
+    supabaseMemWalFound: Boolean(supabaseRows.userMemWalResult),
+    memoryJobStatus: memoryJob?.status || null,
+  });
+  const trace = agentCallTraces.get(found.callId) || found.record;
+  return {
+    gatewayCall: true,
+    type: "hireme_memwal_reconciliation",
+    status,
+    callId: found.callId,
+    traceId: trace?.traceId || found.callId,
+    memoryJobId: memoryJob?.jobId || found.memoryJobId || null,
+    reconciled: {
+      userMemWalStored,
+      ledgerStored,
+      conversationStored,
+      complete: userMemWalStored && ledgerStored,
+    },
+    sources: {
+      memoryJob: memoryJob ? publicProtectedAgentMemoryJob(memoryJob) : null,
+      localMemWal,
+      localLedger: localLedgerEvent
+        ? {
+            callId: localLedgerEvent.callId,
+            status: localLedgerEvent.status,
+            agentId: localLedgerEvent.agentId,
+            hirerId: localLedgerEvent.hirerId,
+            requestDigest: localLedgerEvent.requestDigest,
+            responseDigest: localLedgerEvent.responseDigest,
+            resultStoredInUserMemWal: localLedgerEvent.resultStoredInUserMemWal,
+            mcpConversationId: localLedgerEvent.mcpConversationId || null,
+            createdAt: localLedgerEvent.createdAt || null,
+          }
+        : null,
+      supabase: {
+        configured: supabaseRows.configured,
+        error: supabaseRows.error || null,
+        ledger: supabaseRows.ledger
+          ? {
+              callId: supabaseRows.ledger.call_id,
+              status: supabaseRows.ledger.status,
+              createdAt: supabaseRows.ledger.created_at || null,
+              requestDigest: supabaseRows.ledger.request_digest || null,
+              responseDigest: supabaseRows.ledger.response_digest || null,
+              userMemWalResultId: supabaseRows.ledger.user_memwal_result_id || null,
+              latencyMs: supabaseRows.ledger.latency_ms || null,
+              inputTokens: supabaseRows.ledger.input_tokens || null,
+              outputTokens: supabaseRows.ledger.output_tokens || null,
+            }
+          : null,
+        userMemWalResult: supabaseRows.userMemWalResult
+          ? {
+              id: supabaseRows.userMemWalResult.id,
+              callId: supabaseRows.userMemWalResult.call_id,
+              createdAt: supabaseRows.userMemWalResult.created_at || null,
+              storageProvider: supabaseRows.userMemWalResult.storage_provider || null,
+              storageNetwork: supabaseRows.userMemWalResult.storage_network || null,
+              walrusBlobId: supabaseRows.userMemWalResult.walrus_blob_id || null,
+              walrusSuiObjectId:
+                supabaseRows.userMemWalResult.walrus_sui_object_id || null,
+              ciphertextDigest:
+                supabaseRows.userMemWalResult.ciphertext_digest || null,
+            }
+          : null,
+      },
+    },
+    trace: publicAgentCallTrace(trace),
+  };
+}
+
+function findLedgerEventByCallId(callId) {
+  for (let index = ledger.length - 1; index >= 0; index -= 1) {
+    if (ledger[index]?.callId === callId) return ledger[index];
+  }
+  return null;
+}
+
+async function readLocalMemWalRecordForTrace(trace, memoryJob) {
+  const recordPath =
+    memoryJob?.memoryPersistence?.userMemWal?.recordPath ||
+    trace?.stages?.user_memwal?.recordPath ||
+    trace?.stages?.memory?.recordPath ||
+    null;
+  if (!recordPath) return null;
+  try {
+    const record = JSON.parse(await readFile(resolve(recordPath), "utf8"));
+    return {
+      exists: true,
+      recordPath,
+      callId: record.callId || null,
+      agentId: record.agentId || null,
+      hirerId: record.hirerId || null,
+      kind: record.kind || null,
+      visibility: record.visibility || null,
+      storageProvider: record.storageProvider || null,
+      storageNetwork: record.storageNetwork || null,
+      walrusBlobId: record.walrusBlobId || null,
+      walrusSuiObjectId: record.walrusSuiObjectId || null,
+      ciphertextDigest: record.ciphertextDigest || null,
+      ciphertextSizeBytes: record.ciphertextSizeBytes || null,
+      createdAt: record.createdAt || null,
+    };
+  } catch (err) {
+    return {
+      exists: false,
+      recordPath,
+      error: {
+        code: err?.code || "memwal_record_read_failed",
+        message: err?.message || String(err),
+      },
+    };
+  }
+}
+
+async function readSupabaseCallStorageRows(callId) {
+  const admin = createSupabaseAdminClient();
+  if (!admin) return { configured: false, ledger: null, userMemWalResult: null };
+  const output = { configured: true, ledger: null, userMemWalResult: null, error: null };
+  try {
+    const { data: ledgerRow, error: ledgerError } = await admin
+      .from("mcp_call_ledger")
+      .select(
+        "call_id,status,created_at,request_digest,response_digest,user_memwal_result_id,latency_ms,input_tokens,output_tokens,amount_sui,amount_mist,metadata",
+      )
+      .eq("call_id", callId)
+      .maybeSingle();
+    if (ledgerError) throw ledgerError;
+    output.ledger = ledgerRow || null;
+  } catch (err) {
+    output.error = {
+      code: err?.code || "supabase_ledger_read_failed",
+      message: err?.message || String(err),
+    };
+  }
+
+  try {
+    const { data: memWalRow, error: memWalError } = await admin
+      .from("user_memwal_results")
+      .select(
+        "id,call_id,created_at,storage_provider,storage_network,walrus_blob_id,walrus_sui_object_id,ciphertext_digest,metadata",
+      )
+      .eq("call_id", callId)
+      .maybeSingle();
+    if (memWalError) throw memWalError;
+    output.userMemWalResult = memWalRow || null;
+  } catch (err) {
+    output.error ||= {
+      code: err?.code || "supabase_memwal_read_failed",
+      message: err?.message || String(err),
+    };
+  }
+  return output;
+}
+
 function registerProtectedAgentMemoryJob({
   memoryJobId,
   callId,
@@ -5230,12 +7486,14 @@ function registerProtectedAgentMemoryJob({
   conversationId,
   responseMode,
   waitForMemory,
+  traceId,
   pendingMemory,
 }) {
   pruneProtectedAgentMemoryJobs();
   const now = new Date().toISOString();
   const record = {
     jobId: memoryJobId,
+    traceId: traceId || callId,
     status: "running",
     createdAt: now,
     updatedAt: now,
@@ -5254,6 +7512,9 @@ function registerProtectedAgentMemoryJob({
     error: null,
   };
   memoryJobs.set(memoryJobId, record);
+  if (traceId || callId) {
+    agentCallTraceAliases.set(memoryJobId, traceId || callId);
+  }
   return record;
 }
 
@@ -5265,6 +7526,12 @@ function completeProtectedAgentMemoryJob(memoryJobId, memoryPersistence) {
   record.completedAt = now;
   record.updatedAt = now;
   record.memoryPersistence = memoryPersistence;
+  completeAgentCallTrace(record.callId, {
+    memoryJobId,
+    userMemWalStored: memoryPersistence?.userMemWal?.stored === true,
+    mcpConversationStored: memoryPersistence?.mcpConversation?.stored === true,
+    supabaseLedgerStatus: memoryPersistence?.supabaseLedger?.status || null,
+  });
   return record;
 }
 
@@ -5276,6 +7543,7 @@ function failProtectedAgentMemoryJob(memoryJobId, err) {
   record.failedAt = now;
   record.updatedAt = now;
   record.error = publicError(err);
+  failAgentCallTrace(record.callId, err, { memoryJobId });
   return record;
 }
 
@@ -5294,6 +7562,8 @@ function publicProtectedAgentMemoryJob(record) {
   return {
     jobId: record.jobId,
     job_id: record.jobId,
+    traceId: record.traceId || record.callId,
+    trace_id: record.traceId || record.callId,
     status: record.status,
     callId: record.callId,
     activeAgentId: record.activeAgentId,
@@ -5314,10 +7584,18 @@ function publicProtectedAgentMemoryJob(record) {
     pollArgs: {
       memory_job_id: record.jobId,
     },
+    traceTool: "hireme_get_agent_call_trace",
+    traceArgs: {
+      memory_job_id: record.jobId,
+    },
+    reconcileTool: "hireme_reconcile_memwal",
+    reconcileArgs: {
+      memory_job_id: record.jobId,
+    },
   };
 }
 
-function getProtectedAgentMemoryStatus(args = {}) {
+async function getProtectedAgentMemoryStatus(args = {}) {
   pruneProtectedAgentMemoryJobs();
   const memoryJobId =
     args.memory_job_id ||
@@ -5339,12 +7617,15 @@ function getProtectedAgentMemoryStatus(args = {}) {
     });
   }
   const job = publicProtectedAgentMemoryJob(record);
+  const trace = (await findAgentCallTrace({ memory_job_id: memoryJobId })).record;
   return {
     gatewayCall: true,
     type: "hireme_agent_memory_status",
     status: record.status,
     memoryJobId,
     memory_job_id: memoryJobId,
+    traceId: record.traceId || record.callId,
+    trace_id: record.traceId || record.callId,
     callId: record.callId,
     activeAgentId: record.activeAgentId,
     conversationId: record.conversationId,
@@ -5353,6 +7634,12 @@ function getProtectedAgentMemoryStatus(args = {}) {
     mcpConversation: job.mcpConversation,
     supabaseLedger: job.supabaseLedger,
     error: job.error,
+    trace: publicAgentCallTrace(trace),
+    restApi: {
+      memoryStatusEndpoint: "/v1/agent-memory-status",
+      traceEndpoint: "/v1/agent-call/trace",
+      reconcileEndpoint: "/v1/memwal/reconcile",
+    },
     job,
   };
 }
@@ -5364,10 +7651,6 @@ async function runProtectedAgent(args = {}) {
   const agent = await findOrHydrateAgent(agentId);
   const artifact = protectedArtifacts.get(agent.id) || {};
   const budgetCalls = args.budget_calls || 1;
-  const responseMode = classifyAgentResponseMode({
-    task: args.task || "",
-    requestedMode: args.response_mode || args.responseMode,
-  });
   const waitForMemory = shouldWaitForMemory(args);
   const protectedInternalsRequest = classifyProtectedInternalsRequest(args.task || "");
   if (protectedInternalsRequest.blocked) {
@@ -5407,6 +7690,12 @@ async function runProtectedAgent(args = {}) {
     hireReceiptObjectId,
   });
   const hirerId = access.hirerId || requestedHirerId;
+  const responseMode = await classifyAgentResponseModeForCall({
+    task: args.task || "",
+    requestedMode: args.response_mode || args.responseMode,
+    agent,
+    args,
+  });
   const conversationEnabled =
     args.mcp_conversation !== false &&
     args.memwal_conversation !== false &&
@@ -5458,6 +7747,30 @@ async function runProtectedAgent(args = {}) {
     task: args.task,
     budgetCalls,
   }))}`;
+  createAgentCallTrace({
+    callId,
+    agentId: agent.id,
+    hirerId,
+    installationId,
+    conversationId,
+    requestDigest,
+    budgetCalls,
+    responseMode,
+    waitForMemory,
+    access,
+  });
+  updateAgentCallTrace(callId, "authorization", "authorized", {
+    agentId: agent.id,
+    hirerId,
+    accessId: access.id,
+    accessType: access.accessType,
+    requestDigest,
+    budgetCalls,
+  });
+  updateAgentCallTrace(callId, "mcp_conversation", conversationId ? "loaded" : "skipped", {
+    conversationId,
+    returnedTurns: conversationContext?.returnedTurns || 0,
+  });
   writeGatewayLog("agent_call_authorized", {
     callId,
     agentId: agent.id,
@@ -5469,24 +7782,37 @@ async function runProtectedAgent(args = {}) {
   });
   emitAgentCallEvent(args, "authorized", {
     callId,
+    traceId: callId,
     agentId: agent.id,
     hirerId,
     accessType: access.accessType,
     requestDigest,
     budgetCalls,
   });
-  const protectedTaskResult = await runPlatformEncryptedArtifactTask({
-    agent,
-    artifact,
-    task: executionTask,
-    callId,
-    requestDigest,
-    hireReceiptObjectId: hireReceiptObjectId || access.receiptObjectId,
-    runnerIdentity: args.runner_identity,
-    responseMode,
-  });
+  let protectedTaskResult = null;
+  try {
+    protectedTaskResult = await runPlatformEncryptedArtifactTask({
+      agent,
+      artifact,
+      task: executionTask,
+      callId,
+      requestDigest,
+      hireReceiptObjectId: hireReceiptObjectId || access.receiptObjectId,
+      runnerIdentity: args.runner_identity,
+      responseMode,
+    });
+    updateAgentCallTrace(callId, "artifact", "loaded", {
+      protectedHarnessLoaded: Boolean(protectedTaskResult),
+      finalResult: protectedTaskResult?.finalResult === true,
+      resultProvider: protectedTaskResult?.result?.provider || null,
+    });
+  } catch (err) {
+    failAgentCallTrace(callId, err, { failedStage: "artifact" });
+    throw err;
+  }
   emitAgentCallEvent(args, "artifact_loaded", {
     callId,
+    traceId: callId,
     agentId: agent.id,
     protectedHarnessLoaded: Boolean(protectedTaskResult),
     finalResult: protectedTaskResult?.finalResult === true,
@@ -5494,13 +7820,23 @@ async function runProtectedAgent(args = {}) {
   const protectedSafeResult =
     protectedTaskResult?.result ||
     buildSafeResult(agent, executionTask, responseMode);
-  const executorExecution = protectedTaskResult?.finalResult
-    ? {
-        status: "skipped",
-        provider: "protected_harness",
-        reason: "protected_harness_returned_final_result",
-      }
-    : await callGatewayExecutor({
+  let executorExecution = null;
+  if (protectedTaskResult?.finalResult) {
+    executorExecution = {
+      status: "skipped",
+      provider: "protected_harness",
+      reason: "protected_harness_returned_final_result",
+    };
+    updateAgentCallTrace(callId, "executor", "skipped", {
+      provider: "protected_harness",
+      reason: "protected_harness_returned_final_result",
+    });
+  } else {
+    updateAgentCallTrace(callId, "executor", "started", {
+      responseMode,
+    });
+    try {
+      executorExecution = await callGatewayExecutor({
         agent,
         task: executionTask,
         safeResult: protectedSafeResult,
@@ -5513,6 +7849,17 @@ async function runProtectedAgent(args = {}) {
         ],
         responseMode,
       });
+      updateAgentCallTrace(callId, "executor", executorExecution.status || "completed", {
+        provider: executorExecution.provider || null,
+        model: executorExecution.model || null,
+        inputTokens: executorExecution.usage?.inputTokens || null,
+        outputTokens: executorExecution.usage?.outputTokens || null,
+      });
+    } catch (err) {
+      failAgentCallTrace(callId, err, { failedStage: "executor" });
+      throw err;
+    }
+  }
   const safeResult =
     protectedTaskResult?.finalResult
       ? protectedSafeResult
@@ -5531,6 +7878,11 @@ async function runProtectedAgent(args = {}) {
     harnessRuntimeContext: protectedTaskResult?.runtimeContext || null,
   });
   applyAgentResultAttachmentResolution(safeResult, resultAttachmentResolution);
+  updateAgentCallTrace(callId, "attachments", "resolved", {
+    attachmentCount: Array.isArray(resultAttachmentResolution.attachments)
+      ? resultAttachmentResolution.attachments.length
+      : 0,
+  });
   const inputTokens =
     executorExecution.status === "completed"
       ? executorExecution.usage.inputTokens
@@ -5589,14 +7941,22 @@ async function runProtectedAgent(args = {}) {
     jsonOutput.executionMode = executionMode;
   }
   jsonOutput.responseMode = responseMode;
+  const settlementCharge = settlementChargeForAccess(access, usageCharge);
+  const suiEscrowSettlement = await maybeSettleSuiCallEscrowForAgentCall({
+    access,
+    agent,
+    args,
+    callId,
+    hirerId,
+    requestDigest,
+    responseDigest,
+    settlementCharge,
+  });
   if (jsonOutput.localCodex) {
-    jsonOutput.localCodex.shouldAct = false;
-    jsonOutput.localCodex.instruction =
-      "Treat jsonOutput.payload.attachments as protected Agent result files and jsonOutput.payload.outputText as the protected Agent's text output. Show them directly unless the user explicitly asks you to do follow-up work.";
-    jsonOutput.localCodex.preferredSource =
-      "jsonOutput.payload.attachments || jsonOutput.payload.outputText || jsonOutput.payload";
+    Object.assign(jsonOutput.localCodex, buildLocalCodexActionMetadata(responseMode));
   }
   const memoryJobId = `memory_job_${callId}`;
+  linkAgentCallTrace(callId, { memoryJobId, conversationId });
   const memoryPersistencePromise = persistProtectedAgentMemoryAndLedger({
     args,
     access,
@@ -5618,6 +7978,8 @@ async function runProtectedAgent(args = {}) {
     resultAttachmentResolution,
     responseMode,
     safeResult,
+    settlementCharge,
+    suiEscrowSettlement,
     usageCharge,
   });
 
@@ -5635,7 +7997,13 @@ async function runProtectedAgent(args = {}) {
     conversationId,
     responseMode,
     waitForMemory,
+    traceId: callId,
     pendingMemory: memoryPersistence,
+  });
+  updateAgentCallTrace(callId, "memory", "pending", {
+    memoryJobId,
+    conversationId,
+    waitForMemory,
   });
 
   const initialCodexView = buildCodexView({
@@ -5652,6 +8020,7 @@ async function runProtectedAgent(args = {}) {
 
   const outputFastEvent = {
     callId,
+    traceId: callId,
     agentId: agent.id,
     executionMode,
     responseMode,
@@ -5666,12 +8035,28 @@ async function runProtectedAgent(args = {}) {
     codexView: initialCodexView,
     result: safeResult,
     jsonOutput,
+    suiEscrowSettlement,
+    restApi: {
+      traceEndpoint: "/v1/agent-call/trace",
+      reconcileEndpoint: "/v1/memwal/reconcile",
+      memoryStatusEndpoint: "/v1/agent-memory-status",
+    },
   };
+  updateAgentCallTrace(callId, "output", "ready", {
+    memoryJobId,
+    responseMode,
+    executionMode,
+    resultType: safeResult?.type || null,
+    resultProvider: safeResult?.provider || executorExecution.provider || null,
+    attachmentCount: outputFastEvent.attachmentCount,
+    responseDigest,
+  });
   emitAgentCallEvent(args, "output_fast", outputFastEvent);
   emitAgentCallEvent(args, "result", outputFastEvent);
 
   emitAgentCallEvent(args, "memwal_pending", {
     callId,
+    traceId: callId,
     memoryJobId,
     conversationId,
     waitForMemory,
@@ -5681,11 +8066,22 @@ async function runProtectedAgent(args = {}) {
   if (waitForMemory && !streamAbortedBeforeMemoryWait) {
     emitAgentCallEvent(args, "memwal_wait_started", {
       callId,
+      traceId: callId,
+      memoryJobId,
+      conversationId,
+    });
+    updateAgentCallTrace(callId, "memory", "waiting", {
       memoryJobId,
       conversationId,
     });
     try {
       memoryPersistence = await memoryPersistencePromise;
+      updateAgentCallTrace(callId, "memory", "stored", {
+        memoryJobId,
+        userMemWalStored: memoryPersistence.userMemWal?.stored === true,
+        mcpConversationStored: memoryPersistence.mcpConversation?.stored === true,
+        supabaseLedgerStatus: memoryPersistence.supabaseLedger?.status || null,
+      });
       completeProtectedAgentMemoryJob(memoryJobId, memoryPersistence);
     } catch (err) {
       failProtectedAgentMemoryJob(memoryJobId, err);
@@ -5693,6 +8089,7 @@ async function runProtectedAgent(args = {}) {
     }
     emitAgentCallEvent(args, "memwal_stored", {
       callId,
+      traceId: callId,
       memoryJobId,
       conversationId,
       userMemWal: memoryPersistence.userMemWal,
@@ -5711,6 +8108,12 @@ async function runProtectedAgent(args = {}) {
     }
     memoryPersistencePromise
       .then((storedMemory) => {
+        updateAgentCallTrace(callId, "memory", "stored", {
+          memoryJobId,
+          userMemWalStored: storedMemory.userMemWal?.stored === true,
+          mcpConversationStored: storedMemory.mcpConversation?.stored === true,
+          supabaseLedgerStatus: storedMemory.supabaseLedger?.status || null,
+        });
         completeProtectedAgentMemoryJob(memoryJobId, storedMemory);
         writeGatewayLog("agent_call_memory_completed", {
           callId,
@@ -5752,6 +8155,8 @@ async function runProtectedAgent(args = {}) {
   return {
     gatewayCall: true,
     callId,
+    traceId: callId,
+    memoryJobId,
     activeAgentId: agent.id,
     codexInstallationId: installationId,
     agent: {
@@ -5765,6 +8170,12 @@ async function runProtectedAgent(args = {}) {
       waitForMemory,
     },
     codexView,
+    trace: publicAgentCallTrace(agentCallTraces.get(callId)),
+    restApi: {
+      traceEndpoint: "/v1/agent-call/trace",
+      reconcileEndpoint: "/v1/memwal/reconcile",
+      memoryStatusEndpoint: "/v1/agent-memory-status",
+    },
     memory: memoryPersistence.memory,
     userMemWal: memoryPersistence.userMemWal,
     mcpConversation: memoryPersistence.mcpConversation,
@@ -5840,6 +8251,7 @@ async function runProtectedAgent(args = {}) {
     sealedValidation: null,
     ledgerEvent: memoryPersistence.ledgerEvent,
     supabaseLedger: memoryPersistence.supabaseLedger,
+    suiEscrowSettlement,
     responseMode,
   };
 }
@@ -5865,6 +8277,8 @@ async function persistProtectedAgentMemoryAndLedger({
   resultAttachmentResolution,
   responseMode,
   safeResult,
+  settlementCharge,
+  suiEscrowSettlement,
   usageCharge,
 }) {
   const startedAt = Date.now();
@@ -5878,6 +8292,18 @@ async function persistProtectedAgentMemoryAndLedger({
     result: safeResult,
     resultAttachments: resultAttachmentResolution.attachments,
     jsonOutput,
+  });
+  updateAgentCallTrace(callId, "user_memwal", "stored", {
+    recordPath: userMemWalResult.recordPath,
+    localCiphertextPath: userMemWalResult.localCiphertextPath,
+    kind: userMemWalResult.publicRecord.kind,
+    visibility: userMemWalResult.publicRecord.visibility,
+    storageProvider: userMemWalResult.publicRecord.storageProvider,
+    storageNetwork: userMemWalResult.publicRecord.storageNetwork || null,
+    walrusBlobId: userMemWalResult.publicRecord.walrusBlobId || null,
+    walrusSuiObjectId: userMemWalResult.publicRecord.walrusSuiObjectId || null,
+    ciphertextDigest: userMemWalResult.publicRecord.ciphertextDigest,
+    ciphertextSizeBytes: userMemWalResult.publicRecord.ciphertextSizeBytes,
   });
 
   let mcpConversation = null;
@@ -5904,11 +8330,25 @@ async function persistProtectedAgentMemoryAndLedger({
         },
       });
       mcpConversationSessions.set(installationId, conversationId);
+      updateAgentCallTrace(callId, "mcp_conversation", "stored", {
+        conversationId,
+        stored: mcpConversation?.status === "stored",
+        provider: mcpConversation?.publicRecord?.provider || "memwal-sdk",
+        memoryJobId: mcpConversation?.publicRecord?.memoryJobId || null,
+        indexJobId: mcpConversation?.publicRecord?.indexJobId || null,
+        blobId: mcpConversation?.publicRecord?.blobId || null,
+        previousTurnsLoaded: conversationContext?.returnedTurns || 0,
+        totalTurns: mcpConversation?.publicRecord?.turnCount || null,
+      });
     } catch (err) {
       mcpConversationError = {
         code: err.code || "memwal_conversation_store_failed",
         message: err.message || String(err),
       };
+      updateAgentCallTrace(callId, "mcp_conversation", "failed", {
+        conversationId,
+        error: mcpConversationError,
+      });
       writeGatewayLog("mcp_conversation_store_failed", {
         callId,
         agentId: agent.id,
@@ -5919,13 +8359,14 @@ async function persistProtectedAgentMemoryAndLedger({
     }
   }
 
-  const settlementCharge = settlementChargeForAccess(access, usageCharge);
+  settlementCharge ||= settlementChargeForAccess(access, usageCharge);
   const supabaseLedger = await persistMcpCallLedgerAndStats({
     agent,
     access,
     args,
     callId,
     hirerId,
+    userMemWalResult,
     requestDigest,
     responseDigest,
     inputTokens,
@@ -5937,7 +8378,16 @@ async function persistProtectedAgentMemoryAndLedger({
     nonBillableReason: settlementCharge.nonBillableReason,
     pricePer1MTokensSui,
     latencyMs,
-    toolName: "hireme_call_agent_stream",
+      toolName: "hireme_call_agent_stream",
+  });
+  updateAgentCallTrace(callId, "supabase_ledger", supabaseLedger.status, {
+    ledgerStatus: supabaseLedger.status,
+    agentRowId: supabaseLedger.agentRowId || null,
+    hirerProfileId: supabaseLedger.hirerProfileId || null,
+    userMemWalResultId: supabaseLedger.userMemWalResultId || null,
+    userMemWalResultStatus: supabaseLedger.userMemWalResultStatus || null,
+    reason: supabaseLedger.reason || null,
+    message: supabaseLedger.message || null,
   });
   const ledgerEvent = {
     callId,
@@ -5971,12 +8421,19 @@ async function persistProtectedAgentMemoryAndLedger({
     rawPromptStored: false,
     rawResponseStored: false,
     resultStoredInUserMemWal: true,
+    suiEscrowSettlement,
     supabaseLedger,
   };
 
   ledger.push({
     ...ledgerEvent,
     createdAt: new Date().toISOString(),
+  });
+  updateAgentCallTrace(callId, "local_ledger", "recorded", {
+    ledgerStatus: ledgerEvent.status,
+    resultStoredInUserMemWal: ledgerEvent.resultStoredInUserMemWal,
+    userMemWalResultDigest: ledgerEvent.userMemWalResultDigest,
+    mcpConversationId: ledgerEvent.mcpConversationId,
   });
   writeGatewayLog("agent_call_completed", {
     callId,
@@ -6058,6 +8515,7 @@ function pendingProtectedAgentMemory({
     memory: {
       status: "pending",
       jobId: memoryJobId,
+      traceId: callId,
       waitForMemory,
       userResultStored: false,
       conversationStored: conversationId ? false : null,
@@ -6069,6 +8527,7 @@ function pendingProtectedAgentMemory({
       status: "pending",
       jobId: memoryJobId,
       callId,
+      traceId: callId,
       plaintextStoredInDb: false,
       creatorCanReadPlaintext: false,
       publicCanReadPlaintext: false,
@@ -7843,18 +10302,74 @@ function summarizeOutputContractForSafeResult(contract) {
   };
 }
 
-function classifyAgentResponseMode({ task, requestedMode }) {
-  const normalizedRequestedMode = String(requestedMode || "").trim().toLowerCase();
-  if (normalizedRequestedMode === "direct_answer" || normalizedRequestedMode === "direct") {
+async function classifyAgentResponseModeForCall({
+  task,
+  requestedMode,
+  agent,
+  args = {},
+}) {
+  const explicitMode = normalizeResponseModeOverride(requestedMode);
+  if (explicitMode) return explicitMode;
+
+  if (isWebAgentCallRequest(args)) {
     return "direct_answer";
   }
-  if (
-    normalizedRequestedMode === "local_codex_execution_brief" ||
-    normalizedRequestedMode === "local_codex" ||
-    normalizedRequestedMode === "delegate"
-  ) {
-    return "local_codex_execution_brief";
+
+  const fallbackMode = classifyAgentResponseMode({ task, requestedMode: null });
+  const provider = resolveResponseModeClassifierProvider();
+  if (provider === "rules") return fallbackMode;
+  if (!isResponseModeClassifierProviderConfigured(provider)) {
+    writeGatewayLog("response_mode_classifier_skipped", {
+      provider,
+      fallbackMode,
+      reason: "provider_not_configured",
+    });
+    return fallbackMode;
   }
+
+  try {
+    const classification = await classifyAgentResponseModeWithLlm({
+      task,
+      agent,
+      fallbackMode,
+      provider,
+      abortSignal: args.abortSignal,
+    });
+    return classification.responseMode || fallbackMode;
+  } catch (err) {
+    writeGatewayLog("response_mode_classifier_failed", {
+      provider,
+      fallbackMode,
+      code: err?.code || null,
+      message: err?.message || String(err),
+    });
+    return fallbackMode;
+  }
+}
+
+function isWebAgentCallRequest(args = {}) {
+  const source = String(args.source || args.request_source || args.requestSource || "")
+    .trim()
+    .toLowerCase();
+  if (source === "web" || source.startsWith("web_") || source.startsWith("web-")) {
+    return true;
+  }
+
+  const conversationId = String(args.conversation_id || args.conversationId || "")
+    .trim()
+    .toLowerCase();
+  if (conversationId.startsWith("web-try") || conversationId.startsWith("web_try")) {
+    return true;
+  }
+
+  const clientContext = args.client_conversation_context || args.clientConversationContext;
+  const clientContextSource = String(clientContext?.source || "").trim().toLowerCase();
+  return clientContextSource.startsWith("web_") || clientContextSource.startsWith("web-");
+}
+
+function classifyAgentResponseMode({ task, requestedMode }) {
+  const normalizedRequestedMode = normalizeResponseModeOverride(requestedMode);
+  if (normalizedRequestedMode) return normalizedRequestedMode;
 
   const text = String(task || "").trim().toLowerCase();
   if (!text) return "direct_answer";
@@ -7873,6 +10388,288 @@ function classifyAgentResponseMode({ task, requestedMode }) {
   }
 
   return "direct_answer";
+}
+
+function resolveResponseModeClassifierProvider() {
+  const mode = String(process.env.HIREME_RESPONSE_MODE_CLASSIFIER || "llm")
+    .trim()
+    .toLowerCase();
+  if (
+    mode === "rules" ||
+    mode === "rule" ||
+    mode === "disabled" ||
+    mode === "off" ||
+    mode === "0" ||
+    mode === "false" ||
+    mode === "no"
+  ) {
+    return "rules";
+  }
+  const provider = String(
+    process.env.HIREME_RESPONSE_MODE_CLASSIFIER_PROVIDER || mode || "llm",
+  )
+    .trim()
+    .toLowerCase();
+  if (
+    provider === "rules" ||
+    provider === "rule" ||
+    provider === "disabled" ||
+    provider === "off" ||
+    provider === "0" ||
+    provider === "false" ||
+    provider === "no"
+  ) {
+    return "rules";
+  }
+  if (
+    provider === "llm" ||
+    provider === "auto" ||
+    provider === "1" ||
+    provider === "true" ||
+    provider === "yes" ||
+    provider === "on"
+  ) {
+    return defaultLlmProvider;
+  }
+  return provider;
+}
+
+function isResponseModeClassifierProviderConfigured(provider) {
+  if (provider === "openai") return isOpenAIConfigured();
+  if (provider === "ollama") return isOllamaConfigured();
+  if (provider === "fixture") return true;
+  return false;
+}
+
+async function classifyAgentResponseModeWithLlm({
+  task,
+  agent,
+  fallbackMode,
+  provider,
+  abortSignal,
+}) {
+  const model = readResponseModeClassifierModel(provider);
+  const messages = buildResponseModeClassifierMessages({ task, agent, fallbackMode });
+  const controller = new AbortController();
+  const timeout = setTimeout(
+    () => controller.abort(),
+    defaultResponseModeClassifierTimeoutMs,
+  );
+  let abortHandler = null;
+  if (abortSignal) {
+    if (abortSignal.aborted) controller.abort(abortSignal.reason);
+    abortHandler = () => controller.abort(abortSignal.reason);
+    abortSignal.addEventListener("abort", abortHandler, { once: true });
+  }
+  const startedAt = Date.now();
+  let outputText = "";
+
+  try {
+    if (provider === "fixture") {
+      outputText = readFixtureResponseModeClassifierOutput({ task, fallbackMode });
+    } else if (provider === "ollama") {
+      const { data, endpoint } = await fetchOllamaChatCompletion({
+        messages,
+        signal: controller.signal,
+        model,
+        maxTokens: defaultResponseModeClassifierMaxOutputTokens,
+      });
+      outputText = readOllamaOutputText(data);
+      writeGatewayLog("response_mode_classifier_endpoint", {
+        provider,
+        endpointType: endpoint.type,
+      });
+    } else if (provider === "openai") {
+      outputText = await fetchOpenAIResponseModeClassification({
+        messages,
+        model,
+        signal: controller.signal,
+      });
+    } else {
+      throw Object.assign(
+        new Error(`Unsupported response mode classifier provider: ${provider}`),
+        { code: "unsupported_response_mode_classifier_provider" },
+      );
+    }
+
+    const parsed = parseResponseModeClassifierOutput(outputText);
+    if (!parsed?.responseMode) {
+      throw Object.assign(new Error("Response mode classifier returned no valid mode"), {
+        code: "invalid_response_mode_classifier_output",
+      });
+    }
+    writeGatewayLog("response_mode_classifier_completed", {
+      provider,
+      model,
+      responseMode: parsed.responseMode,
+      fallbackMode,
+      confidence: parsed.confidence,
+      latencyMs: Date.now() - startedAt,
+      outputDigest: `sha256:${sha256Hex(outputText || "")}`,
+    });
+    return parsed;
+  } finally {
+    clearTimeout(timeout);
+    if (abortSignal && abortHandler) {
+      abortSignal.removeEventListener("abort", abortHandler);
+    }
+  }
+}
+
+function readResponseModeClassifierModel(provider) {
+  return (
+    process.env.HIREME_RESPONSE_MODE_CLASSIFIER_MODEL ||
+    (provider === "openai"
+      ? defaultOpenAIModel
+      : provider === "ollama"
+        ? defaultOllamaModel
+        : "fixture")
+  );
+}
+
+function buildResponseModeClassifierMessages({ task, agent, fallbackMode }) {
+  const publicAgent = summarizeAgentForResponseModeClassifier(agent);
+  const classifierInput = {
+    task: truncateTextPreserveLines(String(task || ""), 2_000),
+    publicAgent,
+    fallbackMode,
+  };
+  return [
+    {
+      role: "system",
+      content: [
+        "Classify a HireMe Agent call response mode.",
+        "Choose direct_answer when the gateway Agent should answer the hirer directly.",
+        "Choose local_codex_execution_brief when the request needs local Codex/workspace actions such as editing files, inspecting a repo, running commands, testing, deploying, or operating a local browser.",
+        "Creative or text generation requested as the final user-facing artifact is direct_answer unless the user asks for local workspace execution.",
+        "Use only the provided task and public agent metadata. Do not assume access to private Harness files.",
+        'Return only JSON: {"response_mode":"direct_answer"|"local_codex_execution_brief","confidence":0.0,"reason":"short reason"}.',
+      ].join("\n"),
+    },
+    {
+      role: "user",
+      content: JSON.stringify(classifierInput, null, 2),
+    },
+  ];
+}
+
+function summarizeAgentForResponseModeClassifier(agent = {}) {
+  return {
+    id: agent.id || null,
+    name: agent.name || null,
+    publicContract: agent.publicContract || null,
+    publicSummary: agent.publicSummary || null,
+    publicSkills: Array.isArray(agent.skills) ? agent.skills.slice(0, 20) : [],
+    category: agent.category || agent.agentCategory || agent.kind || null,
+    resultMediaType:
+      agent.resultMediaType ||
+      agent.result_media_type ||
+      agent.resultPreview?.mediaType ||
+      null,
+  };
+}
+
+function readFixtureResponseModeClassifierOutput({ task, fallbackMode }) {
+  const fixtureOutput =
+    process.env.HIREME_RESPONSE_MODE_CLASSIFIER_FIXTURE_OUTPUT ||
+    process.env.HIREME_RESPONSE_MODE_CLASSIFIER_FIXTURE;
+  if (fixtureOutput) return fixtureOutput;
+  const fixtureMode = normalizeResponseModeOverride(
+    process.env.HIREME_RESPONSE_MODE_CLASSIFIER_FIXTURE_MODE,
+  );
+  return JSON.stringify({
+    response_mode: fixtureMode || fallbackMode || classifyAgentResponseMode({ task }),
+    confidence: 1,
+    reason: "fixture classifier",
+  });
+}
+
+async function fetchOpenAIResponseModeClassification({ messages, model, signal }) {
+  const body = {
+    model,
+    max_output_tokens: defaultResponseModeClassifierMaxOutputTokens,
+    instructions: messages[0]?.content || "",
+    input: messages[1]?.content || "",
+  };
+  const response = await fetch(`${defaultOpenAIBaseUrl}/responses`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+    signal,
+  });
+  const responseText = await response.text();
+  let data = null;
+  try {
+    data = responseText ? JSON.parse(responseText) : null;
+  } catch {
+    data = { rawTextDigest: `sha256:${sha256Hex(responseText)}` };
+  }
+  if (!response.ok) {
+    const message =
+      data?.error?.message ||
+      data?.message ||
+      `OpenAI response mode classifier returned ${response.status}`;
+    throw Object.assign(new Error(message), {
+      code: "openai_response_mode_classifier_failed",
+      statusCode: response.status,
+      responseDigest: `sha256:${sha256Hex(responseText || "")}`,
+    });
+  }
+  return readOpenAIOutputText(data);
+}
+
+function parseResponseModeClassifierOutput(outputText) {
+  const raw = String(outputText || "").trim();
+  if (!raw) return null;
+  const parsed = parseFirstJsonObject(raw);
+  const mode = normalizeResponseModeOverride(
+    parsed?.response_mode || parsed?.responseMode || parsed?.mode,
+  );
+  const inferredMode = mode || inferResponseModeFromClassifierText(raw);
+  if (!inferredMode) return null;
+  const rawConfidence = Number(parsed?.confidence);
+  const confidence = Number.isFinite(rawConfidence)
+    ? Math.max(0, Math.min(1, rawConfidence))
+    : null;
+  return {
+    responseMode: inferredMode,
+    confidence,
+    reason: truncateText(parsed?.reason || "", 180),
+  };
+}
+
+function parseFirstJsonObject(text) {
+  const raw = String(text || "").trim();
+  const fenced = /```(?:json)?\s*([\s\S]*?)```/i.exec(raw);
+  const candidates = [fenced?.[1], raw].filter(Boolean);
+  for (const candidate of candidates) {
+    try {
+      return JSON.parse(candidate);
+    } catch {
+      const start = candidate.indexOf("{");
+      const end = candidate.lastIndexOf("}");
+      if (start >= 0 && end > start) {
+        try {
+          return JSON.parse(candidate.slice(start, end + 1));
+        } catch {
+          // Try the next candidate.
+        }
+      }
+    }
+  }
+  return null;
+}
+
+function inferResponseModeFromClassifierText(text) {
+  const lower = String(text || "").toLowerCase();
+  if (lower.includes("local_codex_execution_brief")) {
+    return "local_codex_execution_brief";
+  }
+  if (lower.includes("direct_answer")) return "direct_answer";
+  return null;
 }
 
 function isHirerFacingCreativeGenerationTask(text) {
@@ -8176,7 +10973,7 @@ function buildGatewayJsonOutput({
   payload,
   responseMode,
 }) {
-  const shouldAct = false;
+  const localCodexAction = buildLocalCodexActionMetadata(responseMode);
   return {
     schema: "hireme.protected_agent_json_output.v1",
     type: payload.type || "protected_agent_guidance",
@@ -8206,13 +11003,17 @@ function buildGatewayJsonOutput({
     responseMode,
     payload,
     localCodex: {
-      shouldAct,
-      instruction:
-        "Treat jsonOutput.payload.attachments as protected Agent result files and jsonOutput.payload.outputText as the protected Agent's text output. Show them directly unless the user explicitly asks you to do follow-up work.",
-      preferredSource: "jsonOutput.payload.attachments || jsonOutput.payload.outputText || jsonOutput.payload",
+      ...localCodexAction,
       expectedBriefShape: [
-        "agent_output",
-        "show_verbatim_unless_user_requests_follow_up",
+        responseMode === "local_codex_execution_brief"
+          ? "objective"
+          : "agent_output",
+        responseMode === "local_codex_execution_brief"
+          ? "execution_plan"
+          : "show_verbatim_unless_user_requests_follow_up",
+        responseMode === "local_codex_execution_brief"
+          ? "verification_flow"
+          : null,
       ],
       blockedSources: ["AGENTS.md", "skills/**", "harness/**", "private prompts"],
     },
@@ -8222,6 +11023,37 @@ function buildGatewayJsonOutput({
       responseDigest,
       privateFolderReturnedToCodex: false,
     },
+  };
+}
+
+function buildLocalCodexActionMetadata(responseMode) {
+  if (responseMode === "local_codex_execution_brief") {
+    return {
+      shouldAct: true,
+      action: "execute_local_workspace_brief",
+      instruction:
+        "Use jsonOutput.payload.outputText as the HireMe Agent's execution brief. Local Codex should now perform the requested workspace work with its normal tools, then run the verification flow from the brief. Do not only summarize the brief unless the user asks not to execute.",
+      preferredSource:
+        "jsonOutput.payload.outputText || codexView.primaryText || result.outputText",
+      expectedCodexBehavior: [
+        "read_the_brief",
+        "edit_or_inspect_local_workspace_when_requested",
+        "run_relevant_verification",
+        "report_actual_changes_and_test_results",
+      ],
+    };
+  }
+  return {
+    shouldAct: false,
+    action: "show_agent_answer",
+    instruction:
+      "Treat jsonOutput.payload.attachments as protected Agent result files and jsonOutput.payload.outputText as the protected Agent's text output. Show them directly unless the user explicitly asks you to do follow-up work.",
+    preferredSource:
+      "jsonOutput.payload.attachments || jsonOutput.payload.outputText || jsonOutput.payload",
+    expectedCodexBehavior: [
+      "show_agent_output",
+      "do_not_claim_local_workspace_actions",
+    ],
   };
 }
 
@@ -8544,6 +11376,8 @@ function buildAgentCallStreamDescriptor(args = {}) {
       canonicalStreamEndpoint: "/v1/agent-call/stream",
       jsonFallbackEndpoint: "/v1/agent-call",
       memoryStatusEndpoint: "/v1/agent-memory-status",
+      traceEndpoint: "/v1/agent-call/trace",
+      reconcileEndpoint: "/v1/memwal/reconcile",
       outputEvent: "output_fast",
       heartbeatEvent: "heartbeat",
       heartbeatMs: readAgentStreamHeartbeatMs(),
@@ -8565,6 +11399,117 @@ function buildAgentCallStreamDescriptor(args = {}) {
     curlExample:
       `curl -N -X POST ${gatewayPublicBaseUrl()}/v1/agent-call/stream ` +
       `-H 'content-type: application/json' --data '<JSON body omitted>'`,
+  };
+}
+
+function shouldReturnAgentCallStreamDescriptor(args = {}) {
+  return (
+    readOptionalBoolean(
+      args.return_stream_url ??
+        args.returnStreamUrl ??
+        args.stream_url ??
+        args.streamUrl ??
+        args.descriptor_only ??
+        args.descriptorOnly,
+    ) === true
+  );
+}
+
+async function runAgentCallForMcpTool(callArgs = {}) {
+  const events = [];
+  let outputFast = null;
+  let streamError = null;
+  const result = await runProtectedAgentOrStartJob({
+    ...callArgs,
+    stream: false,
+    return_stream_url: false,
+    returnStreamUrl: false,
+    wait_for_result: true,
+    waitForResult: true,
+    onEvent: ({ event, data }) => {
+      events.push({
+        event,
+        callId: data?.callId || null,
+        traceId: data?.traceId || null,
+        memoryJobId: data?.memoryJobId || null,
+        responseMode: data?.responseMode || null,
+        status: data?.status || null,
+      });
+      if (event === "output_fast") outputFast = data;
+      if (event === "error") streamError = data;
+    },
+  });
+  if (streamError) {
+    throw Object.assign(new Error(streamError.message || "HireMe Agent stream failed"), {
+      code: streamError.code || "hireme_agent_stream_failed",
+      statusCode: streamError.statusCode || 500,
+    });
+  }
+  return buildMcpAgentCallExecutionResult({
+    callArgs,
+    outputFast,
+    finalResult: result,
+    events,
+  });
+}
+
+function buildMcpAgentCallExecutionResult({
+  callArgs = {},
+  outputFast = null,
+  finalResult = null,
+  events = [],
+}) {
+  const responseMode =
+    outputFast?.responseMode ||
+    finalResult?.responseMode ||
+    finalResult?.jsonOutput?.responseMode ||
+    null;
+  const shouldAct = responseMode === "local_codex_execution_brief";
+  const outputText =
+    outputFast?.outputText ||
+    outputFast?.result?.outputText ||
+    finalResult?.result?.outputText ||
+    finalResult?.codexView?.primaryText ||
+    "";
+  const memoryJobId =
+    outputFast?.memoryJobId ||
+    finalResult?.memoryJobId ||
+    finalResult?.memory?.jobId ||
+    null;
+  const callId = outputFast?.callId || finalResult?.callId || null;
+  const traceId = outputFast?.traceId || finalResult?.traceId || callId;
+  return {
+    type: "hireme_agent_call_mcp_result",
+    streamConsumed: true,
+    status: "output_ready",
+    callId,
+    traceId,
+    memoryJobId,
+    activeAgentId: finalResult?.activeAgentId || outputFast?.agentId || callArgs.agent_id || null,
+    responseMode,
+    codexAction: shouldAct
+      ? "EXECUTE_LOCAL_WORKSPACE_BRIEF_NOW"
+      : "SHOW_AGENT_OUTPUT",
+    codexInstruction: shouldAct
+      ? "Local Codex should execute the HireMe Agent brief in this workspace now. Use normal Codex tools to inspect/edit files, run commands, and verify the result. Do not merely summarize the brief unless the user explicitly asks not to execute."
+      : "Show the HireMe Agent output directly. Do not claim local workspace actions were performed unless you actually perform them afterward.",
+    outputText,
+    localCodex: {
+      shouldAct,
+      action: shouldAct ? "execute_local_workspace_brief" : "show_agent_answer",
+      preferredSource: "outputText",
+    },
+    result: outputFast?.result || finalResult?.result || null,
+    jsonOutput: outputFast?.jsonOutput || finalResult?.jsonOutput || null,
+    codexView: outputFast?.codexView || finalResult?.codexView || null,
+    memory: {
+      status: finalResult?.memory?.status || "pending",
+      jobId: memoryJobId,
+      statusTool: memoryJobId ? "hireme_get_memory_status" : null,
+      traceTool: traceId ? "hireme_get_agent_call_trace" : null,
+      reconcileTool: memoryJobId || traceId ? "hireme_reconcile_memwal" : null,
+    },
+    events,
   };
 }
 
@@ -8767,6 +11712,7 @@ function buildCodexView({
   return {
     type: "hireme_codex_view",
     callId,
+    traceId: callId,
     activeAgentId: agent?.id || null,
     agentName: agent?.name || null,
     primaryText: extractCodexPrimaryText(safeResult),
@@ -8782,8 +11728,13 @@ function buildCodexView({
     memoryStatus,
     memoryJobId,
     conversationId,
+    traceEndpoint: "/v1/agent-call/trace",
+    reconcileEndpoint: "/v1/memwal/reconcile",
+    memoryStatusEndpoint: "/v1/agent-memory-status",
     nextAction:
-      memoryStatus === "pending"
+      responseMode === "local_codex_execution_brief"
+        ? "execute_local_workspace_brief"
+        : memoryStatus === "pending"
         ? "poll_memory_status"
         : primaryAttachment
           ? "show_attachment"
@@ -8795,6 +11746,14 @@ function buildCodexView({
             memory_job_id: memoryJobId,
           }
         : null,
+    traceTool: "hireme_get_agent_call_trace",
+    traceArgs: {
+      call_id: callId,
+    },
+    reconcileTool: "hireme_reconcile_memwal",
+    reconcileArgs: {
+      call_id: callId,
+    },
   };
 }
 
@@ -9327,6 +12286,10 @@ async function registerAgentFromMcp(args = {}) {
       : ["AGENTS.md", "skills/**", "harness/**", "private prompts"];
   const publicContract = String(args.public_mcp_contract).trim();
   const now = new Date().toISOString();
+  const currentVersionNumber = Math.max(
+    1,
+    Math.trunc(readOptionalNumber(args.version_number ?? args.versionNumber, 1)),
+  );
 
   const agent = {
     id: agentId,
@@ -9359,6 +12322,10 @@ async function registerAgentFromMcp(args = {}) {
     rating: readOptionalNumber(args.rating, 0),
     calls: Math.max(0, Math.trunc(readOptionalNumber(args.historical_calls, 0))),
     latencyMs: Math.max(0, Math.trunc(readOptionalNumber(args.median_latency_ms, 0))),
+    createdAt: args.created_at || args.createdAt || now,
+    updatedAt: now,
+    currentVersionNumber,
+    versionPublishedAt: now,
   };
 
   upsertLocalAgent(agent);
@@ -9462,6 +12429,13 @@ async function registerAgentFromMcp(args = {}) {
     storedPlaintextHarness: false,
     returnedCreatorSecrets: false,
     supabase,
+    version: {
+      versionNumber: currentVersionNumber,
+      releaseNotes:
+        args.release_notes ||
+        args.releaseNotes ||
+        "Registered through HireMe MCP.",
+    },
     nextSteps: [
       "Call hireme_list_hired_agents to confirm the gateway registry entry.",
       "Open /agents or run npm run supabase:smoke when Supabase persistence is enabled.",
@@ -9628,7 +12602,7 @@ async function persistRegisteredAgentToSupabase({ agent, artifact, args }) {
 
     const versionNumber = Math.max(
       1,
-      Math.trunc(readOptionalNumber(args.version_number, 1)),
+      Math.trunc(readOptionalNumber(args.version_number ?? args.versionNumber, 1)),
     );
     const versionRow = await supabaseMustSingle(
       admin
@@ -10070,6 +13044,64 @@ function parseMist(value) {
   const text = String(value ?? "").trim();
   if (!/^\d+$/.test(text)) return 0n;
   return BigInt(text);
+}
+
+function isRecord(value) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function readPositiveMist(value, field) {
+  const mist = parseMist(value);
+  if (mist <= 0n) {
+    throw Object.assign(new Error(`${field} must be a positive MIST amount`), {
+      statusCode: 400,
+      code: "bad_sui_amount",
+    });
+  }
+  return mist;
+}
+
+function readOptionalPositiveInteger(value, fallback) {
+  if (value === undefined || value === null || value === "") return fallback;
+  const number = Number(value);
+  if (!Number.isFinite(number) || number <= 0) return fallback;
+  return Math.trunc(number);
+}
+
+function readRequiredSuiObjectId(args, keys, field) {
+  for (const key of keys) {
+    const objectId = normalizeSuiObjectId(args[key]);
+    if (objectId) return objectId;
+  }
+  throw Object.assign(new Error(`${field} must be a valid Sui object id`), {
+    statusCode: 400,
+    code: "bad_sui_object_id",
+  });
+}
+
+function normalizeSuiObjectId(value) {
+  return normalizeSuiAddress(value);
+}
+
+function readSuiBytes(value, field) {
+  if (Array.isArray(value)) {
+    const bytes = value.map((item) => Number(item));
+    if (bytes.every((item) => Number.isInteger(item) && item >= 0 && item <= 255)) {
+      return bytes;
+    }
+    throw Object.assign(new Error(`${field} byte array must contain u8 values`), {
+      statusCode: 400,
+      code: "bad_sui_bytes",
+    });
+  }
+  const text = String(value || "").trim();
+  if (!text) {
+    throw Object.assign(new Error(`${field} is required`), {
+      statusCode: 400,
+      code: "bad_sui_bytes",
+    });
+  }
+  return [...Buffer.from(text, "utf8")];
 }
 
 function parseSuiToMist(value) {
@@ -11654,6 +14686,7 @@ async function callOllamaAgent({
     requestDigest,
     harnessRuntimeContext,
     conversationContext,
+    responseMode,
   });
   const messages = [
     {
@@ -11756,7 +14789,12 @@ async function callOllamaAgent({
   }
 }
 
-async function fetchOllamaChatCompletion({ messages, signal }) {
+async function fetchOllamaChatCompletion({
+  messages,
+  signal,
+  model = defaultOllamaModel,
+  maxTokens = defaultModelMaxOutputTokens,
+}) {
   const headers = {
     Authorization: `Bearer ${process.env.OLLAMA_API_KEY}`,
     "Content-Type": "application/json",
@@ -11767,17 +14805,17 @@ async function fetchOllamaChatCompletion({ messages, signal }) {
     const body =
       endpoint.type === "openai-compatible"
         ? {
-            model: defaultOllamaModel,
+            model,
             stream: false,
             messages,
-            max_tokens: defaultModelMaxOutputTokens,
+            max_tokens: maxTokens,
           }
         : {
-            model: defaultOllamaModel,
+            model,
             stream: false,
             messages,
             options: {
-              num_predict: defaultModelMaxOutputTokens,
+              num_predict: maxTokens,
             },
           };
     const response = await fetch(endpoint.url, {
@@ -11874,6 +14912,7 @@ async function callOpenAIAgent({
     requestDigest,
     harnessRuntimeContext,
     conversationContext,
+    responseMode,
   });
   const body = {
     model: defaultOpenAIModel,
@@ -12014,6 +15053,7 @@ async function persistMcpCallLedgerAndStats({
   args,
   callId,
   hirerId,
+  userMemWalResult,
   requestDigest,
   responseDigest,
   inputTokens,
@@ -12055,6 +15095,12 @@ async function persistMcpCallLedgerAndStats({
       };
     }
 
+    const storedUserMemWalResult = await persistUserMemWalResultMetadata(admin, {
+      agentRow,
+      hirerProfile,
+      userMemWalResult,
+    });
+
     const settlementBillableCalls = Math.max(
       0,
       Math.trunc(Number(billableCalls) || 0),
@@ -12072,6 +15118,7 @@ async function persistMcpCallLedgerAndStats({
         tool_name: toolName,
         request_digest: requestDigest,
         response_digest: responseDigest,
+        user_memwal_result_id: storedUserMemWalResult?.id || null,
         input_tokens: inputTokens,
         output_tokens: outputTokens,
         billable_calls: ledgerBillableCalls,
@@ -12090,6 +15137,8 @@ async function persistMcpCallLedgerAndStats({
           nonBillableReason,
           accessType: access.accessType,
           entitlementId: access.id,
+          userMemWalResultId: storedUserMemWalResult?.id || null,
+          userMemWalResultStatus: storedUserMemWalResult?.status || "not_recorded",
         },
       },
       { onConflict: "call_id" },
@@ -12105,7 +15154,74 @@ async function persistMcpCallLedgerAndStats({
       status: "recorded",
       agentRowId: agentRow.id,
       hirerProfileId: hirerProfile.id,
+      userMemWalResultId: storedUserMemWalResult?.id || null,
+      userMemWalResultStatus: storedUserMemWalResult?.status || "not_recorded",
       stats,
+    };
+  } catch (err) {
+    return {
+      status: "failed",
+      message: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+async function persistUserMemWalResultMetadata(admin, {
+  agentRow,
+  hirerProfile,
+  userMemWalResult,
+}) {
+  const publicRecord = userMemWalResult?.publicRecord || null;
+  if (!publicRecord?.callId) return null;
+  try {
+    const { data, error } = await admin
+      .from("user_memwal_results")
+      .upsert(
+        {
+          call_id: publicRecord.callId,
+          hirer_id: hirerProfile.id,
+          agent_id: agentRow.id,
+          agent_version_id: agentRow.current_version_id || null,
+          request_digest: publicRecord.requestDigest || null,
+          response_digest: publicRecord.responseDigest || null,
+          encryption_provider: publicRecord.encryptionProvider,
+          platform_kms_key_id: publicRecord.platformKmsKeyId || null,
+          encryption_id: publicRecord.encryptionId,
+          policy_id: publicRecord.policyId,
+          ciphertext_format: publicRecord.ciphertextFormat,
+          ciphertext_digest: publicRecord.ciphertextDigest,
+          ciphertext_size_bytes: publicRecord.ciphertextSizeBytes || null,
+          storage_provider: publicRecord.storageProvider || "local-file",
+          storage_network: publicRecord.storageNetwork || null,
+          walrus_blob_id: publicRecord.walrusBlobId || null,
+          walrus_sui_object_id: publicRecord.walrusSuiObjectId || null,
+          local_ciphertext_path: publicRecord.localCiphertextPath || null,
+          safe_summary: publicRecord.safeSummary || {},
+          metadata: {
+            kind: publicRecord.kind,
+            visibility: publicRecord.visibility,
+            recordPath: userMemWalResult.recordPath,
+            plaintextStoredInDb: false,
+            plaintextReturnedInRecord: false,
+            creatorCanReadPlaintext: false,
+            publicCanReadPlaintext: false,
+          },
+        },
+        { onConflict: "call_id" },
+      )
+      .select("id,call_id,created_at")
+      .single();
+    if (error) {
+      return {
+        status: "failed",
+        message: error.message,
+      };
+    }
+    return {
+      status: "recorded",
+      id: data.id,
+      callId: data.call_id,
+      createdAt: data.created_at,
     };
   } catch (err) {
     return {
@@ -12239,9 +15355,8 @@ async function refreshAgentUsageStats(admin, agentRowId) {
 
   const latencies = rows
     .map((row) => Number(row.latency_ms))
-    .filter((value) => Number.isFinite(value) && value >= 0)
-    .sort((a, b) => a - b);
-  const medianLatencyMs = median(latencies);
+    .filter((value) => Number.isFinite(value) && value >= 0);
+  const avgLatencyMs = averageInteger(latencies);
   const avgInputTokens = averageInteger(
     rows.map((row) => Number(row.input_tokens)).filter(Number.isFinite),
   );
@@ -12260,7 +15375,7 @@ async function refreshAgentUsageStats(admin, agentRowId) {
     .from("agents")
     .update({
       historical_calls: count ?? rows.length,
-      median_latency_ms: medianLatencyMs,
+      median_latency_ms: avgLatencyMs,
       avg_input_tokens: avgInputTokens,
       avg_output_tokens: avgOutputTokens,
       active_user_count: activeUserCount,
@@ -12274,7 +15389,8 @@ async function refreshAgentUsageStats(admin, agentRowId) {
   return {
     status: "updated",
     historicalCalls: count ?? rows.length,
-    medianLatencyMs,
+    averageLatencyMs: avgLatencyMs,
+    medianLatencyMs: avgLatencyMs,
     avgInputTokens,
     avgOutputTokens,
     activeUserCount,
@@ -12285,7 +15401,15 @@ function applyAgentUsageStats(agent, stats = {}) {
   if (!agent?.id || stats.status !== "updated") return;
   const patch = {
     calls: Math.max(0, Math.trunc(readOptionalNumber(stats.historicalCalls, agent.calls || 0))),
-    latencyMs: Math.max(0, Math.trunc(readOptionalNumber(stats.medianLatencyMs, agent.latencyMs || 0))),
+    latencyMs: Math.max(
+      0,
+      Math.trunc(
+        readOptionalNumber(
+          stats.averageLatencyMs ?? stats.medianLatencyMs,
+          agent.latencyMs || 0,
+        ),
+      ),
+    ),
     avgInputTokens: Math.max(
       0,
       Math.trunc(readOptionalNumber(stats.avgInputTokens, agent.avgInputTokens || 0)),
@@ -12307,13 +15431,6 @@ function isUuid(value) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
     String(value || ""),
   );
-}
-
-function median(values) {
-  if (!values.length) return null;
-  const middle = Math.floor(values.length / 2);
-  if (values.length % 2) return Math.round(values[middle]);
-  return Math.round((values[middle - 1] + values[middle]) / 2);
 }
 
 function averageInteger(values) {
@@ -12667,6 +15784,10 @@ async function hydrateAgentFromSupabase(agentId) {
     avgInputTokens: Math.trunc(readOptionalNumber(row.avg_input_tokens, 0)),
     avgOutputTokens: Math.trunc(readOptionalNumber(row.avg_output_tokens, 0)),
     activeUsers: Math.trunc(readOptionalNumber(row.active_user_count, 0)),
+    createdAt: row.created_at || null,
+    updatedAt: row.updated_at || row.created_at || null,
+    currentVersionNumber: row.current_version_number || null,
+    versionPublishedAt: row.current_version_published_at || null,
     resultTitle: row.result_title || null,
     resultSummary: row.result_summary || null,
     resultSample: row.result_sample || null,
@@ -13341,7 +16462,7 @@ function loadEnvFile(filename) {
     for (const line of file.split(/\r?\n/)) {
       const trimmed = line.trim();
       if (!trimmed || trimmed.startsWith("#")) continue;
-      const match = /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/.exec(trimmed);
+      const match = /^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/.exec(trimmed);
       if (!match || process.env[match[1]] !== undefined) continue;
       process.env[match[1]] = match[2].replace(/^["']|["']$/g, "");
     }

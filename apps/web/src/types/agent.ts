@@ -67,6 +67,8 @@ export type Agent = {
   activeUsers?: number;
   createdAt?: string;
   updatedAt?: string;
+  currentVersionNumber?: number;
+  versionPublishedAt?: string;
   resultPreview: {
     title: string;
     summary: string;

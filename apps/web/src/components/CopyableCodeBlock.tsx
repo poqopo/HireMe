@@ -79,8 +79,10 @@ export function CopyableCodeBlock({
           <span>{copied ? "Copied" : "Copy"}</span>
         </button>
       </div>
-      <pre className="m-0 max-h-[360px] min-w-0 max-w-full overflow-x-auto p-4 text-left text-[0.78rem] leading-6 text-[#dbeafe] sm:text-[0.82rem]">
-        <code>{code}</code>
+      <pre className="m-0 max-h-[360px] min-w-0 max-w-full overflow-hidden whitespace-pre-wrap break-words p-4 text-left text-[0.78rem] leading-6 text-[#dbeafe] [overflow-wrap:anywhere] sm:text-[0.82rem]">
+        <code className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+          {code}
+        </code>
       </pre>
     </div>
   );

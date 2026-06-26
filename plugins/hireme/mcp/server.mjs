@@ -410,6 +410,66 @@ const inputSchemas = {
     type: "object",
     properties: {},
   },
+  hireme_continue_conversation: {
+    type: "object",
+    properties: {
+      agent_id: {
+        type: "string",
+        description: "Optional explicit agent id. Uses active agent when omitted.",
+      },
+      conversation_id: {
+        type: "string",
+        description:
+          "memWal MCP conversation id to continue. Recent turns are loaded as context.",
+      },
+      request: {
+        type: "string",
+        minLength: 1,
+        description:
+          "Natural-language follow-up request. Gateway decides whether to answer directly or return a Codex execution brief.",
+      },
+      response_mode: {
+        type: "string",
+        enum: ["auto", "direct_answer", "local_codex_execution_brief"],
+        description:
+          "Optional override. Omit or use auto to let the gateway infer direct answer vs local Codex execution brief.",
+      },
+      conversation_context_limit: {
+        type: "integer",
+        minimum: 1,
+        maximum: 100,
+        description: "Number of recent memWal turns to load. Defaults to 12.",
+      },
+      client_conversation_context: {
+        type: ["object", "array"],
+        description:
+          "Optional client-held transcript fallback for turns not yet indexed in memWal.",
+      },
+      prior_messages: {
+        type: "array",
+        description:
+          "Optional shorthand client transcript fallback. Items may include role, text/content, and createdAt.",
+        items: { type: "object" },
+      },
+      budget_calls: {
+        type: "integer",
+        minimum: 1,
+        maximum: 100,
+      },
+      hire_receipt_object_id: {
+        type: "string",
+      },
+      hirer_id: {
+        type: "string",
+      },
+      wait_for_memory: {
+        type: "boolean",
+        description:
+          "When true, keep the SSE stream open until memWal storage finishes. Defaults to false for this helper.",
+      },
+    },
+    required: ["request"],
+  },
   hireme_call_agent_stream: {
     type: "object",
     properties: {
@@ -432,6 +492,23 @@ const inputSchemas = {
         enum: ["direct_answer", "local_codex_execution_brief"],
         description:
           "Optional explicit output mode. Omit to let the gateway infer whether the agent should answer directly or hand off to local workspace.",
+      },
+      conversation_context_limit: {
+        type: "integer",
+        minimum: 1,
+        maximum: 100,
+        description: "Number of recent memWal turns to load. Defaults to the gateway setting.",
+      },
+      client_conversation_context: {
+        type: ["object", "array"],
+        description:
+          "Optional client-held transcript fallback for turns not yet indexed in memWal.",
+      },
+      prior_messages: {
+        type: "array",
+        description:
+          "Optional shorthand client transcript fallback. Items may include role, text/content, and createdAt.",
+        items: { type: "object" },
       },
       budget_calls: {
         type: "integer",
@@ -465,6 +542,50 @@ const inputSchemas = {
   hireme_get_memory_status: {
     type: "object",
     properties: {
+      memory_job_id: {
+        type: "string",
+        description:
+          "Memory job id returned at output_fast.memoryJobId from hireme_call_agent_stream.",
+      },
+      job_id: {
+        type: "string",
+        description: "Alias for memory_job_id.",
+      },
+    },
+  },
+  hireme_get_agent_call_trace: {
+    type: "object",
+    properties: {
+      call_id: {
+        type: "string",
+        description: "Agent call id returned at output_fast.callId.",
+      },
+      trace_id: {
+        type: "string",
+        description: "Trace id returned at output_fast.traceId.",
+      },
+      memory_job_id: {
+        type: "string",
+        description:
+          "Memory job id returned at output_fast.memoryJobId from hireme_call_agent_stream.",
+      },
+      job_id: {
+        type: "string",
+        description: "Alias for memory_job_id.",
+      },
+    },
+  },
+  hireme_reconcile_memwal: {
+    type: "object",
+    properties: {
+      call_id: {
+        type: "string",
+        description: "Agent call id returned at output_fast.callId.",
+      },
+      trace_id: {
+        type: "string",
+        description: "Trace id returned at output_fast.traceId.",
+      },
       memory_job_id: {
         type: "string",
         description:
@@ -1073,6 +1194,13 @@ const tools = [
     inputSchema: inputSchemas.hireme_list_conversations,
   },
   {
+    name: "hireme_continue_conversation",
+    title: "Continue a HireMe conversation",
+    description:
+      "Return a stream descriptor for a natural follow-up on an existing memWal conversation. The gateway auto-selects direct answer vs local Codex execution brief.",
+    inputSchema: inputSchemas.hireme_continue_conversation,
+  },
+  {
     name: "hireme_call_agent_stream",
     title: "Stream a HireMe agent call",
     description:
@@ -1085,6 +1213,20 @@ const tools = [
     description:
       "Return whether a streamed Agent call has finished storing its user-result memWal and MCP conversation records.",
     inputSchema: inputSchemas.hireme_get_memory_status,
+  },
+  {
+    name: "hireme_get_agent_call_trace",
+    title: "Get HireMe agent call trace",
+    description:
+      "Return gateway trace stages for a streamed Agent call by call_id, trace_id, or memory_job_id.",
+    inputSchema: inputSchemas.hireme_get_agent_call_trace,
+  },
+  {
+    name: "hireme_reconcile_memwal",
+    title: "Reconcile HireMe memWal storage",
+    description:
+      "Check a call trace, background memory job, local memWal record, local ledger, and Supabase rows for the same Agent call.",
+    inputSchema: inputSchemas.hireme_reconcile_memwal,
   },
   {
     name: "hireme_call_walrus_agent",
@@ -1194,8 +1336,11 @@ const userToolNames = new Set([
   "hireme_get_agent",
   "hireme_select_agent",
   "hireme_current_agent",
+  "hireme_continue_conversation",
   "hireme_call_agent_stream",
   "hireme_get_memory_status",
+  "hireme_get_agent_call_trace",
+  "hireme_reconcile_memwal",
 ]);
 
 const advertisedTools =
@@ -1570,6 +1715,49 @@ function readOptionalBoolean(value) {
   return null;
 }
 
+function normalizeResponseModeOverride(value) {
+  const text = String(value || "").trim();
+  if (!text || text === "auto") return null;
+  if (text === "direct") return "direct_answer";
+  if (text === "brief" || text === "execution_brief" || text === "codex_brief") {
+    return "local_codex_execution_brief";
+  }
+  if (text === "direct_answer" || text === "local_codex_execution_brief") return text;
+  return null;
+}
+
+function buildContinueConversationCallArgs(args = {}, defaults = {}) {
+  const task = String(args.request || args.task || "").trim();
+  if (!task) {
+    throw new Error("request is required to continue a HireMe conversation");
+  }
+  const waitForMemory =
+    readOptionalBoolean(args.wait_for_memory ?? args.waitForMemory) ?? false;
+  const responseMode = normalizeResponseModeOverride(
+    args.response_mode || args.responseMode,
+  );
+  const callArgs = {
+    agent_id: args.agent_id || args.agentId || defaults.agentId,
+    hirer_id: args.hirer_id || args.hirerId || defaults.hirerId,
+    task,
+    conversation_id:
+      args.conversation_id || args.conversationId || defaults.conversationId,
+    conversation_context_limit:
+      args.conversation_context_limit ?? args.conversationContextLimit ?? 12,
+    client_conversation_context:
+      args.client_conversation_context || args.clientConversationContext,
+    prior_messages: args.prior_messages || args.priorMessages,
+    budget_calls: args.budget_calls || args.budgetCalls || 1,
+    hire_receipt_object_id:
+      args.hire_receipt_object_id || args.hireReceiptObjectId,
+    save_local_result: args.save_local_result || args.saveLocalResult,
+    wait_for_memory: waitForMemory,
+    waitForMemory,
+  };
+  if (responseMode) callArgs.response_mode = responseMode;
+  return callArgs;
+}
+
 function buildAgentCallStreamDescriptor(args = {}) {
   const body = {
     codex_installation_id: codexInstallationId,
@@ -1593,6 +1781,8 @@ function buildAgentCallStreamDescriptor(args = {}) {
       canonicalStreamEndpoint: "/v1/agent-call/stream",
       jsonFallbackEndpoint: "/v1/agent-call",
       memoryStatusEndpoint: "/v1/agent-memory-status",
+      traceEndpoint: "/v1/agent-call/trace",
+      reconcileEndpoint: "/v1/memwal/reconcile",
       outputEvent: "output_fast",
       heartbeatEvent: "heartbeat",
       heartbeatMs: 15000,
@@ -1620,6 +1810,179 @@ function buildAgentCallStreamDescriptor(args = {}) {
     curlExample:
       `curl -N -X POST ${gatewayUrl.replace(/\/$/, "")}/v1/agent-call/stream ` +
       `-H 'content-type: application/json' --data '<JSON body omitted>'`,
+  };
+}
+
+function shouldReturnAgentCallStreamDescriptor(args = {}) {
+  return (
+    readOptionalBoolean(
+      args.return_stream_url ??
+        args.returnStreamUrl ??
+        args.stream_url ??
+        args.streamUrl ??
+        args.descriptor_only ??
+        args.descriptorOnly,
+    ) === true
+  );
+}
+
+async function callGatewayAgentStream(args = {}) {
+  if (process.env.HIREME_MCP_GATEWAY_DISABLED === "1") {
+    return buildAgentCallStreamDescriptor(args);
+  }
+
+  const descriptor = buildAgentCallStreamDescriptor({
+    ...args,
+    return_stream_url: false,
+    returnStreamUrl: false,
+  });
+  const controller = new AbortController();
+  const timeout = setTimeout(
+    () => controller.abort(),
+    Number(process.env.HIREME_MCP_AGENT_STREAM_TIMEOUT_MS || 120_000),
+  );
+  const headers = {
+    "content-type": "application/json",
+  };
+  if (gatewayApiKey) {
+    headers.authorization = `Bearer ${gatewayApiKey}`;
+    headers["x-hireme-gateway-key"] = gatewayApiKey;
+  }
+
+  const events = [];
+  let outputFast = null;
+  let done = null;
+
+  try {
+    const response = await fetch(descriptor.url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(descriptor.body),
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      const errorBody = await response.text();
+      throw new Error(`Gateway ${response.status}: ${errorBody}`);
+    }
+    if (!response.body) {
+      throw new Error("Gateway Agent stream did not return a readable body.");
+    }
+
+    let buffer = "";
+    for await (const chunk of response.body) {
+      buffer += Buffer.from(chunk).toString("utf8");
+      let boundary = buffer.indexOf("\n\n");
+      while (boundary >= 0) {
+        const rawEvent = buffer.slice(0, boundary);
+        buffer = buffer.slice(boundary + 2);
+        const parsed = parseSseEvent(rawEvent);
+        if (parsed) {
+          events.push(summarizeAgentStreamEvent(parsed));
+          if (parsed.event === "output_fast") outputFast = parsed.data;
+          if (parsed.event === "done") done = parsed.data;
+          if (parsed.event === "error") {
+            throw new Error(parsed.data?.message || "HireMe Agent stream failed.");
+          }
+        }
+        boundary = buffer.indexOf("\n\n");
+      }
+    }
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  return buildMcpAgentCallExecutionResult({
+    descriptor,
+    outputFast,
+    done,
+    events,
+  });
+}
+
+function parseSseEvent(rawEvent) {
+  const lines = String(rawEvent || "").split(/\r?\n/);
+  let event = "message";
+  const dataLines = [];
+  for (const line of lines) {
+    if (line.startsWith("event:")) event = line.slice("event:".length).trim();
+    if (line.startsWith("data:")) dataLines.push(line.slice("data:".length).trim());
+  }
+  if (!dataLines.length) return null;
+  let data = {};
+  try {
+    data = JSON.parse(dataLines.join("\n"));
+  } catch {
+    data = { raw: dataLines.join("\n") };
+  }
+  return { event, data };
+}
+
+function summarizeAgentStreamEvent({ event, data }) {
+  return {
+    event,
+    callId: data?.callId || null,
+    traceId: data?.traceId || null,
+    memoryJobId: data?.memoryJobId || null,
+    responseMode: data?.responseMode || null,
+    status: data?.status || null,
+  };
+}
+
+function buildMcpAgentCallExecutionResult({
+  descriptor,
+  outputFast = null,
+  done = null,
+  events = [],
+}) {
+  if (!outputFast) {
+    throw new Error("HireMe Agent stream ended before output_fast.");
+  }
+  const responseMode =
+    outputFast.responseMode ||
+    outputFast.jsonOutput?.responseMode ||
+    outputFast.codexView?.responseMode ||
+    null;
+  const shouldAct = responseMode === "local_codex_execution_brief";
+  const outputText =
+    outputFast.outputText ||
+    outputFast.result?.outputText ||
+    outputFast.codexView?.primaryText ||
+    "";
+  const memoryJobId = outputFast.memoryJobId || done?.memoryJobId || null;
+  const callId = outputFast.callId || done?.callId || null;
+  const traceId = outputFast.traceId || done?.traceId || callId;
+  return {
+    type: "hireme_agent_call_mcp_result",
+    streamConsumed: true,
+    status: "output_ready",
+    callId,
+    traceId,
+    memoryJobId,
+    activeAgentId: outputFast.agentId || descriptor.body?.agent_id || null,
+    responseMode,
+    codexAction: shouldAct
+      ? "EXECUTE_LOCAL_WORKSPACE_BRIEF_NOW"
+      : "SHOW_AGENT_OUTPUT",
+    codexInstruction: shouldAct
+      ? "Local Codex should execute the HireMe Agent brief in this workspace now. Use normal Codex tools to inspect/edit files, run commands, and verify the result. Do not merely summarize the brief unless the user explicitly asks not to execute."
+      : "Show the HireMe Agent output directly. Do not claim local workspace actions were performed unless you actually perform them afterward.",
+    outputText,
+    localCodex: {
+      shouldAct,
+      action: shouldAct ? "execute_local_workspace_brief" : "show_agent_answer",
+      preferredSource: "outputText",
+    },
+    result: outputFast.result || null,
+    jsonOutput: outputFast.jsonOutput || null,
+    codexView: outputFast.codexView || null,
+    memory: {
+      status: done?.memory?.status || "pending",
+      jobId: memoryJobId,
+      statusTool: memoryJobId ? "hireme_get_memory_status" : null,
+      traceTool: traceId ? "hireme_get_agent_call_trace" : null,
+      reconcileTool: memoryJobId || traceId ? "hireme_reconcile_memwal" : null,
+    },
+    events,
   };
 }
 
@@ -2421,17 +2784,32 @@ async function callTool(name, args = {}) {
         retryTool: "hireme_list_conversations",
       });
     }
+    case "hireme_continue_conversation": {
+      const callArgs = buildContinueConversationCallArgs(args, {
+        agentId: activeAgentId,
+        hirerId: defaultHirerId,
+      });
+      activeAgentId = callArgs.agent_id || activeAgentId;
+      if (shouldReturnAgentCallStreamDescriptor(args)) {
+        return textResult(buildAgentCallStreamDescriptor(callArgs));
+      }
+      return textResult(await callGatewayAgentStream(callArgs));
+    }
     case "hireme_call_agent_stream": {
       const callArgs = {
         agent_id: args.agent_id || activeAgentId,
         hirer_id: args.hirer_id || defaultHirerId,
         ...args,
         wait_for_memory:
-          readOptionalBoolean(args.wait_for_memory ?? args.waitForMemory) ?? true,
+          readOptionalBoolean(args.wait_for_memory ?? args.waitForMemory) ?? false,
         waitForMemory:
-          readOptionalBoolean(args.wait_for_memory ?? args.waitForMemory) ?? true,
+          readOptionalBoolean(args.wait_for_memory ?? args.waitForMemory) ?? false,
       };
-      return textResult(buildAgentCallStreamDescriptor(callArgs));
+      activeAgentId = callArgs.agent_id || activeAgentId;
+      if (shouldReturnAgentCallStreamDescriptor(args)) {
+        return textResult(buildAgentCallStreamDescriptor(callArgs));
+      }
+      return textResult(await callGatewayAgentStream(callArgs));
     }
     case "hireme_get_memory_status": {
       const gateway = await callGateway("/v1/agent-memory-status", args, {
@@ -2444,6 +2822,32 @@ async function callTool(name, args = {}) {
           "Background memWal storage status is tracked inside the protected gateway process.",
         runGateway: "npm run gateway:dev",
         retryTool: "hireme_get_memory_status",
+      });
+    }
+    case "hireme_get_agent_call_trace": {
+      const gateway = await callGateway("/v1/agent-call/trace", args, {
+        timeoutMs: Number(process.env.HIREME_MCP_TRACE_TIMEOUT_MS || 10_000),
+      });
+      if (gateway) return textResult(gateway);
+      return textResult({
+        status: "gateway_required",
+        reason:
+          "Agent call traces are tracked inside the protected gateway process.",
+        runGateway: "npm run gateway:dev",
+        retryTool: "hireme_get_agent_call_trace",
+      });
+    }
+    case "hireme_reconcile_memwal": {
+      const gateway = await callGateway("/v1/memwal/reconcile", args, {
+        timeoutMs: Number(process.env.HIREME_MCP_RECONCILE_TIMEOUT_MS || 15_000),
+      });
+      if (gateway) return textResult(gateway);
+      return textResult({
+        status: "gateway_required",
+        reason:
+          "MemWal reconciliation checks the gateway's in-memory jobs, trace files, local ledger, and Supabase rows.",
+        runGateway: "npm run gateway:dev",
+        retryTool: "hireme_reconcile_memwal",
       });
     }
     case "hireme_call_walrus_agent": {
@@ -2853,7 +3257,7 @@ function mcpProfileInstructions() {
     return "HireMe Creator is the local stdio MCP plugin for creator workflows. Use hireme_create_agent_template to create a local Agent folder, then edit AGENTS.md, skills/**, harness/**, and examples locally. Use hireme_create_agent_from_folder to archive that local folder, upload it to the protected gateway, encrypt it, store ciphertext on Walrus, and register the public Agent card. Use hireme_update_agent_from_folder to publish a new version. Use hireme_register_agent only when encrypted Walrus artifact metadata already exists. Do not use this plugin for marketplace discovery, Try/Hire entitlement listing, payments, or calling hired Agents; use the OAuth HTTP MCP server named hireme for those user workflows. Never reveal creator AGENTS.md files, private skills folders, Harness internals, plugin source, or protected memWal/Walrus artifacts.";
   }
 
-  return "HireMe's default profile is streaming-first. Use hireme_whoami, hireme_list_hired_agents, hireme_list_my_agents, hireme_get_agent, hireme_select_agent, and hireme_current_agent for identity and Agent management. Use hireme_call_agent_stream for Agent answers: the output_fast event contains the Agent output immediately, then memWal/Walrus-backed storage events follow. Use hireme_get_memory_status only if a client needs to poll a returned memory_job_id. Direct call, wait call, async result polling, loop, team, registry, validation, and read tools are compatibility-only and are not advertised in this profile. Never request or reveal creator AGENTS.md files, private skills folders, Harness internals, plugin source, or protected memWal/Walrus artifacts.";
+  return "HireMe's default profile is streaming-first. Use hireme_whoami, hireme_list_hired_agents, hireme_list_my_agents, hireme_get_agent, hireme_select_agent, and hireme_current_agent for identity and Agent management. Use hireme_continue_conversation for natural follow-ups on an existing memWal conversation, and hireme_call_agent_stream for explicit Agent calls: the output_fast event contains the Agent output immediately, then memWal/Walrus-backed storage events follow. Use hireme_get_memory_status to poll a returned memory_job_id, hireme_get_agent_call_trace to inspect gateway stages, and hireme_reconcile_memwal to verify MemWal/ledger storage for a call. Direct call, wait call, async result polling, loop, team, registry, validation, and read tools are compatibility-only and are not advertised in this profile. Never request or reveal creator AGENTS.md files, private skills folders, Harness internals, plugin source, or protected memWal/Walrus artifacts.";
 }
 
 function assertRequiredRegistrationFields(args) {
