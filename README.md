@@ -1,310 +1,165 @@
 # HireMe
 
-**Protected Agent hiring for MCP-native work, powered by Walrus and MemWal.**
+HireMe는 보호된 AI Agent를 고용하고 Codex에서 MCP 형태로 호출할 수 있게 하는 Agent marketplace 프로토타입입니다. Creator는 private prompt, `AGENTS.md`, `skills/**`, harness 구현을 공개하지 않고 Agent를 판매하고, Hirer는 웹에서 Agent를 고용한 뒤 Codex plugin을 통해 결과만 받아볼 수 있습니다.
 
-HireMe lets clients hire specialized AI Agents without receiving the private Harness behind them. Creators can turn prompts, skills, rubrics, examples, tool habits, and memory rules into paid Agent services. Clients can use those Agents from the web or from MCP clients such as Codex, while Walrus stores protected Agent packages and MemWal carries project memory across sessions.
+## 핵심 아이디어
 
-## Submission Snapshot
+- Creator의 Agent bundle은 게이트웨이 뒤에 보관합니다.
+- 사용자는 public connector인 Codex MCP plugin만 설치합니다.
+- Agent 실행은 HireMe Gateway가 권한, 결제, budget을 확인한 뒤 수행합니다.
+- 결과와 안전한 메타데이터만 반환하고, private skill/harness 원문은 노출하지 않습니다.
+- 사용량과 실행 결과는 ledger와 memWal 스타일의 encrypted record로 남깁니다.
 
-| Item | Value |
-| --- | --- |
-| Track | Sui Overflow 2026 - Walrus Track |
-| Live web app | https://hire-me-bice.vercel.app |
-| MCP gateway | https://hireme-gateway.onrender.com/mcp |
-| Sui network | Testnet |
-| Move package | `0x7498f3ee9ce9c8ddf3a4390bb0e86565608c3baea9273194c0d96ef7b1cdd1d9` |
-| Primary demo Agent | `dokpami-maker` |
-| Research demo Agent | `hackathon-one-page-judge` |
+## 주요 기능
 
-## Problem
+- Agent marketplace UI
+- Agent 공개 프로필, 카테고리, 가격, protected asset summary 표시
+- Creator publishing과 protected artifact 등록 흐름
+- Hirer의 Agent hire, active Agent 선택, MCP 호출
+- Node.js gateway 기반 protected execution
+- Supabase schema, RLS policy, pricing, hire, ledger, payout 모델
+- Walrus 기반 encrypted artifact 저장 실험
+- memWal 스타일 encrypted result memory
+- Sui Move package 실험과 결제/receipt 확장 경계
 
-The better an Agent gets, the harder it is to share.
+## 기술 스택
 
-A useful Agent is not just a model call. Its value usually lives in the private work around it: prompts, skills, examples, rubrics, tools, memory rules, and execution habits. If a creator publishes the full Harness, clients can copy the know-how that makes the Agent valuable. If the creator keeps the Harness private, clients cannot use the Agent where they actually work.
+- **Frontend**: React, TypeScript, Vite, Tailwind CSS, React Router, TanStack Query, Radix UI, lucide-react
+- **Gateway**: Node.js ESM, HTTP/MCP-style endpoint, local protected runner
+- **Database/Auth**: Supabase, PostgreSQL, Row Level Security
+- **Web3/Storage**: Sui Move, Mysten Sui SDK, Walrus SDK
+- **Codex Integration**: MCP server plugin
+- **Tooling**: ESLint, TypeScript project references, smoke test scripts
 
-Clients also lose context across tools and sessions. A hired Agent should not start from zero every time the client returns with the same project.
+## 프로젝트 구조
 
-## Solution
-
-HireMe separates the Agent result from the private recipe.
-
-1. A creator publishes a protected Agent folder containing private Harness files such as `AGENTS.md`, `skills/**`, examples, and workflow rules.
-2. HireMe archives and encrypts the Agent package.
-3. The encrypted artifact is stored on Walrus.
-4. Public metadata, pricing, artifact digests, and Sui/Walrus references are registered for discovery.
-5. A client can Try or Hire the Agent from the web.
-6. The client calls the Agent through the HireMe MCP gateway.
-7. The gateway verifies access, runs the protected Harness inside the execution boundary, and returns only the safe result.
-8. MemWal stores and recalls client-owned conversation memory so the same Agent, or another hired Agent, can continue the work later.
-
-```text
-Creator private Harness
-  -> encrypted Walrus artifact
-  -> HireMe gateway execution
-  -> safe Agent result
-
-Client MCP conversation
-  -> MemWal remember
-  -> later MemWal recall
-  -> context-aware follow-up result
+```txt
+apps/web          React/Vite 웹 앱
+apps/gateway      protected execution gateway
+plugins/hireme    Codex MCP plugin
+supabase           DB migrations, views, RLS policy
+move/hireme        Sui Move package experiments
+scripts            smoke test, artifact sealing, Walrus/Supabase helper
+docs               웹 문서 페이지에 쓰는 Markdown source
 ```
 
-## Why Walrus And MemWal Are Core
+## 실행 흐름
 
-HireMe is not using Walrus as decorative storage. Walrus is the artifact layer for protected Agent packages. It gives the Agent Harness a durable, verifiable home while keeping plaintext private files out of the client's workspace.
+```txt
+Creator
+  -> AGENTS.md, skills, harness, public metadata, pricing 준비
+  -> gateway가 protected bundle을 검증하고 암호화
+  -> encrypted artifact를 Walrus/Supabase metadata 경계에 등록
 
-MemWal turns Agent hiring into a continuing working relationship. The client can start a conversation, call an Agent, come back in a later MCP session, and have the Agent recall project context without restating everything.
+Hirer
+  -> 웹 marketplace에서 Agent 탐색
+  -> Agent hire 또는 try
+  -> Codex MCP plugin으로 Agent 호출
 
-Together:
-
-- **Walrus** protects and verifies the Agent package.
-- **MemWal** makes project context persistent across MCP sessions and Agents.
-- **MCP** makes hired Agents available inside the tools where builders already work.
-- **Sui** provides the testnet package and policy surface for verifiable access and future stronger execution boundaries.
-
-## What The Demo Shows
-
-### 1. Hire A Specialized Agent
-
-The client opens HireMe, selects `dokpami-maker`, and receives a specialized character result. The client gets the output, not the private Harness.
-
-This is the first product proof: HireMe is not a prompt marketplace. The creator keeps the private workflow, and the client hires the result.
-
-### 2. Verify The Protected Artifact
-
-The `dokpami-maker` protected package is mirrored as a public artifact reference:
-
-| Artifact | Value |
-| --- | --- |
-| Walrus blob ID | `e-AiHDAX2qyH4jUMfsRjKaNvGx-6euUh205VWczoqo8` |
-| Sui object ID | `0xf41495316fc3094b89ffff216721c19ea71de5d769958e8b9a9f139c8c12a37a` |
-| Archive digest | `sha256:a72c2af0ba82804029a8f821deca34ca2629c221e2003e18368b9781c62a1601` |
-| Archive format | `zip` |
-| Network | Walrus testnet |
-
-The web app also shows artifact links from the Agent detail page so judges can inspect the public proof without receiving the protected Harness.
-
-### 3. Use The Same Agent Through MCP
-
-The client connects the `hireme` MCP server and calls a hired Agent from Codex:
-
-```bash
-codex mcp add hireme \
-  --url https://hireme-gateway.onrender.com/mcp \
-  --oauth-resource https://hireme-gateway.onrender.com/mcp
-
-codex mcp login --scopes hireme:agents,hireme:call,hireme:manage hireme
+Gateway
+  -> hire/session/budget 검증
+  -> protected artifact 로드 및 복호화
+  -> protected harness 실행
+  -> safe output 반환
+  -> ledger와 encrypted memWal result 기록
 ```
 
-Example MCP flow:
+## 시작하기
 
-```text
-hireme_list_my_agents
-hireme_start_conversation(conversation_id: "dokpami-demo")
-hireme_call_agent(agent_id: "dokpami-maker", conversation_id: "dokpami-demo", task: "Create a Dokpami character variation.")
-hireme_resume_conversation(conversation_id: "dokpami-demo")
-hireme_call_agent(agent_id: "dokpami-maker", conversation_id: "dokpami-demo", task: "Use the character from earlier and make a magical library scene.")
-```
-
-The important proof is that the second call can load prior context through MemWal:
-
-```json
-{
-  "mcpConversation": {
-    "stored": true,
-    "provider": "memwal-sdk",
-    "conversationId": "dokpami-demo",
-    "previousTurnsLoaded": 1
-  }
-}
-```
-
-### 4. Publish A Research Agent
-
-The repository also includes `examples/hackathon-one-page-judge`, a protected Research Agent that can:
-
-- accept a DeepSurge project URL or project name,
-- extract a normalized one-page description,
-- score the project against Sui Overflow criteria,
-- apply track-specific judging skills,
-- compare against public prior-winner patterns,
-- produce concrete fixes for the one-pager and demo.
-
-This second Agent demonstrates that HireMe can publish knowledge-heavy Agents whose private judging rubric and research skills remain protected.
-
-## Technical Architecture
-
-| Layer | Role |
-| --- | --- |
-| `apps/web` | React/Vite web app for landing, Agent discovery, Try/Hire, creation, and result display |
-| `apps/gateway` | HTTP + MCP gateway for OAuth, entitlement checks, Agent calls, Walrus, MemWal, and ledger writes |
-| `plugins/hireme` | Codex plugin/MCP client surface for creator and hirer workflows |
-| `examples/*` | Protected Agent folders used for demo publishing |
-| `move/hireme` | Sui Move package for the access-policy surface |
-| `supabase` | Database migrations for profiles, Agents, artifacts, hires, ledger, and public registry views |
-| `scripts` | Smoke tests, package publish helpers, Walrus artifact helpers, and plugin export scripts |
-
-## Sui Move Package
-
-The current Sui testnet package is:
-
-```text
-0x7498f3ee9ce9c8ddf3a4390bb0e86565608c3baea9273194c0d96ef7b1cdd1d9
-```
-
-Useful target:
-
-```text
-0x7498f3ee9ce9c8ddf3a4390bb0e86565608c3baea9273194c0d96ef7b1cdd1d9::access::seal_approve
-```
-
-The package metadata is stored in `move/hireme/Published.toml`.
-
-## MemWal Integration
-
-HireMe uses the MemWal SDK through `apps/gateway/src/memWalSdk.mjs`.
-
-The gateway stores MCP conversation turns with:
-
-- `createMcpConversationSession`
-- `appendMcpConversationTurn`
-- `readMcpConversationSession`
-- `listMcpConversationSessions`
-
-The demo evidence to look for is:
-
-- first call: `mcpConversation.stored: true`
-- first call: `mcpConversation.waitForStore: true`
-- later call: `previousTurnsLoaded > 0`
-- same `conversation_id`
-- MemWal namespace and job/blob metadata
-- result that uses earlier project context without the client repeating the full prompt
-
-## Privacy Boundary
-
-The MVP uses a trusted gateway execution boundary.
-
-The client never receives:
-
-- raw `AGENTS.md`
-- private `skills/**`
-- private prompts
-- hidden rubrics
-- workflow examples
-- creator-only Harness files
-
-The client receives:
-
-- the Agent result,
-- safe summaries,
-- artifact digests,
-- usage metadata,
-- public Walrus/Sui references.
-
-This is the current practical boundary. The long-term direction is stronger cryptographic and policy-based execution, where access receipts, Seal-style policies, and verifiable execution reduce trust in the platform.
-
-## Run Locally
-
-Requirements:
-
-- Node.js 24+
-- npm
-- Supabase project credentials for live data
-- Walrus and Sui testnet credentials for artifact publishing
-- MemWal account and delegate/private key for memory demo
-
-Install:
+### 1. 의존성 설치
 
 ```bash
 npm install
 ```
 
-Run the web app:
+### 2. 환경 변수 설정
+
+루트의 `.env.example`을 복사해 `.env` 또는 `.env.local`로 사용합니다.
+
+```bash
+cp .env.example .env
+```
+
+자주 쓰는 변수는 다음과 같습니다.
+
+| 변수 | 설명 |
+| --- | --- |
+| `VITE_SUPABASE_URL` | 웹 앱에서 사용할 Supabase URL |
+| `VITE_SUPABASE_ANON_KEY` | 웹 앱에서 사용할 Supabase anon key |
+| `VITE_HIREME_GATEWAY_URL` | 웹 앱이 호출할 gateway URL |
+| `HIREME_GATEWAY_PORT` | gateway 포트. 기본값은 `8787` |
+| `HIREME_GATEWAY_API_KEY` | gateway 보호용 API key |
+| `SUPABASE_URL` | gateway/server에서 사용할 Supabase URL |
+| `SUPABASE_SERVICE_ROLE_KEY` | gateway/server 전용 Supabase service role key |
+| `SUI_NETWORK` | Sui 네트워크. 기본값은 `testnet` |
+| `WALRUS_NETWORK` | Walrus 네트워크. 기본값은 `testnet` |
+| `HIREME_LLM_PROVIDER` | Agent runner LLM provider. 기본값은 `ollama` |
+| `OLLAMA_API_KEY` | Ollama API key |
+| `OPENAI_API_KEY` | OpenAI provider를 사용할 때 필요한 API key |
+| `HIREME_MCP_GATEWAY_URL` | Codex plugin이 호출할 gateway URL |
+
+브라우저에 노출되어도 되는 값만 `VITE_` prefix를 사용합니다. Gateway secret에는 `VITE_`를 붙이지 않습니다.
+
+### 3. 웹 앱 실행
 
 ```bash
 npm run web:dev
 ```
 
-Run the gateway:
+기본 개발 서버는 `http://localhost:5173`에서 실행됩니다.
+
+### 4. Gateway 실행
 
 ```bash
 npm run gateway:dev
 ```
 
-Build and validate:
+기본 gateway URL은 `http://localhost:8787`입니다.
+
+## 사용 가능한 스크립트
+
+| 명령어 | 설명 |
+| --- | --- |
+| `npm run dev` | 웹 개발 서버 실행 |
+| `npm run web:dev` | React/Vite 웹 앱 실행 |
+| `npm run gateway:dev` | protected execution gateway 실행 |
+| `npm run web:build` | 웹 앱 빌드 |
+| `npm run deploy:check` | 웹 빌드, gateway syntax check, plugin syntax check |
+| `npm run gateway:smoke` | gateway smoke test |
+| `npm run plugin:smoke` | Codex plugin smoke test |
+| `npm run agent:validate-folder -- <agent-folder>` | protected Agent folder 구조 검증 |
+| `npm run platform:encrypt -- <agent-folder>` | Agent folder를 platform-managed envelope로 암호화 |
+| `npm run platform:publish:walrus -- <agent-folder>` | 암호화된 artifact를 Walrus에 publish |
+| `npm run memwal:publish -- <memory.json> <agent-id>` | encrypted memWal snapshot publish |
+| `npm run sui:build` | Sui Move package build |
+| `npm run sui:test` | Sui Move test |
+| `npm run supabase:seed` | Supabase demo data seed |
+
+## Codex MCP Plugin
+
+`plugins/hireme`는 Codex에서 사용하는 public MCP connector입니다. 이 plugin은 protected Agent 원본을 포함하지 않고, HireMe Gateway로 요청을 라우팅합니다.
+
+대표 tool:
+
+| Tool | 설명 |
+| --- | --- |
+| `hireme_whoami` | 현재 HireMe identity 확인 |
+| `hireme_list_hired_agents` | 고용한 Agent 목록 조회 |
+| `hireme_get_agent` | Agent 공개 프로필 조회 |
+| `hireme_select_agent` | Codex 세션의 active Agent 선택 |
+| `hireme_current_agent` | 현재 active Agent 확인 |
+| `hireme_call_agent` | Agent 호출 및 ledger metadata 반환 |
+| `hireme_register_agent` | Creator가 공개 Agent metadata와 encrypted artifact 참조 등록 |
+| `hireme_read_memwal` | protected memWal snapshot의 safe summary 조회 |
+
+## 검증
 
 ```bash
 npm run deploy:check
+npm run gateway:smoke
+npm run plugin:smoke
 ```
 
-Build only the web app:
+## 현재 상태
 
-```bash
-npm run web:build
-```
-
-## Important Environment Variables
-
-Browser-facing variables use the `VITE_` prefix. Server secrets must not use `VITE_`.
-
-| Variable | Scope | Purpose |
-| --- | --- | --- |
-| `VITE_SUPABASE_URL` | Web | Supabase project URL |
-| `VITE_SUPABASE_ANON_KEY` | Web | Supabase anon key |
-| `VITE_HIREME_GATEWAY_URL` | Web | Gateway URL for web calls |
-| `SUPABASE_URL` | Gateway | Supabase URL |
-| `SUPABASE_SERVICE_ROLE_KEY` | Gateway | Service role key for server writes |
-| `HIREME_PLATFORM_KMS_KEY` | Gateway | Platform-managed encryption root secret |
-| `WALRUS_NETWORK` | Gateway | Walrus network, currently `testnet` |
-| `WALRUS_UPLOAD_RELAY_URL` | Gateway | Walrus upload relay |
-| `HIREME_WALRUS_PAYER_PRIVATE_KEY` | Gateway | Payer key for Walrus uploads |
-| `MEMWAL_PRIVATE_KEY` | Gateway | MemWal delegate/private key |
-| `MEMWAL_ACCOUNT_ID` | Gateway | MemWal account ID |
-| `MEMWAL_SERVER_URL` | Gateway | MemWal relayer URL |
-| `HIREME_SAVE_LOCAL_AGENT_RESULTS` | Gateway | Optional default for saving returned Agent results under `.hireme/gateway/results` |
-| `HIREME_LLM_PROVIDER` | Gateway | LLM execution provider, currently `ollama` for text execution |
-| `OLLAMA_BASE_URL` | Gateway | Ollama base URL, e.g. `https://ollama.com` |
-| `OLLAMA_API_KEY` | Gateway | Ollama API key for Agent execution |
-| `OLLAMA_MODEL` | Gateway | Ollama model name, e.g. `gemma4:31b-cloud` |
-| `HIREME_IMAGE_GENERATION_PROVIDER` | Gateway | Protected Harness image provider, default `openai` |
-| `OPENAI_API_KEY` | Gateway | OpenAI key used for protected Harness image-category generation |
-| `HIREME_SEAL_PACKAGE_ID` | Gateway | Sui package ID for policy metadata |
-
-See `.env.example`, `apps/gateway/.env.example`, and `render.yaml` for deployment-oriented configuration.
-
-## Repository Highlights
-
-```text
-apps/web/                         Web app
-apps/gateway/                     Protected gateway and MCP server
-plugins/hireme/                   Codex MCP plugin
-examples/hackathon-one-page-judge/ Research Agent Harness
-examples/dokpami-create-agent.zip Demo Agent archive
-move/hireme/                      Sui Move package
-supabase/migrations/              Database schema and public views
-docs/                             Demo flow and product notes
-```
-
-## Why This Fits The Walrus Track
-
-The Walrus Track asks for agentic workflows where data, files, or memory are persistent, portable, and not locked into one app.
-
-HireMe fits because:
-
-- protected Agent packages are durable Walrus artifacts,
-- public metadata can expose proof without revealing creator know-how,
-- MemWal makes hired Agent sessions recallable across MCP sessions,
-- MCP makes those Agents usable from existing developer tools,
-- the product loop depends on protected storage and memory, not just on a storage checkbox.
-
-## Current Limitations
-
-- The MVP gateway is a trusted executor.
-- The current demo runs on testnet infrastructure.
-- Payment and settlement flows are demo-grade and should not be treated as production financial infrastructure.
-- The strongest demo requires live MemWal credentials and a working MCP login session.
-- Future work should reduce trust in the gateway with stronger policy-based and verifiable execution boundaries.
-
-## One-Sentence Pitch
-
-**HireMe lets clients hire specialized AI Agents while creators keep their private Harness protected, with Walrus storing durable Agent packages and MemWal remembering project context across sessions.**
+이 레포는 protected Agent marketplace loop를 검증하는 MVP/prototype입니다. 웹 탐색, gateway 실행, MCP plugin 호출, protected artifact/memWal 저장 경계, ledger 모델을 중심으로 구현되어 있습니다. Production 결제 정산, 운영용 KMS, 완전한 decentralization 정책은 후속 확장 영역입니다.
