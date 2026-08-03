@@ -1,7 +1,0 @@
-<svg width="240" height="80" viewBox="0 0 240 80" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <rect x="8" y="8" width="64" height="64" rx="16" fill="#1C1E54"/>
-  <path d="M26 27H38.5C46.5 27 53 33.5 53 41.5C53 49.5 46.5 56 38.5 56H26V27Z" fill="#533AFD"/>
-  <path d="M33 35H39C42.3 35 45 37.7 45 41C45 44.3 42.3 47 39 47H33V35Z" fill="white"/>
-  <circle cx="55" cy="26" r="5" fill="#F96BEE"/>
-  <text x="88" y="46" font-family="Inter, system-ui, sans-serif" font-size="28" font-weight="400" fill="#0D253D">HireMe</text>
-</svg>

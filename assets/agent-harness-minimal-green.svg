@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1100" viewBox="0 0 1600 1100">
+  <style>
+    .green { fill:#386858; }
+    .line { stroke:#386858; stroke-width:5; stroke-linecap:round; fill:none; }
+    .node { fill:#386858; }
+    .lime { fill:#DCEFB8; }
+    .label { font-family:Arial, 'Noto Sans KR', sans-serif; fill:#386858; font-weight:700; font-size:42px; text-anchor:middle; }
+    .title { font-family:Arial, 'Noto Sans KR', sans-serif; fill:#386858; font-weight:700; font-size:50px; text-anchor:middle; }
+    .center { font-family:Arial, 'Noto Sans KR', sans-serif; fill:#fff; font-weight:700; font-size:54px; text-anchor:middle; }
+    .icon { stroke:#386858; stroke-width:9; stroke-linecap:round; stroke-linejoin:round; fill:none; }
+  </style>
+  <text class="title" x="800" y="90">에이전트 하네스</text>
+
+  <!-- connectors -->
+  <path class="line" d="M800 430 L800 285 M635 545 L385 430 M965 545 L1215 430 M675 705 L470 850 M925 705 L1130 850"/>
+
+  <!-- central agent -->
+  <circle class="node" cx="800" cy="610" r="175"/>
+  <text class="center" x="800" y="590">AI</text>
+  <text class="center" x="800" y="660">에이전트</text>
+
+  <!-- goal -->
+  <circle class="lime" cx="800" cy="230" r="70"/>
+  <circle class="icon" cx="800" cy="230" r="27"/>
+  <path class="icon" d="M820 210 L846 184 M838 184 L846 184 L846 192"/>
+  <text class="label" x="800" y="335">목표·지시</text>
+
+  <!-- memory -->
+  <circle class="lime" cx="315" cy="405" r="70"/>
+  <rect class="icon" x="280" y="380" width="55" height="46" rx="4"/>
+  <path class="icon" d="M294 392 L321 392 M294 407 L314 407"/>
+  <path class="icon" d="M270 365 L320 365 M270 350 L320 350"/>
+  <text class="label" x="315" y="510">메모리·상태</text>
+
+  <!-- tools -->
+  <circle class="lime" cx="1285" cy="405" r="70"/>
+  <rect class="icon" x="1248" y="385" width="74" height="45" rx="5"/>
+  <path class="icon" d="M1270 385 L1270 370 Q1270 358 1285 358 Q1300 358 1300 370 L1300 385 M1248 402 L1322 402"/>
+  <text class="label" x="1285" y="510">도구·데이터</text>
+
+  <!-- safety -->
+  <circle class="lime" cx="405" cy="875" r="70"/>
+  <path class="icon" d="M405 832 L440 846 L440 880 Q440 910 405 928 Q370 910 370 880 L370 846 Z"/>
+  <rect class="icon" x="391" y="872" width="28" height="25" rx="3"/>
+  <path class="icon" d="M397 872 L397 861 Q397 850 405 850 Q413 850 413 861 L413 872"/>
+  <text class="label" x="405" y="990">안전 가드레일</text>
+
+  <!-- validation -->
+  <circle class="lime" cx="1195" cy="875" r="70"/>
+  <circle class="icon" cx="1182" cy="862" r="31"/>
+  <path class="icon" d="M1205 885 L1234 914 M1167 862 L1178 873 L1198 849"/>
+  <text class="label" x="1195" y="990">검증·관찰</text>
+</svg>

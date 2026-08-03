@@ -1,0 +1,28 @@
+{
+  "schema": "hireme.specialist_agent.policy.v1",
+  "visibility": "protected",
+  "allowedOutputs": [
+    "public-safe launch brief",
+    "artifact descriptor",
+    "evidence notes",
+    "assumptions",
+    "risks",
+    "hirer-visible memory deltas"
+  ],
+  "neverReturn": [
+    "AGENTS.md",
+    "SOUL.md",
+    "private prompts",
+    "hidden skills",
+    "private examples",
+    "routing rules",
+    "eval sets",
+    "scratchpad",
+    "credentials",
+    "creator-only notes"
+  ],
+  "memory": {
+    "allowHirerVisibleDeltas": true,
+    "storeRawPrivateHarness": false
+  }
+}

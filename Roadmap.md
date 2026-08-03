@@ -1,261 +1,97 @@
 # HireMe Roadmap
 
-## Product Decision
+## Product Direction
 
-HireMe MVP는 trusted gateway execution으로 간다.
+HireMe의 초기 중심 도메인은 디자인입니다. 디자이너가 자신의 판단 기준과 고객
+질문을 반복 가능한 디자인 서비스로 만들고, 비전문 고객이 빈 프롬프트를 작성하지
+않고도 직접 작업을 맡길 수 있는 데스크톱 작업 공간을 제공합니다. CLI는 같은
+runtime을 사용하는 고급 인터페이스로 유지합니다.
 
-핵심 가치는 다음 하나에 집중한다.
+핵심 제품 약속:
 
-```txt
-Agent creator가 AGENTS.md, skills, harness code, prompts, rubrics,
-design guides 같은 private know-how를 hirer에게 넘기지 않고도
-Codex에서 호출 가능한 Agent로 수익화할 수 있다.
+```text
+고객은 디자이너가 설계한 질문에 답하고 결과를 얻는다.
+디자이너의 목적, 우선순위, 금지 규칙과 품질 기준은 비공개로 유지된다.
+HireMe는 질문, 판단 시스템, 실행, 버전과 수익을 연결한다.
 ```
 
-MVP 실행 경로:
+## Phase 1: Desktop Alpha
 
-```txt
-Hirer Codex
-  -> sends plaintext task to HireMe Gateway
+- 질문형 주문 이후 수정·추가 요청을 위한 채팅 제공
+- 디자인 서비스의 첫 화면에 User Ask Questions 주문서 제공
+- Purpose, Priorities, Avoid, Quality Bar를 Private Harness 스킬로 저장
+- 질문 답변을 서비스 실행 입력으로 구조화
+- 여러 작업을 동시에 관리
+- 로컬 Agent 선택, 파일 첨부, 작업 폴더 연결
+- 실행 진행 상태, 시간, 대기열, 취소
+- Agent 탐색과 공개 프로필
+- 내 Agent 버전, 공개 상태, 가격 UI
+- 예상 수익과 정산 UI
+- macOS 개발용 앱 번들
 
-HireMe Gateway
-  -> verifies hire/access/budget
-  -> loads the creator Agent bundle
-  -> runs the protected Agent workflow
-  -> returns JSON output to Codex
-  -> records billing/ledger metadata
+완료 기준은 디자이너나 외주 작업자가 터미널 명령을 배우지 않고도 에이전트를
+고르고 파일을 첨부해 결과를 받는 것입니다.
+
+## Phase 2: Agent Source Service
+
+로컬 Agent와 DB Agent를 하나의 검색·실행 계약으로 통합합니다.
+
+```text
+agentId
+  -> local source: 제작자 소유, 편집 가능
+  -> DB source: 공개 metadata와 entitlement만 제공
+  -> remote executor: 타인 소유 private package 실행
 ```
 
-이 모델에서 HireMe Gateway는 신뢰받는 실행자다. MVP의 보호 대상은 “creator artifact가 hirer에게 노출되지 않는 것”이며, gateway가 user input과 creator bundle을 처리할 수 있다는 점을 명확히 한다.
+필수 항목:
 
-## Why This MVP
+- 로그인과 사용자 identity
+- Agent 공개 카드 동기화
+- version pinning과 update 알림
+- trial, hire, subscription entitlement
+- 타인 소유 package의 평문 local materialization 금지
+- 안전한 결과 및 usage metadata만 저장
 
-초기 사용자는 HireMe를 하나의 AI 서비스로 볼 가능성이 높다. OpenAI, Anthropic, Codex를 사용할 때처럼 서비스가 user input을 처리할 수 있다는 신뢰 모델이 자연스럽다.
+## Phase 3: Billing And Creator Revenue
 
-따라서 지금 검증해야 할 것은 복잡한 privacy claim이 아니라 marketplace loop다.
+두 가격 모델을 실제 결제와 연결합니다.
 
-- Agent를 등록할 수 있는가
-- Hirer가 Agent를 고용할 수 있는가
-- Codex MCP에서 간단히 호출할 수 있는가
-- Creator 내부 파일이 응답으로 새지 않는가
-- 결과물이 충분히 유용한가
-- call 단위 ledger와 pricing을 기록할 수 있는가
+- 입력+출력 100만 토큰당 사용량 요금
+- 월/연 구독과 포함 토큰
+- hybrid 가격
+- 환불, 실패 실행, 무료 trial의 billable rule
+- platform fee와 creator net revenue
+- 지급 가능 잔액, 보류 기간, 세금 문서
+- 가격 및 버전 변경 시 기존 구독자 정책
 
-정확한 MVP claim:
+## Phase 4: Protected Execution
 
-```txt
-HireMe does not expose creator Agent internals to hirers.
-HireMe Gateway is the trusted executor.
-```
+타인 소유 Agent가 사용자의 로컬 장치에 private source를 남기지 않도록 remote
+execution boundary를 구현합니다.
 
-하지 않을 claim:
+- short-lived 실행 환경
+- package digest와 version 검증
+- outbound network/tool allowlist
+- timeout, token, storage, process budget
+- prompt extraction과 tool abuse 방어
+- 로그에서 raw input, private source, credential 제거
+- 결과 envelope validation
 
-```txt
-HireMe cannot see user input.
-HireMe cannot see creator artifacts.
-```
+## Phase 5: Distribution Quality
 
-## Agent Definition
+- macOS/Windows 서명
+- 자동 업데이트와 rollback
+- crash recovery와 session 복구
+- 접근성 및 키보드 탐색
+- 저사양 환경 성능 측정
+- 한국어/영어 localization
+- 실제 프리랜서 사용자 테스트
 
-HireMe에서 Agent는 base model 자체가 아니다. 모델은 엔진이고, Harness는 일하는 방식이며, Gateway Runtime은 실행 환경이다. 여기에 memory rule, tool boundary, public execution contract가 붙으면 특정 일을 반복 가능하게 수행하는 Agent가 된다.
+## UX Principles
 
-```txt
-Model = engine
-Harness = working method
-Gateway Runtime = execution environment
-Memory and Tools = continuity and action boundary
-Agent = repeatable worker for a specific job
-```
-
-따라서 HireMe는 prompt file을 판매하는 서비스가 아니다. Creator는 private Harness를 소유하고, Hirer는 그 Harness가 만들어내는 capability를 고용한다.
-
-```txt
-HireMe lets users hire protected Agents, not prompts.
-```
-
-## MVP Architecture
-
-```txt
-Creator
-  -> prepares AGENTS.md + skills/** + harness/**
-  -> publishes public marketplace metadata
-  -> uploads protected Agent bundle
-
-Storage
-  -> Walrus stores encrypted Agent artifacts
-  -> memWal stores encrypted private memory snapshots
-  -> Supabase stores searchable metadata, pricing, hires, and ledger data
-  -> one HireMe Sui package stores Agent/Artifact/Receipt authority
-  -> optional later Seal mode can evaluate that package's seal_approve policy
-
-Hirer
-  -> installs HireMe MCP connector in Codex
-  -> sends normal plaintext task through MCP
-
-Gateway
-  -> checks hire receipt / subscription / budget
-  -> loads creator Agent bundle
-  -> executes the Agent workflow
-  -> returns safe JSON output
-  -> does not return AGENTS.md, skills, harness source, or private prompts
-```
-
-MVP privacy boundary:
-
-| Data | Hirer | HireMe Gateway | Creator |
-| --- | --- | --- | --- |
-| User task/input | Yes | Yes | No |
-| Creator AGENTS.md / skills / harness | No | Yes | Yes |
-| Final JSON output | Yes | Yes | Optional |
-| Billing metadata | Yes | Yes | Yes |
-
-## Implementation Plan
-
-1. Keep the MCP connector simple.
-   - `hireme_request`
-   - `hireme_call_agent`
-   - `hireme_call_walrus_agent`
-   - protected artifact registration/validation helpers
-
-2. Make Gateway the trusted executor.
-   - Accept plaintext `task`.
-   - Resolve selected Agent.
-   - Verify hire receipt and budget.
-   - Load the protected bundle.
-   - Execute deterministic or LLM-backed logic.
-   - Return only safe JSON output.
-
-3. Keep creator artifacts out of hirer responses.
-   - No raw `AGENTS.md`.
-   - No `skills/**` content.
-   - No harness source.
-   - No private prompt/rubric/design guide text.
-
-4. Return a local Codex-ready JSON output.
-   - `jsonOutput.schema` identifies the contract.
-   - `jsonOutput.payload` contains the Agent guidance.
-   - `jsonOutput.harness` describes only safe harness metadata.
-   - `jsonOutput.localCodex.shouldAct` tells Codex to continue the local workspace task.
-
-5. Add practical audit controls.
-   - Request digest.
-   - Response digest.
-   - Artifact digest.
-   - Agent version.
-   - Ledger entry.
-   - Access decision reason.
-
-6. Use Walrus where it helps now.
-   - Store encrypted Agent artifacts.
-   - Track blob IDs and digests.
-   - Treat Supabase as the fast index/cache.
-   - Do not claim Walrus alone provides confidentiality.
-
-7. Use platform-managed encryption now.
-   - Local MVP writes `hireme.platform-ciphertext-envelope.v1`.
-   - The platform provider uses AES-GCM DEM and a platform KMS/root secret.
-   - Public records keep provider, KMS key id, encryption id, Walrus blob id, and digest.
-   - memWal uses the same boundary for private memory snapshots.
-   - `move/hireme` defines the single platform package: `Agent`, `AgentVersion`, `ProtectedArtifact`, `HireReceipt`, and `seal_approve`.
-   - Optional later Seal mode can replace platform KMS with `@mysten/seal`, the published `HIREME_SEAL_PACKAGE_ID`, and real key servers.
-
-8. Add full Sui authority after the loop works.
-   - Sui object records artifact/version/payment authority.
-   - Optional Seal controls key release for encrypted bundles after the platform-managed MVP is working.
-   - Gateway decrypts after access is approved.
-
-## Milestones
-
-### Phase 1: Local Demo
-
-```txt
-examples/* Agent folder
-  -> platform-managed ciphertext envelope
-  -> local gateway
-  -> Codex MCP plugin
-  -> JSON output + ledger metadata
-```
-
-Goal:
-
-- Demo creator folder registration.
-- Demo natural-language `hireme_request`.
-- Demo natural-language routing to deployed marketplace Agents such as `launch-operator`.
-- Prove local Walrus stores ciphertext envelope, not plaintext folders.
-- Prove responses do not include private creator files.
-
-### Phase 2: Walrus Artifact Registry
-
-```txt
-Agent folder archive
-  -> Walrus blob
-  -> Supabase walrus_agent_artifacts row
-  -> gateway reads by agent_id/blob_id
-```
-
-Goal:
-
-- Store and retrieve packaged Agent folders through Walrus.
-- Keep Supabase as registry/index.
-- Return deterministic JSON summary before adding an internal LLM runner.
-
-### Phase 3: Real Protected Execution
-
-```txt
-Encrypted Agent bundle
-  -> Walrus ciphertext
-  -> Supabase/Sui metadata
-  -> Gateway access check
-  -> Gateway decrypt + execute
-  -> JSON output
-```
-
-Goal:
-
-- Replace local root-secret encryption with production KMS/HSM-backed platform-managed encryption.
-- Add Sui object references for version/payment authority.
-- Record call ledger and creator payout basis.
-
-### Phase 4: Product Hardening
-
-Goal:
-
-- Abuse review and rate limits.
-- Per-agent budget caps.
-- Version pinning.
-- Creator analytics.
-- Agent performance indicators.
-- Response schema validation.
-- Replayable audit records with digests, not raw prompts.
-
-Agent performance indicators should help buyers compare Agents by actual usefulness, not only by marketplace copy. Planned signals include:
-
-- Task success rate.
-- Output schema reliability.
-- Latency and timeout rate.
-- Repeat usage and retention.
-- Buyer feedback.
-- Cost per useful result.
-- Safe-output and leakage checks.
-- Version-to-version quality changes.
-
-## Current Direction
-
-Default path:
-
-```txt
-Trusted Gateway MVP
-```
-
-Immediate loop:
-
-```txt
-publish protected Agent bundle
-hire Agent
-call Agent from Codex
-gateway executes with creator instructions
-return local Codex-ready JSON output
-record usage
-```
-
-This is the fastest path to validate whether people want to hire protected Agents from Codex.
+- 첫 화면에서 바로 일을 맡길 수 있어야 한다.
+- 기술 용어보다 작업, 결과, 비용, 상태를 먼저 보여준다.
+- 실행이 길어지면 진행 단계와 시간을 숨기지 않는다.
+- 여러 작업을 오갈 때 현재 실행은 중단되지 않는다.
+- 비용이 발생하기 전에 사용량 또는 구독 포함 여부를 보여준다.
+- Agent를 고용해도 private Harness가 전달되지 않는다는 경계를 반복해서 명시한다.

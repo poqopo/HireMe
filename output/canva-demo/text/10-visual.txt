@@ -1,2 +1,0 @@
-BUILD FINAL SLIDE: Creator Harness -> Walrus artifact ->
-HireMe gateway -> safe Agent result.

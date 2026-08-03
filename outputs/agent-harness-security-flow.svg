@@ -1,0 +1,83 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc">
+  <title id="title">비공개 에이전트 하네스 보안 실행 흐름</title>
+  <desc id="desc">사용자 요청부터 암호화된 하네스의 일회성 런타임 처리, 최종 결과 제공까지의 5단계 흐름도</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#F8FBFF"/><stop offset="1" stop-color="#EEF3FF"/></linearGradient>
+    <linearGradient id="private" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#182B57"/><stop offset="1" stop-color="#254993"/></linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="150%"><feDropShadow dx="0" dy="10" stdDeviation="13" flood-color="#173468" flood-opacity=".12"/></filter>
+    <style>
+      .k { font-family: Pretendard, 'Apple SD Gothic Neo', 'Noto Sans KR', Arial, sans-serif; }
+      .title { font-size: 39px; font-weight: 800; fill: #12254A; letter-spacing: -1.5px; }
+      .sub { font-size: 19px; font-weight: 500; fill: #63718B; letter-spacing: -.5px; }
+      .step { font-size: 14px; font-weight: 800; fill: #4975E8; letter-spacing: 1.2px; }
+      .head { font-size: 22px; font-weight: 800; fill: #172A4D; letter-spacing: -1px; }
+      .body { font-size: 16px; font-weight: 500; fill: #66738B; letter-spacing: -.55px; }
+      .private-head { font-size: 22px; font-weight: 800; fill: #FFF; letter-spacing: -1px; }
+      .private-body { font-size: 16px; font-weight: 500; fill: #D9E6FF; letter-spacing: -.55px; }
+      .pill { font-size: 13px; font-weight: 800; fill: #315CBB; letter-spacing: .3px; }
+      .footer { font-size: 17px; font-weight: 700; fill: #304463; letter-spacing: -.4px; }
+    </style>
+  </defs>
+  <rect width="1600" height="900" fill="url(#bg)"/>
+  <circle cx="1430" cy="105" r="230" fill="#DDE9FF" opacity=".48"/><circle cx="122" cy="810" r="175" fill="#E5EDFF" opacity=".7"/>
+  <g class="k">
+    <text x="800" y="105" text-anchor="middle" class="title">에이전트 기능은 제공하고, 내부 하네스는 보호합니다</text>
+    <text x="800" y="145" text-anchor="middle" class="sub">사용자는 요청과 결과에만 접근하며, 실행 방식과 프롬프트는 노출되지 않습니다.</text>
+    <rect x="625" y="175" width="350" height="34" rx="17" fill="#E0EAFF"/>
+    <text x="800" y="198" text-anchor="middle" class="pill">PROTECTED AGENT EXECUTION</text>
+
+    <!-- Flow arrows -->
+    <g fill="none" stroke="#8AAAF0" stroke-width="4" stroke-linecap="round">
+      <path d="M318 435 H358"/><path d="M598 435 H638"/><path d="M962 435 H1002"/><path d="M1242 435 H1282"/>
+    </g>
+    <g fill="#8AAAF0"><path d="M350 427 l14 8 -14 8z"/><path d="M630 427 l14 8 -14 8z"/><path d="M994 427 l14 8 -14 8z"/><path d="M1274 427 l14 8 -14 8z"/></g>
+
+    <!-- card 1 -->
+    <g filter="url(#shadow)"><rect x="78" y="295" width="240" height="280" rx="24" fill="#FFF"/></g>
+    <rect x="102" y="319" width="57" height="30" rx="15" fill="#E8F0FF"/><text x="130.5" y="340" text-anchor="middle" class="step">01</text>
+    <circle cx="198" cy="398" r="43" fill="#EAF1FF"/>
+    <path d="M198 370a20 20 0 1 1 0 40a20 20 0 0 1 0-40zm-33 65c3-16 17-25 33-25s30 9 33 25" fill="none" stroke="#4776E5" stroke-width="6" stroke-linecap="round"/>
+    <text x="198" y="485" text-anchor="middle" class="head">사용자 요청</text>
+    <text x="198" y="518" text-anchor="middle" class="body">원하는 작업을</text><text x="198" y="542" text-anchor="middle" class="body">에이전트에 전달</text>
+
+    <!-- card 2 -->
+    <g filter="url(#shadow)"><rect x="358" y="295" width="240" height="280" rx="24" fill="#FFF"/></g>
+    <rect x="382" y="319" width="57" height="30" rx="15" fill="#E8F0FF"/><text x="410.5" y="340" text-anchor="middle" class="step">02</text>
+    <circle cx="478" cy="398" r="43" fill="#EAF1FF"/>
+    <rect x="454" y="377" width="48" height="41" rx="6" fill="none" stroke="#4776E5" stroke-width="5"/>
+    <path d="M463 377v-9a15 15 0 0 1 30 0v9M469 395h18M469 404h18" fill="none" stroke="#4776E5" stroke-width="5" stroke-linecap="round"/>
+    <text x="478" y="485" text-anchor="middle" class="head">암호화 패키지</text>
+    <text x="478" y="518" text-anchor="middle" class="body">비공개 하네스를</text><text x="478" y="542" text-anchor="middle" class="body">안전하게 다운로드</text>
+
+    <!-- private runtime -->
+    <g filter="url(#shadow)"><rect x="638" y="265" width="324" height="340" rx="28" fill="url(#private)"/></g>
+    <rect x="662" y="289" width="116" height="31" rx="15.5" fill="#395EA5"/><text x="720" y="310" text-anchor="middle" fill="#E4EEFF" style="font:800 13px Pretendard, 'Apple SD Gothic Neo', sans-serif;letter-spacing:1px">PRIVATE ZONE</text>
+    <circle cx="800" cy="390" r="49" fill="#3E67B6"/>
+    <rect x="776" y="385" width="48" height="36" rx="7" fill="none" stroke="#FFF" stroke-width="5"/>
+    <path d="M785 385v-10a15 15 0 0 1 30 0v10M800 397v10" fill="none" stroke="#FFF" stroke-width="5" stroke-linecap="round"/>
+    <text x="800" y="485" text-anchor="middle" class="private-head">런타임에서만 복호화</text>
+    <text x="800" y="518" text-anchor="middle" class="private-body">작업에 필요한 순간에만</text><text x="800" y="542" text-anchor="middle" class="private-body">일회성으로 실행</text>
+    <text x="800" y="579" text-anchor="middle" fill="#AFC8FF" style="font:700 13px Pretendard, 'Apple SD Gothic Neo', sans-serif;letter-spacing:.5px">프롬프트 · 작업 방식 비공개</text>
+
+    <!-- card 4 -->
+    <g filter="url(#shadow)"><rect x="1002" y="295" width="240" height="280" rx="24" fill="#FFF"/></g>
+    <rect x="1026" y="319" width="57" height="30" rx="15" fill="#E8F0FF"/><text x="1054.5" y="340" text-anchor="middle" class="step">04</text>
+    <circle cx="1122" cy="398" r="43" fill="#EAF1FF"/>
+    <path d="M1101 386h42M1101 398h42M1101 410h27" fill="none" stroke="#4776E5" stroke-width="5" stroke-linecap="round"/><path d="M1135 412l8 8 15-18" fill="none" stroke="#4BC68A" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="1122" y="485" text-anchor="middle" class="head">최종 결과 생성</text>
+    <text x="1122" y="518" text-anchor="middle" class="body">하네스가 작업을 수행해</text><text x="1122" y="542" text-anchor="middle" class="body">결과물만 생성</text>
+
+    <!-- card 5 -->
+    <g filter="url(#shadow)"><rect x="1282" y="295" width="240" height="280" rx="24" fill="#FFF"/></g>
+    <rect x="1306" y="319" width="57" height="30" rx="15" fill="#E8F0FF"/><text x="1334.5" y="340" text-anchor="middle" class="step">05</text>
+    <circle cx="1402" cy="398" r="43" fill="#EAF1FF"/>
+    <path d="M1382 378l40 40M1422 378l-40 40M1377 423h50" fill="none" stroke="#4776E5" stroke-width="5" stroke-linecap="round"/>
+    <text x="1402" y="485" text-anchor="middle" class="head">하네스 자동 삭제</text>
+    <text x="1402" y="518" text-anchor="middle" class="body">실행 후 하네스 파일은</text><text x="1402" y="542" text-anchor="middle" class="body">즉시 제거</text>
+
+    <g filter="url(#shadow)"><rect x="214" y="682" width="1172" height="98" rx="24" fill="#FFF"/></g>
+    <circle cx="272" cy="731" r="28" fill="#E6F9F0"/><path d="M259 732l9 9 18-21" fill="none" stroke="#36B87D" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="322" y="727" class="footer">사용자에게는</text><text x="446" y="727" style="font:800 19px Pretendard, 'Apple SD Gothic Neo', sans-serif;fill:#2455B7;letter-spacing:-.5px">에이전트의 기능과 최종 결과</text><text x="683" y="727" class="footer">만 제공됩니다.</text>
+    <text x="322" y="757" class="body">핵심 하네스는 암호화·런타임 한정 복호화·자동 삭제로 보호되어 직접적인 복제를 방지합니다.</text>
+  </g>
+</svg>

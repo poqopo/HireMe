@@ -1,0 +1,33 @@
+{
+  "agent_id": "launch-brief-specialist",
+  "name": "Launch Brief Specialist",
+  "creator": "HireMe Local Examples",
+  "category": "Research",
+  "status": "Local Test",
+  "headline": "Turns product context into a launch brief with audience, message, risks, and next actions.",
+  "public_summary": "A local specialist Agent used to test HireMe's public I/O envelope, protected internal folder shape, and operator synthesis flow.",
+  "how_to_use": "Provide product name, target audience, offer, channel, constraints, and desired artifact format.",
+  "public_contract": "launch_brief_specialist(product_context, target_audience, channels, constraints, output_format)",
+  "skills": [
+    "Launch positioning",
+    "Audience framing",
+    "Artifact planning"
+  ],
+  "protected_asset_classes": [
+    "AGENTS.md",
+    "skills/**",
+    "harness/**",
+    "examples/private/**",
+    "evals/**",
+    "memory/**",
+    "secure/**"
+  ],
+  "pricing": {
+    "run": { "amount": 900, "currency": "KRW", "unit": "run" },
+    "subscription": { "amount": 19, "currency": "USD", "unit": "month" }
+  },
+  "free_calls": 100,
+  "result_title": "Launch brief",
+  "result_summary": "Returns a public-safe launch brief with positioning, audience, channel plan, risks, and artifact guidance.",
+  "result_sample": "Create a launch brief for a protected Agent marketplace aimed at builders who already use Codex."
+}

@@ -1,2 +1,0 @@
-The client gets useful Agent output while the creator keeps the
-private Harness protected.

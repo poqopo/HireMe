@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="430" viewBox="0 0 1600 430" role="img" aria-label="비공개 에이전트 하네스 보안 실행 카드 흐름">
+  <defs>
+    <linearGradient id="private" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#386B32"/><stop offset="1" stop-color="#6FA83F"/></linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="150%"><feDropShadow dx="0" dy="9" stdDeviation="12" flood-color="#386B32" flood-opacity=".14"/></filter>
+    <style>
+      .k { font-family:Pretendard,'Apple SD Gothic Neo','Noto Sans KR',Arial,sans-serif }
+      .step { font-size:14px;font-weight:800;fill:#4A8A36;letter-spacing:1.2px }
+      .head { font-size:22px;font-weight:800;fill:#263C28;letter-spacing:-1px }
+      .body { font-size:16px;font-weight:500;fill:#657666;letter-spacing:-.55px }
+      .phead { font-size:22px;font-weight:800;fill:#fff;letter-spacing:-1px }
+      .pbody { font-size:16px;font-weight:500;fill:#E6F4D5;letter-spacing:-.55px }
+    </style>
+  </defs>
+  <g class="k">
+    <!-- arrows are independent groups, so they can be exported separately if needed -->
+    <g id="arrows" fill="none" stroke="#95C96B" stroke-width="4" stroke-linecap="round">
+      <path d="M288 215H348"/><path d="M598 215H658"/><path d="M942 215H1002"/><path d="M1252 215H1312"/>
+    </g>
+    <g id="arrowheads" fill="#95C96B"><path d="M340 207l15 8-15 8z"/><path d="M650 207l15 8-15 8z"/><path d="M994 207l15 8-15 8z"/><path d="M1304 207l15 8-15 8z"/></g>
+
+    <g id="card-request" filter="url(#shadow)"><rect x="48" y="75" width="240" height="280" rx="24" fill="#fff"/></g>
+    <g class="k"><rect x="72" y="99" width="57" height="30" rx="15" fill="#EAF6DD"/><text x="100.5" y="120" text-anchor="middle" class="step">01</text><circle cx="168" cy="178" r="43" fill="#EDF8E1"/><path d="M168 150a20 20 0 1 1 0 40a20 20 0 0 1 0-40zm-33 65c3-16 17-25 33-25s30 9 33 25" fill="none" stroke="#64A94A" stroke-width="6" stroke-linecap="round"/><text x="168" y="265" text-anchor="middle" class="head">사용자 요청</text><text x="168" y="298" text-anchor="middle" class="body">원하는 작업을</text><text x="168" y="322" text-anchor="middle" class="body">에이전트에 전달</text></g>
+
+    <g id="card-package" filter="url(#shadow)"><rect x="358" y="75" width="240" height="280" rx="24" fill="#fff"/></g>
+    <g class="k"><rect x="382" y="99" width="57" height="30" rx="15" fill="#EAF6DD"/><text x="410.5" y="120" text-anchor="middle" class="step">02</text><circle cx="478" cy="178" r="43" fill="#EDF8E1"/><rect x="454" y="157" width="48" height="41" rx="6" fill="none" stroke="#64A94A" stroke-width="5"/><path d="M463 157v-9a15 15 0 0 1 30 0v9M469 175h18M469 184h18" fill="none" stroke="#64A94A" stroke-width="5" stroke-linecap="round"/><text x="478" y="265" text-anchor="middle" class="head">암호화 패키지</text><text x="478" y="298" text-anchor="middle" class="body">비공개 하네스를</text><text x="478" y="322" text-anchor="middle" class="body">안전하게 다운로드</text></g>
+
+    <g id="card-runtime" filter="url(#shadow)"><rect x="658" y="45" width="284" height="340" rx="28" fill="url(#private)"/></g>
+    <g class="k"><circle cx="800" cy="170" r="49" fill="#78AF52"/><rect x="776" y="165" width="48" height="36" rx="7" fill="none" stroke="#fff" stroke-width="5"/><path d="M785 165v-10a15 15 0 0 1 30 0v10M800 177v10" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round"/><text x="800" y="265" text-anchor="middle" class="phead">런타임에서만 복호화</text><text x="800" y="298" text-anchor="middle" class="pbody">작업에 필요한 순간에만</text><text x="800" y="322" text-anchor="middle" class="pbody">일회성으로 실행</text><text x="800" y="359" text-anchor="middle" fill="#D1EABB" style="font:700 13px Pretendard,'Apple SD Gothic Neo',sans-serif;letter-spacing:.5px">프롬프트 · 작업 방식 비공개</text></g>
+
+    <g id="card-result" filter="url(#shadow)"><rect x="1002" y="75" width="240" height="280" rx="24" fill="#fff"/></g>
+    <g class="k"><rect x="1026" y="99" width="57" height="30" rx="15" fill="#EAF6DD"/><text x="1054.5" y="120" text-anchor="middle" class="step">04</text><circle cx="1122" cy="178" r="43" fill="#EDF8E1"/><path d="M1101 166h42M1101 178h42M1101 190h27" fill="none" stroke="#64A94A" stroke-width="5" stroke-linecap="round"/><path d="M1135 192l8 8 15-18" fill="none" stroke="#3CAF76" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/><text x="1122" y="265" text-anchor="middle" class="head">최종 결과 생성</text><text x="1122" y="298" text-anchor="middle" class="body">하네스가 작업을 수행해</text><text x="1122" y="322" text-anchor="middle" class="body">결과물만 생성</text></g>
+
+    <g id="card-delete" filter="url(#shadow)"><rect x="1312" y="75" width="240" height="280" rx="24" fill="#fff"/></g>
+    <g class="k"><rect x="1336" y="99" width="57" height="30" rx="15" fill="#EAF6DD"/><text x="1364.5" y="120" text-anchor="middle" class="step">05</text><circle cx="1432" cy="178" r="43" fill="#EDF8E1"/><path d="M1412 158l40 40M1452 158l-40 40M1407 203h50" fill="none" stroke="#64A94A" stroke-width="5" stroke-linecap="round"/><text x="1432" y="265" text-anchor="middle" class="head">하네스 자동 삭제</text><text x="1432" y="298" text-anchor="middle" class="body">실행 후 하네스 파일은</text><text x="1432" y="322" text-anchor="middle" class="body">즉시 제거</text></g>
+  </g>
+</svg>
