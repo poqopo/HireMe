@@ -22,6 +22,13 @@ contextBridge.exposeInMainWorld("hiremeDesktop", {
   updatePrivateHarnessFile: (input) => ipcRenderer.invoke("hireme:agent:update-private-harness", input),
   closeAgentManagement: (input) => ipcRenderer.invoke("hireme:agent:close-management", input),
   publishAgentDraft: (input) => ipcRenderer.invoke("hireme:agent:publish-draft", input),
+  getCreatorWorker: () => ipcRenderer.invoke("hireme:worker:get"),
+  refreshCreatorWorker: () => ipcRenderer.invoke("hireme:worker:refresh"),
+  setCreatorWorkerAvailable: (available) => ipcRenderer.invoke("hireme:worker:set-available", available),
+  approveCreatorJob: (input) => ipcRenderer.invoke("hireme:worker:approve", input),
+  submitDesignProject: (input) => ipcRenderer.invoke("hireme:projects:submit", input),
+  loadDesignProjects: () => ipcRenderer.invoke("hireme:projects:list"),
+  cancelDesignProject: (input) => ipcRenderer.invoke("hireme:projects:cancel", input),
   getAiSettings: () => ipcRenderer.invoke("hireme:ai:get"),
   connectCodex: () => ipcRenderer.invoke("hireme:ai:connect-codex"),
   cancelAiConnection: () => ipcRenderer.invoke("hireme:ai:cancel-connect"),
@@ -47,5 +54,10 @@ contextBridge.exposeInMainWorld("hiremeDesktop", {
     const wrapped = (_event, payload) => listener(payload);
     ipcRenderer.on("hireme:ai:changed", wrapped);
     return () => ipcRenderer.removeListener("hireme:ai:changed", wrapped);
+  },
+  onCreatorWorkerChanged: (listener) => {
+    const wrapped = (_event, payload) => listener(payload);
+    ipcRenderer.on("hireme:worker:changed", wrapped);
+    return () => ipcRenderer.removeListener("hireme:worker:changed", wrapped);
   },
 });

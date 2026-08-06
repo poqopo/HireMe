@@ -178,6 +178,18 @@ function createRuntimeTools({
       defaultConversationId: sessionId,
     },
   });
+  const configuredAllowlist = String(process.env.HIREME_TOOL_ALLOWLIST || "")
+    .split(",")
+    .map((name) => name.trim())
+    .filter(Boolean);
+  if (configuredAllowlist.length) {
+    const allowed = new Set(configuredAllowlist);
+    const selected = runtimeTools.filter((tool) => allowed.has(tool.name));
+    const available = new Set(runtimeTools.map((tool) => tool.name));
+    const unknown = configuredAllowlist.filter((name) => !available.has(name));
+    if (unknown.length) throw new Error(`Unknown HIREME_TOOL_ALLOWLIST entries: ${unknown.join(", ")}`);
+    return selected;
+  }
   if (mode !== "agent_authoring" || explicitAgentControl) return runtimeTools;
   return runtimeTools.filter((tool) => managementRuntimeToolNames.has(tool.name));
 }

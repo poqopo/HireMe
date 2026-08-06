@@ -256,6 +256,22 @@ try {
   assert.ok(packageDocument.files.some((file) => file.path === "AGENTS.md"));
   assert.ok(packageDocument.files.some((file) => file.path === "memory/bootstrap.jsonl"));
   assert.ok(packageDocument.archiveBase64 || packageDocument.archive?.base64);
+  const publication = await service.recordPublication({
+    userId,
+    agentId: created.agentId,
+    harnessRevision: "0.1.0",
+    packageDigest: published.packageDigest,
+    agentVersionId: "version-smoke",
+    packagePath: published.packagePath,
+  });
+  const snapshotHarnessPath = join(publication.snapshotRoot, created.agentId, "AGENTS.md");
+  const snapshottedHarness = await readFile(snapshotHarnessPath, "utf8");
+  assert.ok(snapshottedHarness.includes("Management-session smoke rule"));
+  await writeFile(join(service.pathsForUser(userId).specialistRoot, created.agentId, "AGENTS.md"), "edited after publication\n", "utf8");
+  assert.equal(await readFile(snapshotHarnessPath, "utf8"), snapshottedHarness);
+  await writeFile(join(service.pathsForUser(userId).specialistRoot, created.agentId, "AGENTS.md"), snapshottedHarness, "utf8");
+  const receipt = JSON.parse(await readFile(join(publication.snapshotRoot, created.agentId, ".hireme-published.json"), "utf8"));
+  assert.equal(receipt.packageDigest, published.packageDigest);
 
   assert.throws(
     () => service.authorizeManagement({ userId, clientId, input: managementRequest }),

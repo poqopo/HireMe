@@ -192,6 +192,14 @@ type QueuedRequest = {
   kind?: "draft_output";
 };
 
+type DesignProjectRequest = {
+  agentId: string;
+  brief: string;
+  diagnosis: { channel: string; assets: string; goal: string };
+  deliveryMode: "instant" | "reviewed" | "custom";
+  attachments: Attachment[];
+};
+
 type ToastState = {
   id: number;
   title: string;
@@ -837,6 +845,9 @@ function HireMeWorkspace({
   );
   const nativeRuntime = Boolean(bootstrap?.native);
   const [runs, setRuns] = useState<Record<string, RunState>>({});
+  const [creatorWorker, setCreatorWorker] = useState<HireMeCreatorWorkerState | null>(null);
+  const [designProjects, setDesignProjects] = useState<HireMeDesignProject[]>([]);
+  const [projectSubmitting, setProjectSubmitting] = useState(false);
   const [publishingAgentIds, setPublishingAgentIds] = useState<Record<string, boolean>>({});
   const [managementSessions, setManagementSessions] = useState<Record<string, HireMeAgentManagementSession>>({});
   const [queueCounts, setQueueCounts] = useState<Record<string, number>>({});
@@ -1037,6 +1048,33 @@ function HireMeWorkspace({
     const desktop = window.hiremeDesktop;
     if (!desktop || auth?.status !== "authenticated") return;
     void desktop.loadReviewInbox().then(setReviewInbox).catch(() => setReviewInbox(null));
+  }, [auth?.status, auth?.user?.id]);
+
+  useEffect(() => {
+    const desktop = window.hiremeDesktop;
+    if (!desktop || auth?.status !== "authenticated") return;
+    let disposed = false;
+    const load = async () => {
+      const [workerState, projectState] = await Promise.all([
+        desktop.getCreatorWorker(),
+        desktop.loadDesignProjects(),
+      ]);
+      if (disposed) return;
+      setCreatorWorker(workerState);
+      setDesignProjects(projectState.projects);
+    };
+    void load().catch((error) => {
+      if (!disposed) setToast({ id: eventTimeMs(), title: "Creator Worker 상태를 불러오지 못했어요", detail: publicErrorMessage(error) });
+    });
+    const unsubscribe = desktop.onCreatorWorkerChanged((state) => {
+      if (!disposed) setCreatorWorker(state);
+    });
+    const projectPoll = window.setInterval(() => {
+      void desktop.loadDesignProjects().then((state) => {
+        if (!disposed) setDesignProjects(state.projects);
+      }).catch(() => {});
+    }, 15_000);
+    return () => { disposed = true; window.clearInterval(projectPoll); unsubscribe(); };
   }, [auth?.status, auth?.user?.id]);
 
   useEffect(() => {
@@ -1799,6 +1837,84 @@ function HireMeWorkspace({
     createConversation(agentId);
   };
 
+  const setWorkerAvailable = async (available: boolean) => {
+    if (!window.hiremeDesktop) return;
+    try {
+      setCreatorWorker(await window.hiremeDesktop.setCreatorWorkerAvailable(available));
+      showToast(available ? "이 Mac에서 디자인 요청을 받습니다" : "새 디자인 요청 수신을 멈췄어요");
+    } catch (error) {
+      showToast("Creator Worker 상태를 바꾸지 못했어요", publicErrorMessage(error));
+    }
+  };
+
+  const approveCreatorJob = async (jobId: string, decision: "approved" | "revision_requested" | "rejected") => {
+    if (!window.hiremeDesktop) return;
+    try {
+      const note = decision === "revision_requested" ? window.prompt("다시 만들 때 반영할 내용을 적어 주세요.", "브리프 일치도와 시각적 완성도를 높여 주세요.") || "" : "";
+      if (decision === "revision_requested" && !note) return;
+      await window.hiremeDesktop.approveCreatorJob({ jobId, decision, note });
+      const [workerState, projectState] = await Promise.all([
+        window.hiremeDesktop.refreshCreatorWorker(),
+        window.hiremeDesktop.loadDesignProjects(),
+      ]);
+      setCreatorWorker(workerState);
+      setDesignProjects(projectState.projects);
+      showToast(decision === "approved" ? "클라이언트에게 결과를 전달했어요" : decision === "revision_requested" ? "수정 실행을 다시 대기열에 넣었어요" : "결과를 반려했어요");
+    } catch (error) {
+      showToast("검수 결정을 저장하지 못했어요", publicErrorMessage(error));
+    }
+  };
+
+  const submitDesignProject = async (request: DesignProjectRequest) => {
+    const agent = agents.find((item) => item.id === request.agentId);
+    if (!agent || projectSubmitting) return;
+    if (!window.hiremeDesktop || !agent.databaseId) {
+      showToast("데스크톱 앱의 공개 Agent에서 프로젝트를 시작해 주세요");
+      return;
+    }
+    setProjectSubmitting(true);
+    try {
+      if (agent.ownership === "market" && !agent.hired) {
+        await window.hiremeDesktop.hireDemoAgent({ agentId: agent.id });
+        setAgents((current) => current.map((item) => item.id === agent.id ? { ...item, hired: true } : item));
+      }
+      const result = await window.hiremeDesktop.submitDesignProject({
+        agentId: agent.databaseId,
+        attachments: request.attachments,
+        brief: {
+          objective: request.brief,
+          audience: "브리프와 첨부 자료에서 확인",
+          channel: request.diagnosis.channel,
+          goal: request.diagnosis.goal,
+          deliverables: [{ kind: "social_image", format: "png", dimensions: "1080x1350", count: 3 }],
+          mustInclude: [request.diagnosis.assets],
+          mustAvoid: [],
+          deliveryMode: request.deliveryMode,
+        },
+      });
+      const projectState = await window.hiremeDesktop.loadDesignProjects();
+      setDesignProjects(projectState.projects);
+      showToast("프로젝트를 접수했어요", `요청 ${result.jobId.slice(0, 8)} · 디자이너 Worker가 준비되면 시작합니다.`);
+    } catch (error) {
+      showToast("프로젝트를 접수하지 못했어요", publicErrorMessage(error));
+      throw error;
+    } finally {
+      setProjectSubmitting(false);
+    }
+  };
+
+  const cancelDesignProject = async (projectId: string) => {
+    if (!window.hiremeDesktop) return;
+    try {
+      await window.hiremeDesktop.cancelDesignProject({ projectId });
+      const state = await window.hiremeDesktop.loadDesignProjects();
+      setDesignProjects(state.projects);
+      showToast("프로젝트 취소를 요청했어요");
+    } catch (error) {
+      showToast("프로젝트를 취소하지 못했어요", publicErrorMessage(error));
+    }
+  };
+
   const publishVersion = async (agentId: string) => {
     if (publishingAgentIds[agentId]) return;
     const agent = agents.find((item) => item.id === agentId);
@@ -2065,7 +2181,10 @@ function HireMeWorkspace({
         {view === "studio" && (
           <StudioHome
             agents={ownedAgents}
+            worker={creatorWorker}
             onCreate={() => setModal({ type: "new-agent" })}
+            onSetWorkerAvailable={(available) => void setWorkerAvailable(available)}
+            onApproveJob={(jobId, decision) => void approveCreatorJob(jobId, decision)}
             onOpenAgent={(agentId) => {
               setSelectedOwnedAgentId(agentId);
               setView("agents");
@@ -2105,12 +2224,15 @@ function HireMeWorkspace({
         {view === "discover" && (
           <ProjectStartView
             agents={agents.filter((agent) => !isRetiredMockAgent(agent))}
+            projects={designProjects.filter((project) => project.client_id === auth?.user?.id)}
+            submitting={projectSubmitting}
+            onCancel={(projectId) => void cancelDesignProject(projectId)}
             selectedAgentId={selectedAgentId}
             onSelect={(agentId) => {
               setSelectedAgentId(agentId);
               setModal({ type: "agent-profile", agentId });
             }}
-            onUse={startAgentWork}
+            onSubmit={submitDesignProject}
           />
         )}
 
@@ -3060,7 +3182,9 @@ function DesignWorkEnvironment({
   const [selectedRegion, setSelectedRegion] = useState<string | null>(null);
 
   useEffect(() => {
-    if (latestResult?.id) setSelectedResultId(latestResult.id);
+    if (!latestResult?.id) return;
+    const timer = window.setTimeout(() => setSelectedResultId(latestResult.id), 0);
+    return () => window.clearTimeout(timer);
   }, [latestResult?.id]);
 
   useEffect(() => {
@@ -3689,29 +3813,40 @@ function RunProgress({
 
 function ProjectStartView({
   agents,
+  projects,
+  submitting,
+  onCancel,
   selectedAgentId,
   onSelect,
-  onUse,
+  onSubmit,
 }: {
   agents: Agent[];
+  projects: HireMeDesignProject[];
+  submitting: boolean;
+  onCancel: (projectId: string) => void;
   selectedAgentId: string;
   onSelect: (agentId: string) => void;
-  onUse: (agentId: string) => void;
+  onSubmit: (request: DesignProjectRequest) => Promise<void>;
 }) {
   const [step, setStep] = useState<"intake" | "diagnosis" | "proposal">("intake");
   const [brief, setBrief] = useState("");
   const [diagnosis, setDiagnosis] = useState({ channel: "자사몰", assets: "제품 사진", goal: "구매 전환" });
   const [deliveryMode, setDeliveryMode] = useState<"instant" | "reviewed" | "custom">("reviewed");
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
   const designAgents = agents.filter((agent) => agent.category === "디자인");
   const expert = designAgents.find((agent) => agent.id === selectedAgentId) || designAgents[0] || agents[0];
   const beginDiagnosis = () => {
     if (!brief.trim()) return;
     setStep("diagnosis");
   };
-  const startProject = () => {
+  const startProject = async () => {
     if (!expert) return;
     onSelect(expert.id);
-    onUse(expert.id);
+    await onSubmit({ agentId: expert.id, brief, diagnosis, deliveryMode, attachments });
+  };
+  const pickProjectFiles = async () => {
+    const files = await window.hiremeDesktop?.pickFiles();
+    if (files?.length) setAttachments((current) => [...current, ...files].slice(0, 12));
   };
   const showAnotherExpert = () => {
     const currentIndex = designAgents.findIndex((agent) => agent.id === expert?.id);
@@ -3739,10 +3874,11 @@ function ProjectStartView({
           <textarea value={brief} onChange={(event) => setBrief(event.target.value)} placeholder="예: 다음 달 화장품 신제품을 출시하는데, 어떤 디자인이 필요한지 잘 모르겠어요." autoFocus />
         </label>
         <div className="project-attach-row">
-          <button type="button"><Upload size={15} /> 파일 업로드</button><button type="button"><Paperclip size={15} /> 링크 추가</button>
+          <button type="button" onClick={() => void pickProjectFiles()}><Upload size={15} /> 파일 업로드</button>
           <small>웹사이트, 기존 디자인, 제품 이미지, 브랜드 가이드를 추가할 수 있어요.</small>
           <button className="primary-button" type="button" onClick={beginDiagnosis} disabled={!brief.trim()}>프로젝트 진단 시작 <ArrowUpRight size={16} /></button>
         </div>
+        {attachments.length > 0 && <div className="project-attachment-list">{attachments.map((file, index) => <span key={`${file.path}-${index}`}><FileText size={13} /> {file.name}<button type="button" aria-label={`${file.name} 제거`} onClick={() => setAttachments((current) => current.filter((_, itemIndex) => itemIndex !== index))}><X size={12} /></button></span>)}</div>}
         <div className="project-situation-list"><span>어디서부터 시작해야 할지 모르겠나요?</span>{["신제품 출시", "광고 성과 개선", "상세페이지 개선", "SNS 콘텐츠 제작", "발표자료 개선"].map((item) => <button key={item} type="button" onClick={() => setBrief(`${item}을(를) 준비하고 있는데, 어떤 디자인 작업이 필요한지 먼저 정리하고 싶어요.`)}>{item}</button>)}</div>
       </div>}
 
@@ -3757,20 +3893,27 @@ function ProjectStartView({
         <section className="proposal-summary"><span className="proposal-label"><Sparkles size={14} /> 진단 결과</span><h2>단순한 디자인 한 장보다, 구매 이유를 정리한 뒤 채널별로 확장하는 작업이 필요합니다.</h2><p>{diagnosis.channel}에서 {diagnosis.goal}을 목표로 하며, 현재 {diagnosis.assets}을 기반으로 시작합니다.</p></section>
         <div className="proposal-grid"><section className="proposal-package"><span className="eyebrow">Recommended project</span><h2>뷰티 신제품 출시 패키지</h2><p>상세페이지의 핵심 메시지를 먼저 설계하고 광고 소재까지 일관되게 확장합니다.</p><ul><li><CheckCircle2 size={15} /> 상세페이지 콘텐츠 구조와 디자인 1종</li><li><CheckCircle2 size={15} /> 인스타그램 광고 소재 5종</li><li><CheckCircle2 size={15} /> 쇼핑몰 메인 배너 2종 · 채널별 리사이징</li><li><CheckCircle2 size={15} /> 편집 가능한 원본 파일과 전달 가이드</li></ul><div className="proposal-timeline"><span>1. 경쟁 상품 분석</span><span>2. 셀링 포인트 정리</span><span>3. 시안 제작 · 검수</span></div></section>
           <aside className="expert-recommendation"><span>가장 적합한 전문가</span><div className="expert-profile"><AgentAvatar agent={expert} size="large" /><div><strong>{expert.creator}</strong><small>뷰티 이커머스 디자이너</small><p><Star size={13} fill="currentColor" /> {expert.rating} · {formatCompact(expert.uses)}건 프로젝트</p></div></div><p>제품의 사용 후 경험을 시각적으로 전달하는 작업 방식이 이번 요청에 적합합니다.</p><button type="button" onClick={showAnotherExpert}>다른 전문가 보기 <ChevronRight size={14} /></button></aside></div>
-        <section className="delivery-mode"><div><span className="eyebrow">How involved should the expert be?</span><h2>진행 방식을 선택하세요</h2></div><div className="delivery-options">{([ ["instant", "Instant", "AI 실행", "즉시 초안 · 전문가 직접 검수 없음"], ["reviewed", "Reviewed", "AI 실행 + 디자이너 검수", "최종 확인 · 품질 수정 1회 · 기본 추천"], ["custom", "Custom", "디자이너 직접 참여", "맞춤 상담 · 여러 차례 수정"] ] as const).map(([id, title, heading, detail]) => <button type="button" key={id} className={deliveryMode === id ? "active" : ""} onClick={() => setDeliveryMode(id)}><span>{deliveryMode === id ? <CheckCircle2 size={15} /> : <span className="radio-dot" />}{title}</span><strong>{heading}</strong><small>{detail}</small></button>)}</div></section>
-        <div className="proposal-actions"><button className="text-button" type="button" onClick={() => setStep("diagnosis")}>결과물 조정하기</button><div><span>예상 납기 3일 · 편집 가능한 원본 포함</span><button className="primary-button" type="button" onClick={startProject}>이 구성으로 프로젝트 시작 <ArrowUpRight size={16} /></button></div></div>
+        <section className="delivery-mode"><div><span className="eyebrow">Closed pilot delivery</span><h2>모든 결과는 디자이너가 확인한 뒤 전달합니다</h2></div><div className="delivery-options single"><button type="button" className="active" onClick={() => setDeliveryMode("reviewed")}><span><CheckCircle2 size={15} /> Reviewed</span><strong>AI 실행 + 디자이너 검수</strong><small>품질 수정 1회 · 승인 전에는 클라이언트에게 파일이 공개되지 않음</small></button></div></section>
+        <div className="proposal-actions"><button className="text-button" type="button" onClick={() => setStep("diagnosis")}>결과물 조정하기</button><div><span>Creator Worker 실행 · 디자이너 승인 후 전달</span><button className="primary-button" type="button" onClick={() => void startProject()} disabled={submitting || attachments.length === 0}>{submitting ? <LoaderCircle className="spin" size={16} /> : null}{attachments.length === 0 ? "참고 파일을 먼저 첨부해 주세요" : "이 구성으로 프로젝트 시작"} <ArrowUpRight size={16} /></button></div></div>
       </div>}
+      {projects.length > 0 && <section className="client-project-status"><div><span className="eyebrow">Your design projects</span><h2>진행 중인 프로젝트</h2></div><div>{projects.slice(0, 5).map((project) => <article key={project.id}><span className={`project-status ${project.status}`}>{designProjectStatusLabel(project.status)}</span><strong>{String(project.brief.objective || "디자인 프로젝트")}</strong><small>{new Date(project.created_at).toLocaleString("ko-KR")}</small>{!["delivered", "failed", "blocked", "canceled", "expired", "approval_expired"].includes(project.status) && <button className="text-button project-cancel" type="button" onClick={() => onCancel(project.id)}>취소</button>}{project.status === "delivered" && project.artifacts.length > 0 && <div className="project-deliveries">{project.artifacts.map((artifact) => artifact.downloadUrl ? <a key={artifact.id} href={artifact.downloadUrl} target="_blank" rel="noreferrer"><Download size={13} /> {artifact.filename}</a> : null)}</div>}</article>)}</div></section>}
     </section>
   );
 }
 
-function StudioHome({ agents, onCreate, onOpenAgent }: { agents: Agent[]; onCreate: () => void; onOpenAgent: (agentId: string) => void }) {
+function StudioHome({ agents, worker, onCreate, onOpenAgent, onSetWorkerAvailable, onApproveJob }: { agents: Agent[]; worker: HireMeCreatorWorkerState | null; onCreate: () => void; onOpenAgent: (agentId: string) => void; onSetWorkerAvailable: (available: boolean) => void; onApproveJob: (jobId: string, decision: "approved" | "revision_requested" | "rejected") => void }) {
   const drafts = agents.filter((agent) => agent.status !== "공개");
   return <section className="studio-home">
     <header className="studio-hero">
       <div><span className="eyebrow">HireMe · designer studio</span><h1>좋은 디자인 에이전트는<br />작업 방식을 설계하는 것에서 시작합니다.</h1><p>고객이 답할 질문과 전달 기준을 정리하고, 에이전트를 지속적으로 개선하세요.</p></div>
       <button className="primary-button studio-create-button" type="button" onClick={onCreate}><Plus size={17} /> 새 에이전트 만들기</button>
     </header>
+    <section className="creator-worker-card">
+      <div className="creator-worker-status"><span className={worker?.available ? "worker-icon online" : "worker-icon"}><Cpu size={18} /></span><div><span className="eyebrow">Creator Worker · this Mac</span><h2>{worker?.available ? worker.busy ? "디자인 작업을 실행하고 있어요" : "새 요청을 받을 준비가 됐어요" : "요청 수신이 꺼져 있어요"}</h2><p>Private Harness는 이 Mac에 남고, 암호화된 입력과 승인된 결과만 오갑니다.</p></div></div>
+      <button className={worker?.available ? "secondary-button" : "primary-button"} type="button" onClick={() => onSetWorkerAvailable(!worker?.available)} disabled={!worker}>{worker?.available ? "요청 수신 끄기" : "이 Mac에서 요청 받기"}</button>
+    </section>
+    {worker?.error && <div className="worker-error"><Info size={15} /> {worker.error}</div>}
+    {worker?.approvalItems?.length ? <section className="creator-approval-inbox"><div className="studio-overview-heading"><div><span className="eyebrow">Approval inbox</span><h2>클라이언트 전달 전 검수</h2></div><span>{worker.approvalItems.length}건</span></div><div className="creator-approval-list">{worker.approvalItems.map((item) => <article key={item.jobId}><div><span className="studio-status draft">검수 대기</span><h3>{String(item.brief.objective || "디자인 프로젝트")}</h3><p>자동 평가 {item.evaluations.map((evaluation) => `${evaluation.evaluator}: ${evaluation.verdict}`).join(" · ")}</p></div><div className="creator-artifact-links">{item.artifacts.map((artifact) => artifact.downloadUrl ? <a href={artifact.downloadUrl} target="_blank" rel="noreferrer" key={artifact.id}>{artifact.kind} · {artifact.name}</a> : null)}</div><div className="creator-approval-actions"><button type="button" onClick={() => onApproveJob(item.jobId, "revision_requested")}>수정 실행</button><button type="button" onClick={() => onApproveJob(item.jobId, "rejected")}>반려</button><button className="primary-button" type="button" onClick={() => onApproveJob(item.jobId, "approved")}><Check size={14} /> 승인 · 전달</button></div></article>)}</div></section> : null}
     <section className="studio-flow" aria-label="에이전트 제작 흐름">
       <article><span>01</span><div><strong>서비스를 정의하세요</strong><p>누구를 위해 어떤 결과물을 만들지 정합니다.</p></div></article>
       <article><span>02</span><div><strong>고객 질문을 설계하세요</strong><p>프롬프트 대신 선택지로 필요한 맥락을 받습니다.</p></div></article>
@@ -3794,6 +3937,22 @@ function StudioHome({ agents, onCreate, onOpenAgent }: { agents: Agent[]; onCrea
 
 function DiagnosisQuestion({ label, value, options, onChange }: { label: string; value: string; options: string[]; onChange: (value: string) => void }) {
   return <section className="diagnosis-question"><h2>{label}</h2><div>{options.map((option) => <button type="button" key={option} className={option === value ? "active" : ""} onClick={() => onChange(option)}>{option === value && <Check size={14} />}{option}</button>)}</div></section>;
+}
+
+function designProjectStatusLabel(status: string) {
+  return ({
+    draft: "자료 업로드 중",
+    queued: "디자이너 대기 중",
+    running: "디자인 작업 중",
+    evaluating: "품질 평가 중",
+    awaiting_creator_approval: "디자이너 검수 중",
+    delivered: "전달 완료",
+    blocked: "확인 필요",
+    failed: "작업 실패",
+    canceled: "취소됨",
+    expired: "접수 만료",
+    approval_expired: "검수 만료",
+  } as Record<string, string>)[status] || status;
 }
 
 function MyAgentsView({

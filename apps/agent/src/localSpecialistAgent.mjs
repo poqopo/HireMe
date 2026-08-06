@@ -1336,7 +1336,7 @@ function normalizeSpecialistManifest({ config = {}, publicProfile = {} } = {}) {
       ].filter(Boolean),
     ),
     execution: normalizeExecutionPolicy(raw.execution, {
-      defaultClass: "local_protected",
+      defaultClass: "creator_worker",
     }),
     routing: {
       priority: readInteger(raw.routing?.priority, isImage ? 80 : isLaunch ? 60 : 40),

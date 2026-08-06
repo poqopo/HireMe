@@ -200,7 +200,62 @@ type HireMeAgentPublishResult = {
   includesPrivateHarness: boolean;
   memory?: Record<string, unknown>;
   databaseVersion?: string;
-  storage?: { bucket: string; path: string; runtimeRef: string };
+  databaseAgentId?: string;
+  databaseVersionId?: string;
+  backup?: { bucket: string; path: string; digest: string; sizeBytes: number };
+  workerBinding?: Record<string, unknown>;
+};
+
+type HireMeCreatorWorkerApproval = {
+  jobId: string;
+  projectId: string;
+  agentId: string;
+  status: string;
+  attemptNumber: number;
+  brief: Record<string, unknown>;
+  createdAt: string;
+  artifacts: Array<{ id: string; kind: string; name: string; mimeType: string; size: number; downloadUrl: string | null }>;
+  evaluations: Array<{ evaluator: string; verdict: string; scores: Record<string, number>; reasons: string[] }>;
+};
+
+type HireMeCreatorWorkerState = {
+  schema: "hireme.creator_worker.state.v1";
+  worker: null | {
+    id: string;
+    deviceName: string;
+    availability: "available" | "unavailable";
+    health: "online" | "stale" | "offline" | "revoked";
+    lastHeartbeatAt: string | null;
+    appVersion: string;
+    platform: string;
+  };
+  available: boolean;
+  busy: boolean;
+  activeJob: null | Record<string, unknown>;
+  jobs: Array<Record<string, unknown>>;
+  approvalItems: HireMeCreatorWorkerApproval[];
+  error: string | null;
+};
+
+type HireMeDesignProject = {
+  id: string;
+  client_id: string;
+  creator_id: string;
+  agent_id: string;
+  status: string;
+  brief: Record<string, unknown>;
+  retention_until: string;
+  delivered_at: string | null;
+  created_at: string;
+  updated_at: string;
+  jobs: Array<Record<string, unknown>>;
+  artifacts: Array<{ id: string; kind: string; filename: string; mime_type: string; size_bytes: number; approved_at: string | null; downloadUrl?: string | null }>;
+  evaluations: Array<Record<string, unknown>>;
+};
+
+type HireMeDesignProjectList = {
+  schema: "hireme.design_project_list.v1";
+  projects: HireMeDesignProject[];
 };
 
 type HireMeDesktopFile = {
@@ -348,6 +403,13 @@ interface Window {
     updatePrivateHarnessFile(input: HireMePrivateHarnessRequest & { path: string; content: string; expectedSha256: string }): Promise<HireMePrivateHarnessUpdate>;
     closeAgentManagement(input: HireMePrivateHarnessRequest): Promise<{ revoked: true; conversationId: string; agentId: string }>;
     publishAgentDraft(input: HireMePrivateHarnessRequest & { version: string }): Promise<HireMeAgentPublishResult>;
+    getCreatorWorker(): Promise<HireMeCreatorWorkerState>;
+    refreshCreatorWorker(): Promise<HireMeCreatorWorkerState>;
+    setCreatorWorkerAvailable(available: boolean): Promise<HireMeCreatorWorkerState>;
+    approveCreatorJob(input: { jobId: string; decision: "approved" | "revision_requested" | "rejected"; note?: string }): Promise<{ jobId: string; status: string }>;
+    submitDesignProject(input: { agentId: string; brief: Record<string, unknown>; attachments: HireMeDesktopFile[] }): Promise<{ projectId: string; jobId: string; status: string }>;
+    loadDesignProjects(): Promise<HireMeDesignProjectList>;
+    cancelDesignProject(input: { projectId: string }): Promise<{ projectId: string; status: string }>;
     getAiSettings(): Promise<HireMeDesktopAiSettings>;
     connectCodex(): Promise<HireMeDesktopAiSettings>;
     cancelAiConnection(): Promise<boolean>;
@@ -362,5 +424,6 @@ interface Window {
     onRunEvent(listener: (event: Record<string, unknown>) => void): () => void;
     onAuthStateChanged(listener: (state: HireMeDesktopAuthState) => void): () => void;
     onAiSettingsChanged(listener: (settings: HireMeDesktopAiSettings) => void): () => void;
+    onCreatorWorkerChanged(listener: (state: HireMeCreatorWorkerState) => void): () => void;
   };
 }

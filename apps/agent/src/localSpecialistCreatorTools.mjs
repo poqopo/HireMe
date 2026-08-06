@@ -745,13 +745,13 @@ function buildManifest(spec) {
     intentTags: [spec.category, ...spec.skills].filter(Boolean),
     execution: {
       schema: "hireme.agent_execution_policy.v1",
-      defaultClass: "local_protected",
+      defaultClass: "creator_worker",
       operations: [
         {
           id: "standard",
-          title: "Standard local protected operation",
-          executionClass: "local_protected",
-          billingKey: "local_protected",
+          title: "Standard Creator Worker operation",
+          executionClass: "creator_worker",
+          billingKey: "creator_worker",
           default: true,
           triggers: [],
         },
@@ -1433,6 +1433,7 @@ async function collectPackageFileMetadata(root, prefix = "") {
 
 function shouldSkipPackagePath(path) {
   const parts = String(path || "").split("/");
+  if (String(path || "") === ".hireme-published.json") return true;
   return parts.some((part) =>
     part === ".git" ||
     part === "node_modules" ||

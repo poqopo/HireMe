@@ -4,6 +4,14 @@
 # working directory name when running `supabase init`.
 project_id = "yknrtsvdgwwsnjmjidrd"
 
+[functions.creator-worker]
+verify_jwt = true
+
+[functions.creator-worker-maintenance]
+# Scheduled invocations authenticate with a dedicated x-cron-secret and never
+# accept end-user operations.
+verify_jwt = false
+
 [api]
 enabled = true
 # Port to use for the API URL.

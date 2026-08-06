@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
-import { cp, mkdir, readFile, realpath, rm, stat } from "node:fs/promises";
+import { cp, mkdir, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 
 const managementSessionTtlMs = 2 * 60 * 60 * 1_000;
 const maxManagedHarnessBytes = 512 * 1_024;
@@ -53,6 +53,7 @@ export function createDesktopAgentAuthoringService({
     const runtimeState = join(resolve(userDataDir), "runtime", safeUserId);
     return {
       specialistRoot: join(runtimeState, "agents"),
+      publishedRoot: join(runtimeState, "published-agents"),
       stateRoot: join(runtimeState, "hireme-operator"),
     };
   };
@@ -83,6 +84,44 @@ export function createDesktopAgentAuthoringService({
   return {
     pathsForUser(userId) {
       return authoringPaths(userId);
+    },
+
+    async recordPublication({ userId, agentId, harnessRevision, packageDigest, agentVersionId, packagePath, materialize = true }) {
+      const paths = authoringPaths(userId);
+      const normalizedAgentId = normalizeAgentId(agentId);
+      const digest = boundedText(packageDigest, "packageDigest", 80);
+      if (!/^sha256:[a-f0-9]{64}$/.test(digest)) throw new Error("게시 Harness digest가 올바르지 않습니다.");
+      const snapshotRoot = join(paths.publishedRoot, digest.slice(7), "agents");
+      const target = join(snapshotRoot, normalizedAgentId, ".hireme-published.json");
+      const previousReceipt = await readFile(target, "utf8").then(JSON.parse).catch(() => null);
+      if (materialize) {
+        const packageDocument = JSON.parse(await readFile(resolve(packagePath), "utf8"));
+        if (packageDocument?.integrity?.packageDigest !== digest || packageDocument?.packageMode !== "full") {
+          throw new Error("게시 Harness 스냅샷의 무결성을 확인하지 못했습니다.");
+        }
+        const creatorModule = await loadCreatorModule();
+        await mkdir(snapshotRoot, { recursive: true });
+        await creatorModule.importLocalSpecialistAgentPackage({
+          root: snapshotRoot,
+          workspaceRoot: resolve(getWorkspace()),
+          package: packageDocument,
+          current_user_id: requireUserId(userId),
+          materialization_context: "creator_snapshot",
+          overwrite: true,
+        });
+      }
+      const revision = boundedText(harnessRevision, "harnessRevision", 80);
+      const receipt = {
+        schema: "hireme.creator_worker.publication_receipt.v1",
+        agentId: normalizedAgentId,
+        harnessRevision: revision,
+        harnessRevisions: [...new Set([...(previousReceipt?.harnessRevisions || []), previousReceipt?.harnessRevision, revision].filter(Boolean))],
+        packageDigest: digest,
+        agentVersionId: String(agentVersionId || "pending"),
+        publishedAt: new Date().toISOString(),
+      };
+      await writeFile(target, `${JSON.stringify(receipt, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+      return { ...receipt, snapshotRoot };
     },
 
     async createDraft({ userId, input } = {}) {
@@ -450,9 +489,9 @@ export function createDesktopAgentAuthoringService({
       const result = await packageTool.handler({
         agent_id: publish.agentId,
         output_path: relativeOutput,
-        // Standard marketplace work is a device-licensed, ephemeral local run.
-        // The creator's editable source remains in their private user-data folder.
-        package_mode: "local_protected",
+        // The full package remains creator-only and is encrypted for recovery.
+        // Clients submit jobs to the creator's outbound-only Worker instead of receiving it.
+        package_mode: "full",
         creator_id: userId,
         current_user_id: userId,
         require_test: false,
