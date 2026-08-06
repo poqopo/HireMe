@@ -1,14 +1,17 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { appendFile, chmod, copyFile, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { appendFile, copyFile, mkdir, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { hostname } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import { app, BrowserWindow, dialog, ipcMain, protocol, safeStorage, shell } from "electron";
 import { createAiProviderService } from "./aiProviders.mjs";
 import { createDesktopAgentAuthoringService } from "./agentAuthoring.mjs";
 import { createDesktopAuthService, readDesktopPublicConfig } from "./auth.mjs";
 import { createDesktopDataService } from "./data.mjs";
+import { createCreatorWorkerService } from "./creatorWorker.mjs";
+import { createCreatorWorkerExecutor } from "./creatorWorkerExecutor.mjs";
+import { createDesignProjectService } from "./designProjects.mjs";
 import { stableManagementIpcError } from "./managementIpcError.mjs";
 import { isTrustedRendererContext, isTrustedRendererDocument, expectedRendererDocumentUrl } from "./rendererTrust.mjs";
 import { createActiveRunRegistry } from "./runLifecycle.mjs";
@@ -45,6 +48,10 @@ let authService = null;
 let aiProviderService = null;
 let dataService = null;
 let agentAuthoringService = null;
+let creatorWorkerService = null;
+let designProjectService = null;
+let creatorWorkerUserId = null;
+let creatorWorkerInitialization = null;
 let authenticatedUserId = null;
 const pendingAuthUrls = [];
 
@@ -76,180 +83,6 @@ app.on("open-url", (event, url) => {
 
 function runtimeRoot() {
   return app.isPackaged ? join(process.resourcesPath, "runtime") : developmentRoot;
-}
-
-async function publishAgentPackageToStorage({ user, agentId, version, packagePath }) {
-  const client = authService?.getDataClient();
-  if (!client) throw new Error("HireMe 로그인 세션을 확인하지 못했습니다.");
-  const packageBytes = await readFile(packagePath);
-  if (packageBytes.length > 8 * 1024 * 1024) {
-    throw new Error("에이전트 패키지가 현재 배포 가능한 크기를 초과했습니다.");
-  }
-  try {
-    const response = await client.functions.invoke("publish-agent-package", {
-      body: {
-        agentId,
-        version,
-        packageBase64: packageBytes.toString("base64"),
-      },
-    });
-    if (response.error) {
-      throw await readableEdgeFunctionError(
-        response.error,
-        "에이전트 패키지를 배포 서버에 저장하지 못했습니다.",
-      );
-    }
-    if (!response.data?.storage?.runtimeRef || !response.data?.displayVersion) {
-      throw new Error("배포 서버가 패키지 저장 결과를 반환하지 않았습니다.");
-    }
-    return response.data;
-  } finally {
-    packageBytes.fill(0);
-  }
-}
-
-async function materializeLicensedAgentPackage({ userId, agentId }) {
-  const client = authService?.getDataClient();
-  if (!client) throw new Error("HireMe 로그인 세션을 확인하지 못했습니다.");
-  const protectedRuntime = await loadProtectedRuntimeModules();
-  const device = await readOrCreateDeviceLicenseIdentity(protectedRuntime.createDeviceLicenseIdentity);
-  const issued = await client.functions.invoke("issue-agent-local-run-license", {
-    body: {
-      agentId,
-      device: {
-        schema: "hireme.device_registration.v1",
-        deviceId: device.deviceId,
-        keyType: "x25519",
-        publicKey: device.publicKey,
-      },
-    },
-  });
-  if (issued.error) {
-    throw await readableEdgeFunctionError(
-      issued.error,
-      "에이전트 실행 권한을 확인하지 못했습니다.",
-    );
-  }
-  const grant = issued.data;
-  if (!grant?.packageUrl || !grant?.license || !grant?.issuerPublicKey) {
-    throw new Error("에이전트 실행 패키지 권한 응답이 올바르지 않습니다.");
-  }
-
-  let envelopeBytes = null;
-  let decrypted = null;
-  let runtimeRoot = null;
-  try {
-    const response = await fetch(grant.packageUrl);
-    if (!response.ok) throw new Error("보호된 에이전트 패키지를 내려받지 못했습니다.");
-    envelopeBytes = Buffer.from(await response.arrayBuffer());
-    const unwrapped = protectedRuntime.unwrapDevicePackageLicense({
-      license: grant.license,
-      devicePrivateKey: device.privateKey,
-      issuerPublicKey: grant.issuerPublicKey,
-      expectedUserId: userId,
-      expectedAgentId: agentId,
-    });
-    decrypted = protectedRuntime.decryptAgentPackage({
-      envelopeBytes,
-      masterSecret: unwrapped.packageKey,
-    });
-    if (decrypted.packageDigest !== grant.packageDigest) {
-      throw new Error("에이전트 패키지 무결성 검증에 실패했습니다.");
-    }
-    runtimeRoot = await mkdtemp(join(tmpdir(), "hireme-licensed-agent-"));
-    const specialistRoot = join(runtimeRoot, "agents");
-    await mkdir(specialistRoot, { recursive: true });
-    await protectedRuntime.importLocalSpecialistAgentPackage({
-      root: specialistRoot,
-      workspaceRoot: runtimeRoot,
-      package: decrypted.package,
-      current_user_id: userId,
-      materialization_context: "licensed_device_runtime",
-      overwrite: false,
-    });
-    return {
-      specialistRoot,
-      cleanup: async () => {
-        envelopeBytes?.fill(0);
-        decrypted?.bytes?.fill(0);
-        await rm(runtimeRoot, { recursive: true, force: true });
-      },
-    };
-  } catch (error) {
-    envelopeBytes?.fill(0);
-    decrypted?.bytes?.fill(0);
-    if (runtimeRoot) await rm(runtimeRoot, { recursive: true, force: true }).catch(() => {});
-    throw error;
-  }
-}
-
-async function readableEdgeFunctionError(error, fallbackMessage) {
-  let serverMessage = "";
-  const context = error?.context;
-  if (context && typeof context.clone === "function") {
-    try {
-      const payload = await context.clone().json();
-      serverMessage = String(payload?.error || payload?.message || "").trim();
-    } catch {
-      try {
-        serverMessage = String(await context.clone().text()).trim();
-      } catch {
-        // The response body is optional; the stable fallback remains useful.
-      }
-    }
-  }
-  const message = serverMessage || String(fallbackMessage || error?.message || "요청을 완료하지 못했습니다.");
-  const code = /고용한 뒤|hire.*agent/i.test(message)
-    ? "agent_hire_required"
-    : /남은 실행|remaining runs|실행 권한을 사용할 수 없/i.test(message)
-      ? "agent_run_entitlement_required"
-      : /공개 Agent 버전|실행 버전|버전 검토|기기 보호 실행|패키지/i.test(message)
-        ? "agent_package_unavailable"
-        : /authentication|로그인 세션|인증/i.test(message)
-          ? "hireme_auth_required"
-          : "runtime_failed";
-  return Object.assign(new Error(message), { code });
-}
-
-async function loadProtectedRuntimeModules() {
-  const sourceRoot = join(runtimeRoot(), "apps", "agent", "src");
-  const [license, encryptedPackage, creator] = await Promise.all([
-    import(pathToFileURL(join(sourceRoot, "deviceBoundPackageLicense.mjs")).href),
-    import(pathToFileURL(join(sourceRoot, "encryptedAgentPackageStore.mjs")).href),
-    import(pathToFileURL(join(sourceRoot, "localSpecialistCreatorTools.mjs")).href),
-  ]);
-  return {
-    createDeviceLicenseIdentity: license.createDeviceLicenseIdentity,
-    unwrapDevicePackageLicense: license.unwrapDevicePackageLicense,
-    decryptAgentPackage: encryptedPackage.decryptAgentPackage,
-    importLocalSpecialistAgentPackage: creator.importLocalSpecialistAgentPackage,
-  };
-}
-
-async function readOrCreateDeviceLicenseIdentity(createDeviceLicenseIdentity) {
-  if (!safeStorage.isEncryptionAvailable()) {
-    throw new Error("운영체제 보안 저장소를 사용할 수 없어 보호된 에이전트를 실행할 수 없습니다.");
-  }
-  const path = join(app.getPath("userData"), "runtime", "device-license-identity.v1");
-  try {
-    const encrypted = await readFile(path);
-    const stored = JSON.parse(safeStorage.decryptString(encrypted));
-    if (stored?.deviceId && stored?.publicKey && stored?.privateKey) return stored;
-  } catch (error) {
-    if (error?.code !== "ENOENT") await rm(path, { force: true }).catch(() => {});
-  }
-  const identity = createDeviceLicenseIdentity();
-  const stored = {
-    deviceId: identity.deviceId,
-    publicKey: identity.publicKey,
-    privateKey: identity.privateKey.export({ format: "der", type: "pkcs8" }).toString("base64"),
-  };
-  const temporaryPath = `${path}.${randomUUID()}.tmp`;
-  await mkdir(dirname(path), { recursive: true });
-  await writeFile(temporaryPath, safeStorage.encryptString(JSON.stringify(stored)));
-  await chmod(temporaryPath, 0o600).catch(() => {});
-  await rename(temporaryPath, path);
-  return stored;
 }
 
 function rendererPath() {
@@ -681,18 +514,89 @@ ipcMain.handle("hireme:agent:publish-draft", managementIpc(async ({ sender, inpu
     clientId: sender.id,
     input,
   });
-  const published = await publishAgentPackageToStorage({
-    user,
+  const packageDocument = JSON.parse(await readFile(localPackage.packagePath, "utf8"));
+  if (packageDocument?.packageMode !== "full" || packageDocument?.integrity?.packageDigest !== localPackage.packageDigest) {
+    throw new Error("Creator Harness 게시 패키지의 무결성을 확인하지 못했습니다.");
+  }
+  await agentAuthoringService.recordPublication({
+    userId: user.id,
     agentId: localPackage.agentId,
-    version: localPackage.version,
+    harnessRevision: localPackage.version,
+    packageDigest: localPackage.packageDigest,
+    agentVersionId: "pending",
     packagePath: localPackage.packagePath,
+    materialize: true,
+  });
+  const workerService = await requireCreatorWorkerService(user.id);
+  const published = await workerService.publishAgent({
+    packagePath: localPackage.packagePath,
+    agentSlug: localPackage.agentId,
+    version: localPackage.version,
+    packageDigest: localPackage.packageDigest,
+    publicProfile: packageDocument.publicProfile,
+    publicDesignContract: packageDocument.publicProfile?.design_contract || {},
+    manifest: packageDocument.manifest || {},
+  });
+  await agentAuthoringService.recordPublication({
+    userId: user.id,
+    agentId: localPackage.agentId,
+    harnessRevision: published.displayVersion,
+    packageDigest: published.packageDigest,
+    agentVersionId: published.versionId,
+    packagePath: localPackage.packagePath,
+    materialize: false,
   });
   return {
     ...localPackage,
-    storage: published.storage,
+    databaseAgentId: published.agentId,
+    databaseVersionId: published.versionId,
+    backup: published.backup,
+    workerBinding: published.binding,
     databaseVersion: published.displayVersion,
   };
 }));
+
+ipcMain.handle("hireme:worker:get", async (event) => {
+  assertTrustedRenderer(event);
+  const user = requireAuthenticatedUser();
+  return (await requireCreatorWorkerService(user.id)).getState();
+});
+
+ipcMain.handle("hireme:worker:refresh", async (event) => {
+  assertTrustedRenderer(event);
+  const user = requireAuthenticatedUser();
+  return (await requireCreatorWorkerService(user.id)).refresh();
+});
+
+ipcMain.handle("hireme:worker:set-available", async (event, available) => {
+  assertTrustedRenderer(event);
+  const user = requireAuthenticatedUser();
+  return (await requireCreatorWorkerService(user.id)).setAvailable(available === true);
+});
+
+ipcMain.handle("hireme:worker:approve", async (event, input) => {
+  assertTrustedRenderer(event);
+  const user = requireAuthenticatedUser();
+  return (await requireCreatorWorkerService(user.id)).approveJob(input);
+});
+
+ipcMain.handle("hireme:projects:submit", async (event, input) => {
+  assertTrustedRenderer(event);
+  requireAuthenticatedUser();
+  return designProjectService.submitProject(input);
+});
+
+ipcMain.handle("hireme:projects:list", async (event) => {
+  assertTrustedRenderer(event);
+  requireAuthenticatedUser();
+  return designProjectService.listProjects();
+});
+
+ipcMain.handle("hireme:projects:cancel", async (event, input) => {
+  assertTrustedRenderer(event);
+  requireAuthenticatedUser();
+  return designProjectService.cancelProject(input);
+});
 
 ipcMain.handle("hireme:ai:get", async (event) => {
   assertTrustedRenderer(event);
@@ -831,21 +735,13 @@ ipcMain.handle("hireme:chat:send", chatIpc(async (event, rawRequest) => {
   const attachmentContext = await formatAttachmentContext(request.attachments, workingDirectory);
   const personalAgentRoot = agentAuthoringService.pathsForUser(userId).specialistRoot;
   const personalAgentAvailable = await existingDirectory(join(personalAgentRoot, request.agentId));
-  let ephemeralPackage = null;
   if (request.mode !== "agent_authoring" && !personalAgentAvailable) {
-    sendRunEvent(sender, {
-      type: "stage",
-      runId,
-      conversationId: request.conversationId,
-      stage: "licensed_package_preparing",
-      label: "보호된 에이전트 실행 패키지를 준비하고 있어요",
-    });
-    ephemeralPackage = await materializeLicensedAgentPackage({
-      userId,
-      agentId: request.agentId,
-    });
+    throw Object.assign(
+      new Error("다른 디자이너의 Agent는 로컬 채팅에서 실행하지 않습니다. 디자인 프로젝트로 접수해 주세요."),
+      { code: "creator_worker_project_required" },
+    );
   }
-  const specialistRoot = ephemeralPackage?.specialistRoot || personalAgentRoot;
+  const specialistRoot = personalAgentRoot;
   const prompt = request.mode === "agent_authoring"
     ? buildAgentAuthoringPrompt(request, attachmentContext)
     : buildAgentWorkPrompt(request, attachmentContext);
@@ -1017,7 +913,6 @@ ipcMain.handle("hireme:chat:send", chatIpc(async (event, rawRequest) => {
   } finally {
     if (active.managementSessionExpiryTimer) clearTimeout(active.managementSessionExpiryTimer);
     activeRuns.release(runId, active);
-    await ephemeralPackage?.cleanup?.();
   }
 }));
 
@@ -1040,6 +935,7 @@ app.whenReady()
     initializeDesktopData();
     initializeAiProviders();
     initializeAgentAuthoring();
+    initializeDesignProjects();
     await createWindow();
     app.on("activate", async () => {
       if (BrowserWindow.getAllWindows().length === 0) await createWindow();
@@ -1066,6 +962,7 @@ app.whenReady()
 
 app.on("before-quit", () => {
   activeRuns.cancelMatching(() => true, "app_quit");
+  void creatorWorkerService?.stop();
   aiProviderService?.destroy();
   authService?.destroy();
 });
@@ -1092,11 +989,32 @@ async function configureDesktopAuth() {
         : null;
       authenticatedUserId = nextUserId;
       if (revokedUserId) {
+        void creatorWorkerService?.stop().catch(() => {});
+        creatorWorkerService = null;
+        creatorWorkerUserId = null;
+        creatorWorkerInitialization = null;
         void revokeUserManagementSessions({
           userId: revokedUserId,
           reason: "auth_session_revoked",
         }).catch((error) => {
           console.warn("Failed to revoke management sessions after auth change:", error);
+        });
+      }
+      if (nextUserId && nextUserId !== creatorWorkerUserId) {
+        void initializeCreatorWorker(nextUserId).catch((error) => {
+          console.warn("Failed to initialize Creator Worker:", error);
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send("hireme:worker:changed", {
+              schema: "hireme.creator_worker.state.v1",
+              worker: null,
+              available: false,
+              busy: false,
+              activeJob: null,
+              jobs: [],
+              approvalItems: [],
+              error: String(error?.message || error),
+            });
+          }
         });
       }
       if (mainWindow && !mainWindow.isDestroyed()) {
@@ -1163,6 +1081,63 @@ function initializeAgentAuthoring() {
       return ownership;
     },
   });
+}
+
+function initializeDesignProjects() {
+  designProjectService = createDesignProjectService({
+    getClient: () => authService?.getDataClient() || null,
+    getUser: () => authService?.getState()?.user || null,
+  });
+}
+
+async function initializeCreatorWorker(userId) {
+  if (creatorWorkerUserId === userId && creatorWorkerInitialization) return creatorWorkerInitialization;
+  if (creatorWorkerService && creatorWorkerUserId === userId && creatorWorkerService.getState().worker) return creatorWorkerService.getState();
+  const initialization = (async () => {
+    await creatorWorkerService?.stop().catch(() => {});
+    if (!safeStorage.isEncryptionAvailable()) {
+      throw new Error("이 기기에서 macOS Keychain 기반 Worker key 보호를 사용할 수 없습니다.");
+    }
+    const executeJob = createCreatorWorkerExecutor({
+      runtimeRoot: runtimeRoot(),
+      userDataDir: app.getPath("userData"),
+      getAiRuntime: (user) => aiProviderService.resolveRuntime({ user }),
+      getSpecialistRoot: (id, digest) => join(
+        agentAuthoringService.pathsForUser(id).publishedRoot,
+        String(digest || "").replace(/^sha256:/, ""),
+        "agents",
+      ),
+      getUser: () => authService?.getState()?.user || null,
+    });
+    const service = createCreatorWorkerService({
+      getClient: () => authService?.getDataClient() || null,
+      getUser: () => authService?.getState()?.user || null,
+      appVersion: app.getVersion(),
+      platform: process.platform,
+      deviceName: hostname() || "HireMe Mac",
+      identityPath: join(app.getPath("userData"), "creator-workers", userId, "identity.bin"),
+      protectSecret: async (plaintext) => safeStorage.encryptString(Buffer.from(plaintext).toString("base64")),
+      unprotectSecret: async (encrypted) => Buffer.from(safeStorage.decryptString(Buffer.from(encrypted)), "base64"),
+      executeJob,
+      onStateChange: (state) => {
+        if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("hireme:worker:changed", state);
+      },
+    });
+    creatorWorkerService = service;
+    creatorWorkerUserId = userId;
+    return service.initialize();
+  })();
+  creatorWorkerInitialization = initialization;
+  try {
+    return await initialization;
+  } finally {
+    if (creatorWorkerInitialization === initialization) creatorWorkerInitialization = null;
+  }
+}
+
+async function requireCreatorWorkerService(userId) {
+  if (!creatorWorkerService || creatorWorkerUserId !== userId) await initializeCreatorWorker(userId);
+  return creatorWorkerService;
 }
 
 function requireAuthenticatedUser() {

@@ -1,11 +1,14 @@
 export const executionPolicySchema = "hireme.agent_execution_policy.v1";
-export const localProtectedExecution = "local_protected";
+export const creatorWorkerExecution = "creator_worker";
+export const legacyLocalProtectedExecution = "local_protected";
 export const hostedSecureExecution = "hosted_secure";
 
-const executionClasses = new Set([localProtectedExecution, hostedSecureExecution]);
+// local_protected remains parseable for previously published packages, but new
+// Desktop publication and generated Agents use creator_worker.
+const executionClasses = new Set([creatorWorkerExecution, legacyLocalProtectedExecution, hostedSecureExecution]);
 
 export function normalizeExecutionPolicy(value, {
-  defaultClass = localProtectedExecution,
+  defaultClass = creatorWorkerExecution,
 } = {}) {
   const input = value && typeof value === "object" ? value : {};
   const normalizedDefault = normalizeExecutionClass(input.defaultClass || defaultClass);
@@ -15,7 +18,8 @@ export function normalizeExecutionPolicy(value, {
     defaultClass: normalizedDefault,
     operations,
     bundles: {
-      localProtected: "local_protected",
+      creatorWorker: creatorWorkerExecution,
+      legacyLocalProtected: legacyLocalProtectedExecution,
       hostedSecure: "hosted_secure",
     },
   };
@@ -30,7 +34,7 @@ export function validateExecutionPolicy(value) {
     errors.push(`manifest.execution.schema must be ${executionPolicySchema}`);
   }
   if (!executionClasses.has(value.defaultClass)) {
-    errors.push("manifest.execution.defaultClass must be local_protected or hosted_secure");
+    errors.push("manifest.execution.defaultClass must be creator_worker, local_protected (legacy), or hosted_secure");
   }
   if (!Array.isArray(value.operations) || !value.operations.length) {
     errors.push("manifest.execution.operations must include at least one operation");
@@ -59,7 +63,7 @@ export function selectExecutionPolicy({
   requestedExecutionClass,
 } = {}) {
   const normalized = normalizeExecutionPolicy(policy, {
-    defaultClass: policy?.defaultClass || localProtectedExecution,
+    defaultClass: policy?.defaultClass || creatorWorkerExecution,
   });
   const requestedOperation = String(operationId || "").trim();
   let selected = requestedOperation
@@ -97,7 +101,7 @@ export function selectExecutionPolicy({
   const requestedClass = requestedExecutionClass
     ? normalizeExecutionClass(requestedExecutionClass)
     : null;
-  if (requestedClass === hostedSecureExecution && executionClass === localProtectedExecution) {
+  if (requestedClass === hostedSecureExecution && executionClass === creatorWorkerExecution) {
     executionClass = hostedSecureExecution;
     reason = "user_security_upgrade";
   }
@@ -109,8 +113,11 @@ export function selectExecutionPolicy({
     billingKey: selected?.billingKey || executionClass,
     reason,
     downgradeAllowed: false,
-    userProviderAllowed: executionClass === localProtectedExecution,
-    packageDeliveredToDevice: executionClass === localProtectedExecution,
+    userProviderAllowed: false,
+    creatorProviderRequired: executionClass === creatorWorkerExecution,
+    packageDeliveredToDevice: false,
+    executedOnCreatorWorker: executionClass === creatorWorkerExecution,
+    legacyLocalProtected: executionClass === legacyLocalProtectedExecution,
   };
 }
 
