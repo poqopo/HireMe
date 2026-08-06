@@ -1,2 +1,0 @@
-REPLACE WITH: MCP response metadata showing memWalStored and
-blob ID.

@@ -1,7 +1,7 @@
 {
-  "name": "@hireme/web",
+  "name": "@hireme/desktop-renderer",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -9,23 +9,9 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@mysten/dapp-kit": "^1.1.0",
-    "@mysten/enoki": "^1.1.0",
-    "@mysten/sui": "^2.18.0",
-    "@radix-ui/react-avatar": "latest",
-    "@radix-ui/react-slot": "latest",
-    "@radix-ui/react-tabs": "latest",
-    "@supabase/supabase-js": "latest",
-    "@tailwindcss/vite": "latest",
-    "@tanstack/react-query": "^5.101.0",
-    "class-variance-authority": "latest",
-    "clsx": "latest",
     "lucide-react": "latest",
     "react": "latest",
-    "react-dom": "latest",
-    "react-router-dom": "^7.17.0",
-    "tailwind-merge": "latest",
-    "tailwindcss": "latest"
+    "react-dom": "latest"
   },
   "devDependencies": {
     "@types/node": "latest",

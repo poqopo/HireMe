@@ -1,3 +1,0 @@
-- previousTurnsLoaded > 0
-- same wizard eagle identity
-- new scene version

@@ -1,2 +1,0 @@
-Protected Agent packages are stored on
-Walrus.

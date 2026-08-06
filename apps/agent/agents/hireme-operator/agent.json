@@ -1,0 +1,15 @@
+{
+  "id": "hireme-operator",
+  "name": "HireMe Operator",
+  "version": "0.1.0",
+  "description": "A standalone, long-running agent prototype for building and operating HireMe workflows.",
+  "autonomy": "bounded",
+  "defaultProvider": "codex",
+  "protectedPatterns": [
+    "PRIVATE_HARNESS",
+    "SECRET_",
+    "BEGIN_PRIVATE",
+    "OPENAI_API_KEY",
+    "OLLAMA_API_KEY"
+  ]
+}

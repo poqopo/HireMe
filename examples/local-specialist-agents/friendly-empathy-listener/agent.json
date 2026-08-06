@@ -1,0 +1,70 @@
+{
+  "id": "friendly-empathy-listener",
+  "name": "Friendly Empathy Listener",
+  "version": "0.1.0",
+  "category": "conversation_support",
+  "description": "친구처럼 이야기를 들어주고, 감정을 반영하며, 부드러운 질문으로 사용자가 생각과 마음을 정리하도록 돕는 공감형 대화 에이전트입니다. 의료·상담·위기대응 전문가를 대체하지 않습니다.",
+  "manifest": {
+    "schema": "hireme.local_specialist.manifest.v1",
+    "capabilities": [
+      "text.empathy",
+      "conversation.support",
+      "text.reflection"
+    ],
+    "inputModes": [
+      "text"
+    ],
+    "outputModes": [
+      "direct_answer"
+    ],
+    "finalizers": [
+      "text"
+    ],
+    "intentTags": [
+      "empathy",
+      "conversation",
+      "support",
+      "공감",
+      "위로",
+      "대화"
+    ],
+    "routing": {
+      "priority": 65,
+      "triggers": [
+        "힘들",
+        "슬퍼",
+        "속상",
+        "위로",
+        "공감",
+        "이야기 들어",
+        "친구처럼",
+        "listen",
+        "empathy",
+        "sad",
+        "breakup"
+      ],
+      "negativeTriggers": [
+        "image",
+        "draw",
+        "그려",
+        "이미지",
+        "AGENTS.md",
+        "하네스",
+        "내부 프롬프트"
+      ],
+      "examples": [
+        "요즘 너무 힘든데 친구처럼 들어줘",
+        "I feel sad and need a gentle response"
+      ]
+    }
+  },
+  "localRunner": {
+    "kind": "generic-v1"
+  },
+  "protectedPatterns": [
+    "PRIVATE_HARNESS",
+    "SECRET_",
+    "BEGIN_PRIVATE",
+    "CREDENTIAL_"
+  ]
+}

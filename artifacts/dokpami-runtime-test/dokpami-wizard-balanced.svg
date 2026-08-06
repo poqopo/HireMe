@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="Dokpami wizard balanced preview">
+  <rect width="512" height="512" rx="32" fill="#fffdf7"/>
+  <ellipse cx="256" cy="282" rx="116" ry="132" fill="#fff9ee" stroke="#201713" stroke-width="10"/>
+  <path d="M225 138c18-33 52-28 43 4-8 27-45 24-35-1" fill="none" stroke="#201713" stroke-width="9" stroke-linecap="round"/>
+  <ellipse cx="190" cy="292" rx="35" ry="54" fill="#8a5a32" stroke="#201713" stroke-width="8" transform="rotate(-16 190 292)"/>
+  <ellipse cx="326" cy="292" rx="35" ry="54" fill="#8a5a32" stroke="#201713" stroke-width="8" transform="rotate(16 326 292)"/>
+  <circle cx="216" cy="252" r="12" fill="#201713"/>
+  <circle cx="296" cy="252" r="12" fill="#201713"/>
+  <ellipse cx="188" cy="278" rx="18" ry="11" fill="#f5a3a4" opacity="0.85"/>
+  <ellipse cx="324" cy="278" rx="18" ry="11" fill="#f5a3a4" opacity="0.85"/>
+  <path d="M246 272l20 0-10 17z" fill="#f5c242" stroke="#201713" stroke-width="5" stroke-linejoin="round"/>
+  <path d="M214 408c-20 14-30 15-48 3" fill="none" stroke="#e5b12f" stroke-width="16" stroke-linecap="round"/>
+  <path d="M298 408c20 14 30 15 48 3" fill="none" stroke="#e5b12f" stroke-width="16" stroke-linecap="round"/>
+  <path d="M337 352c33 4 48 19 50 43-21-10-40-12-63-7z" fill="#8a5a32" stroke="#201713" stroke-width="8" stroke-linejoin="round"/>
+  <path d="M207 164l45-82 54 82z" fill="#6d5dfc" stroke="#201713" stroke-width="8" stroke-linejoin="round"/>
+  <rect x="200" y="160" width="112" height="22" rx="11" fill="#6d5dfc" stroke="#201713" stroke-width="7"/>
+  <circle cx="276" cy="121" r="7" fill="#ffe66d"/>
+  <text x="256" y="470" text-anchor="middle" font-family="Arial, sans-serif" font-size="18" fill="#201713">Wizard / balanced</text>
+</svg>

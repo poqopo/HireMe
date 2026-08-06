@@ -1,4 +1,0 @@
-- Run the Agent behind the gateway
-- Check access and route the call
-- Return safe Agent output
-- Keep private Harness protected
