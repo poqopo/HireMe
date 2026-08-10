@@ -1,0 +1,60 @@
+{
+  "name": "@hireme/designer-app",
+  "private": true,
+  "version": "0.2.0",
+  "description": "HireMe designer workspace and local Creator Worker",
+  "type": "module",
+  "main": "electron/main.mjs",
+  "scripts": {
+    "config": "node scripts/write-desktop-public-config.mjs",
+    "config:required": "node scripts/write-desktop-public-config.mjs --required",
+    "renderer:dev": "vite --config renderer/vite.config.ts",
+    "renderer:build": "tsc -b renderer && vite build --config renderer/vite.config.ts",
+    "dev": "npm run config && concurrently -k -s first -n renderer,electron \"npm run renderer:dev -- --host 127.0.0.1 --port 5173\" \"wait-on http://127.0.0.1:5173 && cross-env HIREME_DEV_PROFILE=1 HIREME_DEV_SERVER_URL=http://127.0.0.1:5173 electron .\"",
+    "check": "npm run config && node --check electron/main.mjs && node --check electron/auth.mjs && node --check electron/data.mjs && node --check electron/aiProviders.mjs && node --check electron/agentAuthoring.mjs && node --check electron/creatorWorker.mjs && node --check electron/creatorWorkerExecutor.mjs && node --check electron/designProjects.mjs && node --check electron/managementIpcError.mjs && node --check electron/runIpcError.mjs && node --check electron/rendererTrust.mjs && node --check electron/runLifecycle.mjs && node --check electron/preload.cjs",
+    "build": "npm run renderer:build && npm run check",
+    "package": "npm run config:required && npm run renderer:build && electron-builder --dir",
+    "dist": "npm run config:required && npm run renderer:build && electron-builder",
+    "test:auth": "node scripts/smoke-desktop-auth.mjs",
+    "test:data": "node scripts/smoke-desktop-data.mjs",
+    "test:ai": "node scripts/smoke-desktop-ai-settings.mjs",
+    "test:security": "node scripts/smoke-desktop-security.mjs",
+    "test:authoring": "node scripts/smoke-desktop-agent-authoring.mjs",
+    "test:worker": "node scripts/smoke-creator-worker.mjs"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.110.2",
+    "lucide-react": "latest",
+    "react": "latest",
+    "react-dom": "latest"
+  },
+  "devDependencies": {
+    "@types/node": "latest",
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "@vitejs/plugin-react": "latest",
+    "concurrently": "latest",
+    "cross-env": "latest",
+    "electron": "latest",
+    "electron-builder": "latest",
+    "typescript": "latest",
+    "vite": "latest",
+    "wait-on": "latest"
+  },
+  "build": {
+    "appId": "com.hireme.desktop",
+    "productName": "HireMe",
+    "asar": true,
+    "artifactName": "HireMe-${version}-${os}-${arch}.${ext}",
+    "directories": { "output": "../../release", "buildResources": "build" },
+    "files": ["renderer/dist/**/*", "electron/**/*", "package.json"],
+    "extraResources": [
+      { "from": "../../hireme-agent/cli", "to": "runtime/hireme-agent/cli", "filter": ["**/*"] },
+      { "from": "../../hireme-agent/runtime", "to": "runtime/hireme-agent/runtime", "filter": ["**/*"] },
+      { "from": "../../hireme-agent/examples", "to": "runtime/hireme-agent/examples", "filter": ["**/*"] },
+      { "from": "../../hireme-agent/scripts", "to": "runtime/hireme-agent/scripts", "filter": ["openai-codex-image-gen-native.mjs", "openai-codex-image-gen-bridge.mjs", "fixtures/codex-image-gen-fixture.mjs"] }
+    ],
+    "mac": { "category": "public.app-category.productivity", "target": ["dmg", "zip"], "icon": "build/icon.icns", "extendInfo": { "CFBundleURLTypes": [{ "CFBundleURLName": "HireMe Auth", "CFBundleURLSchemes": ["hireme"] }] } },
+    "dmg": { "sign": false }
+  }
+}

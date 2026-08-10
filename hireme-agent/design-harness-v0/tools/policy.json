@@ -1,0 +1,17 @@
+{
+  "schema": "hireme.design_harness.tool_policy.v1",
+  "default": "deny",
+  "allow": [
+    "list_files",
+    "search_files",
+    "read_file",
+    "write_file",
+    "hireme_list_local_specialist_agents",
+    "hireme_validate_local_specialist_agent",
+    "hireme_call_local_specialist_agent",
+    "hireme_validate_specialist_image_artifact",
+    "hireme_materialize_specialist_image_artifact"
+  ],
+  "deny": ["shell", "network.unrestricted", "plugin.executable", "credential.read"],
+  "limits": { "maxToolCalls": 24, "maxIterations": 12, "maxOutputBytes": 52428800 }
+}

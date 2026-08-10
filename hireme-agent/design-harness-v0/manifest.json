@@ -1,0 +1,23 @@
+{
+  "schema": "hireme.design_harness.manifest.v1",
+  "id": "design-harness-v0",
+  "version": "0.1.0",
+  "entryAgent": "design-director",
+  "workflow": "brand-social-campaign",
+  "skills": [
+    "brief-interpretation",
+    "brand-system-reasoning",
+    "visual-direction",
+    "design-quality-critique"
+  ],
+  "subagents": [
+    "brief-interpreter",
+    "brand-guardian",
+    "concept-explorer",
+    "production-designer",
+    "design-critic"
+  ],
+  "toolPolicy": "tools/policy.json",
+  "memoryPolicy": "memory/policy.md",
+  "evaluationPlan": "evals/plan.md"
+}

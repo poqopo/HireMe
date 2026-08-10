@@ -1,0 +1,19 @@
+{
+  "name": "@hireme/agent-harness",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "bin": { "hireme-agent": "cli/hireme.mjs" },
+  "scripts": {
+    "start": "node cli/hireme.mjs",
+    "runtime": "node runtime/src/index.mjs",
+    "test": "npm run test:core && npm run test:harness",
+    "test:core": "node scripts/smoke-standalone-agent.mjs && node scripts/smoke-hireme-cli.mjs",
+    "test:harness": "node scripts/smoke-local-specialist-agent.mjs && node scripts/smoke-local-specialist-creator.mjs && node scripts/smoke-specialist-memory.mjs",
+    "test:authoring": "node scripts/smoke-agent-authoring-layer.mjs && node scripts/smoke-management-mode.mjs",
+    "test:security": "node scripts/smoke-encrypted-agent-package.mjs && node scripts/smoke-protected-runtime-agent.mjs",
+    "test:billing": "node scripts/smoke-hybrid-execution-billing.mjs && node scripts/smoke-usage-ledger-quota.mjs",
+    "publish:agent": "node scripts/publish-agent-package.mjs"
+  },
+  "dependencies": { "@supabase/supabase-js": "^2.110.2" }
+}

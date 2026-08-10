@@ -1,0 +1,17 @@
+{
+  "name": "@hireme/supabase-control-plane",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "start": "supabase --workdir .. start",
+    "stop": "supabase --workdir .. stop",
+    "status": "supabase --workdir .. status",
+    "db:reset": "supabase --workdir .. db reset",
+    "functions:serve": "supabase --workdir .. functions serve",
+    "deploy:worker": "supabase --workdir .. functions deploy creator-worker",
+    "deploy:maintenance": "supabase --workdir .. functions deploy creator-worker-maintenance",
+    "types": "supabase --workdir .. gen types typescript --local > ../client-web/src/types/database.generated.ts",
+    "test": "node scripts/smoke-supabase.mjs"
+  },
+  "devDependencies": { "supabase": "latest" }
+}
