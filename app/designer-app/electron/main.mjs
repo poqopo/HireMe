@@ -413,6 +413,115 @@ ipcMain.handle("hireme:data:save-message", async (event, input) => {
   return dataService.saveMessage(input);
 });
 
+async function runAgentStudioGraph({ sender, user, input, resume }) {
+  const startedAt = Date.now();
+  const agentId = String(input?.agentId || "").trim().toLowerCase();
+  const conversationId = String(input?.conversationId || "").trim();
+  const runId = String(input?.runId || `studio-${Date.now().toString(36)}`).trim();
+  const task = String(input?.task || "").trim();
+  if (!/^[a-z0-9][a-z0-9._-]{0,79}$/.test(agentId)) throw new Error("Invalid Agent Studio agent id.");
+  if (!/^[a-zA-Z0-9._-]{1,160}$/.test(conversationId)) throw new Error("Invalid Agent Studio conversation id.");
+  if (!/^[a-zA-Z0-9._-]{1,120}$/.test(runId)) throw new Error("Invalid Agent Studio run id.");
+  if (!resume && !task) throw new Error("Agent Studio graph run requires a task.");
+  const managementSession = agentAuthoringService.authorizeManagement({
+    userId: user.id,
+    clientId: sender.id,
+    input,
+  });
+  if (activeRuns.has(runId)) throw new Error("A run with this id is already active.");
+  const aiRuntime = await aiProviderService.resolveRuntime({ user });
+  const root = runtimeRoot();
+  const cliPath = join(root, "hireme-agent", "cli", "hireme.mjs");
+  const stateDir = join(app.getPath("userData"), "runtime", user.id, "hireme-operator");
+  const specialistRoot = agentAuthoringService.pathsForUser(user.id).specialistRoot;
+  const commandArgs = [
+    cliPath,
+    "agent",
+    resume ? "graph-resume" : "graph-run",
+    agentId,
+    "--provider",
+    aiRuntime.provider,
+    ...(aiRuntime.model ? ["--model", aiRuntime.model] : []),
+    "--state-dir",
+    stateDir,
+    "--run-id",
+    runId,
+    "--event-stream",
+    ...(task ? ["--task", task] : []),
+    ...(resume ? ["--decision", String(input?.decision || "")] : []),
+  ];
+  const child = spawn(process.execPath, commandArgs, {
+    cwd: await existingDirectory(input?.workspace) ? resolve(input.workspace) : workspacePath,
+    env: {
+      ...process.env,
+      ...aiRuntime.env,
+      ELECTRON_RUN_AS_NODE: "1",
+      HIREME_LOCAL_SPECIALIST_ROOT: specialistRoot,
+      HIREME_USER_ID: user.id,
+      NO_COLOR: "1",
+      PATH: ensureRuntimePath(aiRuntime.env.PATH || process.env.PATH),
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  const active = activeRuns.register(runId, {
+    child,
+    userId: user.id,
+    clientId: sender.id,
+    conversationId,
+    agentId,
+    mode: "agent_authoring",
+    managementSessionId: managementSession.id,
+    startedAt,
+  });
+  scheduleAuthoringSessionExpiry(runId, active, managementSession.expiresAt);
+  let stdoutBuffer = "";
+  let stderr = "";
+  let graphResult = null;
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
+  child.stdout.on("data", (chunk) => {
+    stdoutBuffer += chunk;
+    const lines = stdoutBuffer.split(/\r?\n/);
+    stdoutBuffer = lines.pop() || "";
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      try {
+        const message = JSON.parse(line);
+        if (message.type === "graph_event") {
+          if (!sender.isDestroyed()) sender.send("hireme:agent-studio:event", {
+            runId,
+            conversationId,
+            agentId,
+            ...message.event,
+          });
+        } else if (message.type === "graph_result") {
+          graphResult = message.result;
+        }
+      } catch {
+        // Non-event output is retained only for the public failure message.
+      }
+    }
+  });
+  child.stderr.on("data", (chunk) => { stderr += chunk; });
+  try {
+    const exit = await new Promise((resolveExit, rejectExit) => {
+      child.once("error", rejectExit);
+      child.once("close", (code, signal) => resolveExit({ code, signal }));
+    });
+    if (exit.signal || exit.code !== 0 || !graphResult) {
+      throw Object.assign(new Error(publicProcessError(stderr || stdoutBuffer, exit.code)), {
+        code: active.cancelRequested ? "run_canceled" : "agent_graph_run_failed",
+      });
+    }
+    const publicResult = { ...graphResult };
+    delete publicResult.checkpoint;
+    return { ...publicResult, elapsedMs: Date.now() - startedAt };
+  } finally {
+    if (active.managementSessionExpiryTimer) clearTimeout(active.managementSessionExpiryTimer);
+    activeRuns.release(runId, active);
+  }
+}
+
 ipcMain.handle("hireme:agent:create-draft", managementIpc(async ({ input }) => {
   const user = requireAuthenticatedUser();
   return agentAuthoringService.createDraft({ userId: user.id, input });
@@ -480,6 +589,36 @@ ipcMain.handle("hireme:agent:update-private-harness", managementIpc(async ({ sen
     clientId: sender.id,
     input,
   });
+}));
+
+ipcMain.handle("hireme:agent-studio:snapshot", managementIpc(async ({ sender, input }) => {
+  const user = requireAuthenticatedUser();
+  return agentAuthoringService.getStudioSnapshot({ userId: user.id, clientId: sender.id, input });
+}));
+
+ipcMain.handle("hireme:agent-studio:preview-graph", managementIpc(async ({ sender, input }) => {
+  const user = requireAuthenticatedUser();
+  return agentAuthoringService.previewGraphPatch({ userId: user.id, clientId: sender.id, input });
+}));
+
+ipcMain.handle("hireme:agent-studio:apply-graph", managementIpc(async ({ sender, input }) => {
+  const user = requireAuthenticatedUser();
+  return agentAuthoringService.applyGraphPatch({ userId: user.id, clientId: sender.id, input });
+}));
+
+ipcMain.handle("hireme:agent-studio:save-layout", managementIpc(async ({ sender, input }) => {
+  const user = requireAuthenticatedUser();
+  return agentAuthoringService.saveStudioLayout({ userId: user.id, clientId: sender.id, input });
+}));
+
+ipcMain.handle("hireme:agent-studio:run", managementIpc(async ({ sender, input }) => {
+  const user = requireAuthenticatedUser();
+  return runAgentStudioGraph({ sender, user, input, resume: false });
+}));
+
+ipcMain.handle("hireme:agent-studio:resume", managementIpc(async ({ sender, input }) => {
+  const user = requireAuthenticatedUser();
+  return runAgentStudioGraph({ sender, user, input, resume: true });
 }));
 
 ipcMain.handle("hireme:agent:close-management", managementIpc(async ({ sender, input }) => {

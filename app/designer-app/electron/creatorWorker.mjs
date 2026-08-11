@@ -541,8 +541,15 @@ async function edgeErrorMessage(error) {
   try {
     const context = error?.context;
     if (context && typeof context.json === "function") {
-      const payload = await context.json();
+      const payload = await (typeof context.clone === "function" ? context.clone() : context).json();
       if (payload?.error) return String(payload.error);
+    }
+  } catch {}
+  try {
+    const context = error?.context;
+    if (context && typeof context.text === "function") {
+      const text = await (typeof context.clone === "function" ? context.clone() : context).text();
+      if (text.trim()) return text.trim().slice(0, 500);
     }
   } catch {}
   return error?.message || "Creator Worker 요청에 실패했습니다.";

@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { completeOpenAICodexText } from "./openaiCodexImageProvider.mjs";
 
 export function createModelProvider({
   provider = process.env.HIREME_AGENT_PROVIDER || "codex",
@@ -38,6 +39,11 @@ export function createModelProvider({
       maxOutputTokens,
     });
   }
+  if (normalizedProvider === "openai-codex") {
+    return createOpenAICodexOAuthProvider({
+      model: model || process.env.HIREME_OPENAI_CODEX_RESPONSES_MODEL,
+    });
+  }
   if (normalizedProvider === "ollama") {
     return createOllamaProvider({
       model:
@@ -56,6 +62,20 @@ export function createModelProvider({
     });
   }
   throw new Error(`Unsupported agent provider: ${provider}`);
+}
+
+function createOpenAICodexOAuthProvider({ model }) {
+  async function complete({ instructions, input, signal }) {
+    return completeOpenAICodexText({ instructions, input, model, signal });
+  }
+  return {
+    provider: "openai-codex",
+    model: model || "gpt-5.5",
+    complete,
+    async decide({ instructions, input, signal }) {
+      return parseDecision(await complete({ instructions, input, signal }));
+    },
+  };
 }
 
 function createCodexProvider({ model, workspaceDir }) {

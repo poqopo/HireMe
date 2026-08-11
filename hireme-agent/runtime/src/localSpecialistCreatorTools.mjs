@@ -24,6 +24,7 @@ import {
   isHostedSecureOnlyPath,
   isLocalProtectedOnlyPath,
 } from "./executionPolicy.mjs";
+import { createDefaultAgentGraph } from "./agentGraph.mjs";
 
 const inputSchemaVersion = "hireme.specialist_agent.input.v1";
 const outputSchemaVersion = "hireme.specialist_agent.output.v1";
@@ -704,6 +705,14 @@ function buildTemplateFiles(spec) {
     { path: "harness/policy.json", content: buildPolicyJson(spec) },
     { path: "harness/io-contract.md", content: buildIoContractMd(spec) },
     { path: "harness/routing.md", content: buildRoutingMd(spec) },
+    {
+      path: "workflow/graph.json",
+      content: JSON.stringify(createDefaultAgentGraph({
+        agentId: spec.id,
+        revision: 1,
+        skillRefs: spec.skills.map((skill) => String(skill).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")),
+      }), null, 2),
+    },
     { path: "skills/core-workflow.md", content: buildCoreWorkflowMd(spec) },
     { path: "skills/domain-checklist.md", content: buildDomainChecklistMd(spec) },
     { path: "skills/output-style.md", content: buildOutputStyleMd(spec) },

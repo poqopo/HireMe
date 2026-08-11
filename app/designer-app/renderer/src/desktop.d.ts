@@ -89,6 +89,7 @@ type HireMeDesktopChatRequest = {
 
 type HireMeAgentDraftWrite = {
   agentId: string;
+  databaseId?: string;
   name: string;
   category: string;
   headline: string;
@@ -186,6 +187,88 @@ type HireMePrivateHarnessUpdate = {
   phase: string;
   revision: number;
   valid: boolean;
+};
+
+type HireMeAgentGraphNode = {
+  id: string;
+  type: "intake" | "analyze" | "decide" | "explore" | "produce" | "evaluate" | "human_gate" | "deliver";
+  skillRef: string | null;
+  capabilities: string[];
+  completionGate: string[];
+  inputSchemaRef: string;
+  outputSchemaRef: string;
+};
+
+type HireMeAgentGraph = {
+  schema: "hireme.agent_graph.v1";
+  id: string;
+  agentId: string;
+  revision: number;
+  entryNodeId: string;
+  terminalNodeIds: string[];
+  budgets: { maxSteps: number; maxRevisionAttempts: number };
+  nodes: HireMeAgentGraphNode[];
+  edges: Array<{ from: string; to: string; when: string; loop?: "revision"; maxTraversals?: number }>;
+};
+
+type HireMeAgentStudioRequest = HireMePrivateHarnessRequest;
+type HireMeAgentStudioLayout = {
+  positions: Record<string, { x: number; y: number }>;
+  viewport: { x: number; y: number; zoom: number };
+};
+type HireMeAgentStudioSnapshot = {
+  schema: "hireme.desktop.agent_studio_snapshot.v1";
+  agentId: string;
+  conversationId: string;
+  revision: number;
+  phase: string;
+  graph: HireMeAgentGraph;
+  graphValidation: { valid: boolean; digest: string; errors: string[] };
+  skills: Array<{ id: string; title: string; description: string; tier: string }>;
+  layout: HireMeAgentStudioLayout;
+  readiness: Record<string, boolean>;
+};
+type HireMeAgentGraphPatch = {
+  middleOrder: string[];
+  exploreEnabled: boolean;
+  humanGateEnabled: boolean;
+  maxRevisionAttempts: number;
+  skillRefs: Record<string, string | null>;
+};
+type HireMeAgentGraphPatchPreview = {
+  schema: "hireme.desktop.agent_graph_patch_preview.v1";
+  agentId: string;
+  baseRevision: number;
+  candidateRevision: number;
+  baseDigest: string;
+  candidateDigest: string;
+  graph: HireMeAgentGraph;
+  validation: { valid: boolean; digest: string; errors: string[] };
+  diff: Record<string, unknown>;
+};
+type HireMeAgentGraphRunResult = {
+  schema: "hireme.agent_graph.execution.v1";
+  runId: string;
+  agentId: string;
+  status: "completed" | "waiting_for_human" | "blocked" | "failed" | "canceled";
+  reason: string | null;
+  graphRevision: number;
+  graphDigest: string;
+  outputText: string;
+  nodeSummaries: Record<string, { status: string; summary: string; outputChars: number; artifactCount: number }>;
+  elapsedMs: number;
+};
+type HireMeAgentGraphRunEvent = {
+  runId: string;
+  conversationId: string;
+  agentId: string;
+  type: "node_started" | "node_completed" | "graph_paused" | "graph_completed";
+  nodeId?: string;
+  nodeType?: string;
+  outcome?: string;
+  status?: string;
+  step?: number;
+  summary?: { status: string; summary: string; outputChars: number; artifactCount: number } | null;
 };
 
 type HireMeAgentPublishResult = {
@@ -401,6 +484,12 @@ interface Window {
     listPrivateHarnessFiles(input: HireMePrivateHarnessRequest): Promise<HireMePrivateHarnessFileList>;
     readPrivateHarnessFile(input: HireMePrivateHarnessRequest & { path: string }): Promise<HireMePrivateHarnessFile>;
     updatePrivateHarnessFile(input: HireMePrivateHarnessRequest & { path: string; content: string; expectedSha256: string }): Promise<HireMePrivateHarnessUpdate>;
+    getAgentStudioSnapshot(input: HireMeAgentStudioRequest): Promise<HireMeAgentStudioSnapshot>;
+    previewAgentGraphPatch(input: HireMeAgentStudioRequest & { expectedRevision: number; expectedGraphDigest: string; patch: HireMeAgentGraphPatch }): Promise<HireMeAgentGraphPatchPreview>;
+    applyAgentGraphPatch(input: HireMeAgentStudioRequest & { expectedRevision: number; expectedGraphDigest: string; patch: HireMeAgentGraphPatch }): Promise<{ status: "applied"; revision: number; phase: string; graph: HireMeAgentGraph; graphValidation: { valid: boolean; digest: string; errors: string[] } }>;
+    saveAgentStudioLayout(input: HireMeAgentStudioRequest & { layout: HireMeAgentStudioLayout }): Promise<{ agentId: string; layout: HireMeAgentStudioLayout }>;
+    runAgentStudioGraph(input: HireMeAgentStudioRequest & { runId: string; task: string; workspace?: string }): Promise<HireMeAgentGraphRunResult>;
+    resumeAgentStudioGraph(input: HireMeAgentStudioRequest & { runId: string; decision: "approved" | "revision_requested"; workspace?: string }): Promise<HireMeAgentGraphRunResult>;
     closeAgentManagement(input: HireMePrivateHarnessRequest): Promise<{ revoked: true; conversationId: string; agentId: string }>;
     publishAgentDraft(input: HireMePrivateHarnessRequest & { version: string }): Promise<HireMeAgentPublishResult>;
     getCreatorWorker(): Promise<HireMeCreatorWorkerState>;
@@ -422,6 +511,7 @@ interface Window {
     sendChat(request: HireMeDesktopChatRequest): Promise<HireMeDesktopChatResult>;
     cancelRun(runId: string): Promise<boolean>;
     onRunEvent(listener: (event: Record<string, unknown>) => void): () => void;
+    onAgentStudioEvent(listener: (event: HireMeAgentGraphRunEvent) => void): () => void;
     onAuthStateChanged(listener: (state: HireMeDesktopAuthState) => void): () => void;
     onAiSettingsChanged(listener: (settings: HireMeDesktopAiSettings) => void): () => void;
     onCreatorWorkerChanged(listener: (state: HireMeCreatorWorkerState) => void): () => void;

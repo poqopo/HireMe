@@ -20,6 +20,12 @@ contextBridge.exposeInMainWorld("hiremeDesktop", {
   listPrivateHarnessFiles: (input) => ipcRenderer.invoke("hireme:agent:list-private-harness", input),
   readPrivateHarnessFile: (input) => ipcRenderer.invoke("hireme:agent:read-private-harness", input),
   updatePrivateHarnessFile: (input) => ipcRenderer.invoke("hireme:agent:update-private-harness", input),
+  getAgentStudioSnapshot: (input) => ipcRenderer.invoke("hireme:agent-studio:snapshot", input),
+  previewAgentGraphPatch: (input) => ipcRenderer.invoke("hireme:agent-studio:preview-graph", input),
+  applyAgentGraphPatch: (input) => ipcRenderer.invoke("hireme:agent-studio:apply-graph", input),
+  saveAgentStudioLayout: (input) => ipcRenderer.invoke("hireme:agent-studio:save-layout", input),
+  runAgentStudioGraph: (input) => ipcRenderer.invoke("hireme:agent-studio:run", input),
+  resumeAgentStudioGraph: (input) => ipcRenderer.invoke("hireme:agent-studio:resume", input),
   closeAgentManagement: (input) => ipcRenderer.invoke("hireme:agent:close-management", input),
   publishAgentDraft: (input) => ipcRenderer.invoke("hireme:agent:publish-draft", input),
   getCreatorWorker: () => ipcRenderer.invoke("hireme:worker:get"),
@@ -44,6 +50,11 @@ contextBridge.exposeInMainWorld("hiremeDesktop", {
     const wrapped = (_event, payload) => listener(payload);
     ipcRenderer.on("hireme:run:event", wrapped);
     return () => ipcRenderer.removeListener("hireme:run:event", wrapped);
+  },
+  onAgentStudioEvent: (listener) => {
+    const wrapped = (_event, payload) => listener(payload);
+    ipcRenderer.on("hireme:agent-studio:event", wrapped);
+    return () => ipcRenderer.removeListener("hireme:agent-studio:event", wrapped);
   },
   onAuthStateChanged: (listener) => {
     const wrapped = (_event, payload) => listener(payload);

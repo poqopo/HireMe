@@ -18,6 +18,26 @@ local specialist Agent, or add a reusable private procedure to one.
      materialization.
    - `command` for specialists with a local adapter command.
 
+## Conversation-First Teaching
+
+When the creator does not already have a complete Harness specification:
+
+1. Start `hireme_start_agent_authoring_session` with the concrete job, audience,
+   outputs, success criteria, and non-goals. Surface only the remaining questions.
+2. Record labeled examples and explicit approval, rejection, selection,
+   correction, or revision feedback with `hireme_record_agent_authoring_feedback`.
+3. List built-in skills first and load a full skill only when needed. System
+   authoring skills are read-only; design starters may be copied with
+   `hireme_fork_builtin_agent_skill`.
+4. Compile `workflow/graph.json` with `hireme_compile_agent_graph`. Every cycle
+   must be a bounded revision edge and each run keeps its pinned revision.
+5. Create learning candidates with `hireme_propose_agent_skill_update`, include
+   the real user request and observable acceptance indicators, then compare the
+   isolated candidate with the baseline. Require a model-backed `improved`
+   comparison and explicit creator approval before applying a new revision.
+6. Use `hireme_rollback_agent_candidate` when an approved change regresses.
+   Rollback restores source as a new revision rather than rewriting history.
+
 ## Default Authoring Flow
 
 1. When the user starts from a job description, call

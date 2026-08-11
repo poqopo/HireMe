@@ -128,6 +128,33 @@ invalidates prior test/eval/package evidence. Use one skill per repeatable
 decision or procedure; verify the changed revision with the normal test and
 eval gates before packaging.
 
+## Conversation-first graph authoring
+
+The Authoring Engine collects a creator's job, audience, desired outputs,
+success criteria, non-goals, labeled examples, and explicit feedback without
+requiring direct file editing. It compiles those decisions into
+`workflow/graph.json` using `hireme.agent_graph.v1`.
+
+The graph uses typed `intake`, `analyze`, `decide`, `explore`, `produce`,
+`evaluate`, `human_gate`, and `deliver` nodes. Creative revision cycles are
+allowed only through bounded revision edges. A graph revision is pinned for the
+entire run.
+
+Skill learning uses explicit creator evidence only. It creates a private
+`hireme.skill_change_proposal.v1` candidate, validates a copy of the Agent,
+and requires creator approval. Approval advances the revision and invalidates
+stale test, eval, and package evidence. Rollback restores the old source as
+another revision.
+
+Approval additionally requires a behavioral comparison. Pass the real user
+request with `--task` and the observable acceptance indicators with
+`--expected-indicators`. HireMe runs the base and isolated candidate with the
+same request and a clean memory context. The candidate must be model-backed,
+contain every requested indicator, differ from the base output, and match more
+indicators than the base. Only then does comparison report `improved` and allow
+approval. Output text is never saved in authoring state; the comparison keeps
+only digests, lengths, statuses, and indicator matches.
+
 ## Memory Authoring
 
 Every template starts with two protected Bootstrap Memory records. They provide
@@ -179,6 +206,12 @@ It must not contain:
 
 Writes use a temporary file followed by an atomic rename so interrupted writes
 do not leave a partially written workflow document.
+
+Conversation sessions, explicit feedback records, and proposal state are kept
+separately under the creator-local `authoring/` state directory. Proposal state
+may contain the private base and candidate source needed for approval and
+rollback. Public tool results expose only hashes and metadata; this local state
+is not copied into Agent packages or DB publication payloads.
 
 ## DB Boundary
 

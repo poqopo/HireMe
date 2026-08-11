@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
-import { mkdir, readFile, stat, writeFile, chmod } from "node:fs/promises";
+import { chmod, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { homedir } from "node:os";
 import { basename, dirname, resolve } from "node:path";
@@ -107,10 +107,19 @@ export async function loginOpenAICodex({
   onAuth,
   manualCodeProvider,
   openBrowser = true,
+  signal = null,
+  timeoutMs = 10 * 60_000,
 } = {}) {
+  if (signal?.aborted) throw oauthAbortError(signal);
   const flow = await createAuthorizationFlow(originator);
   const server = await startCallbackServer(flow.state);
+  if (!server.listening) {
+    await server.close();
+    throw new Error("OpenAI 로그인 callback 서버를 시작하지 못했습니다. 다른 앱이 localhost:1455를 사용 중인지 확인해 주세요.");
+  }
   let code = "";
+  let timeout = null;
+  let removeAbortListener = null;
 
   try {
     await onAuth?.({
@@ -120,23 +129,25 @@ export async function loginOpenAICodex({
     });
     if (openBrowser) openUrl(flow.url);
 
-    const callbackPromise = server.waitForCode();
-    const manualPromise = manualCodeProvider
-      ? manualCodeProvider({ url: flow.url, state: flow.state }).then((value) => (
-          parseAuthorizationInput(value, flow.state)
-        ))
-      : Promise.resolve("");
-    code = await Promise.race([
-      callbackPromise.then((value) => value?.code || ""),
-      manualPromise,
-    ]);
-    if (!code) {
-      const callbackResult = await Promise.race([
-        callbackPromise,
-        wait(30_000).then(() => null),
-      ]);
-      code = callbackResult?.code || "";
+    const candidates = [
+      server.waitForCode().then((value) => value?.code || ""),
+    ];
+    if (manualCodeProvider) {
+      candidates.push(manualCodeProvider({ url: flow.url, state: flow.state })
+        .then((value) => parseAuthorizationInput(value, flow.state)));
     }
+    const codePromise = Promise.race(candidates.map((candidate) => candidate.then((value) => (
+      value ? value : new Promise(() => {})
+    ))));
+    const timeoutPromise = new Promise((_, reject) => {
+      timeout = setTimeout(() => reject(new Error("OpenAI Codex OAuth login timed out.")), normalizeTimeoutMs(timeoutMs));
+    });
+    const abortPromise = new Promise((_, reject) => {
+      const onAbort = () => reject(oauthAbortError(signal));
+      removeAbortListener = () => signal?.removeEventListener?.("abort", onAbort);
+      signal?.addEventListener?.("abort", onAbort, { once: true });
+    });
+    code = await Promise.race([codePromise, timeoutPromise, abortPromise]);
     if (!code) throw new Error("OpenAI Codex OAuth authorization code was not received.");
 
     const token = await exchangeAuthorizationCode({
@@ -168,8 +179,44 @@ export async function loginOpenAICodex({
       expires: profile.expires || null,
     };
   } finally {
+    if (timeout) clearTimeout(timeout);
+    removeAbortListener?.();
     await server.close();
   }
+}
+
+export async function logoutOpenAICodex({ authPath = openAICodexAuthPath() } = {}) {
+  await rm(authPath, { force: true });
+  return { authPath, configured: false };
+}
+
+export async function completeOpenAICodexText({
+  instructions,
+  input,
+  model = process.env.HIREME_OPENAI_CODEX_RESPONSES_MODEL || defaultResponsesModel,
+  authPath = openAICodexAuthPath(),
+  signal,
+} = {}) {
+  const accessToken = await resolveAccessToken({ authPath });
+  const responseBody = await postCodexResponses({
+    accessToken,
+    timeoutMs: defaultTimeoutMs,
+    signal,
+    body: {
+      model: String(model || defaultResponsesModel),
+      input: [{
+        role: "user",
+        content: [{
+          type: "input_text",
+          text: JSON.stringify(input || {}, null, 2),
+        }],
+      }],
+      instructions: String(instructions || "You are a helpful design agent."),
+      stream: true,
+      store: false,
+    },
+  });
+  return extractTextResult(responseBody);
 }
 
 export async function runOpenAICodexImageBridgeStdio({
@@ -306,13 +353,14 @@ async function resolveAccessToken({ authPath }) {
   return store.profiles[profileId].access;
 }
 
-async function postCodexResponses({ accessToken, body, timeoutMs }) {
+async function postCodexResponses({ accessToken, body, timeoutMs, signal = null }) {
   const baseUrl = normalizeBaseUrl(
     process.env.HIREME_OPENAI_CODEX_RESPONSES_BASE_URL ||
       defaultCodexResponsesBaseUrl,
   );
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  const requestSignal = signal ? AbortSignal.any([controller.signal, signal]) : controller.signal;
   try {
     const response = await fetch(`${baseUrl}/responses`, {
       method: "POST",
@@ -322,7 +370,7 @@ async function postCodexResponses({ accessToken, body, timeoutMs }) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify(body),
-      signal: controller.signal,
+      signal: requestSignal,
     });
     const text = await readBoundedResponseText(response);
     if (!response.ok) {
@@ -368,6 +416,27 @@ function extractImageGenerationResult({ body, outputFormat }) {
     mimeType: mimeTypeForOutputFormat(outputFormat),
     revisedPrompt: item.revised_prompt || null,
   };
+}
+
+function extractTextResult(body) {
+  const events = parseSseEvents(body);
+  const failure = events.find((event) => event.type === "response.failed" || event.type === "error");
+  if (failure) throw new Error(failure.error?.message || failure.message || "OpenAI Codex response failed.");
+  const completed = events.find((event) => event.type === "response.completed");
+  const completedText = completed?.response?.output
+    ?.flatMap((item) => Array.isArray(item?.content) ? item.content : [])
+    .filter((content) => content?.type === "output_text")
+    .map((content) => String(content.text || ""))
+    .join("")
+    .trim();
+  if (completedText) return completedText;
+  const streamedText = events
+    .filter((event) => event.type === "response.output_text.delta")
+    .map((event) => String(event.delta || ""))
+    .join("")
+    .trim();
+  if (streamedText) return streamedText;
+  throw new Error("OpenAI Codex response completed without text output.");
 }
 
 function parseSseEvents(text) {
@@ -562,6 +631,17 @@ function closeServer(server) {
   return new Promise((resolveClose) => {
     server.close(() => resolveClose());
   }).catch(() => {});
+}
+
+function normalizeTimeoutMs(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.max(5_000, Math.min(30 * 60_000, parsed)) : 10 * 60_000;
+}
+
+function oauthAbortError(signal) {
+  const reason = signal?.reason;
+  if (reason instanceof Error) return reason;
+  return Object.assign(new Error("OpenAI Codex OAuth login was canceled."), { code: "openai_codex_oauth_cancelled" });
 }
 
 function parseAuthorizationInput(value, expectedState) {

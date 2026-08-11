@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hireme.dev/schemas/revision-comparison.v1.json",
+  "title": "HireMe Revision Comparison",
+  "type": "object",
+  "required": ["schema", "agentId", "baseRevision", "candidateRevision", "verdict", "checks"],
+  "properties": {
+    "schema": { "const": "hireme.revision_comparison.v1" },
+    "agentId": { "type": "string" },
+    "baseRevision": { "type": "integer", "minimum": 1 },
+    "candidateRevision": { "type": "integer", "minimum": 1 },
+    "verdict": { "enum": ["improved", "equivalent", "regressed", "needs_evidence"] },
+    "checks": { "type": "array", "items": { "type": "object" } },
+    "behavioral": { "type": ["object", "null"] },
+    "cost": { "type": ["object", "null"] },
+    "latency": { "type": ["object", "null"] }
+  },
+  "additionalProperties": true
+}

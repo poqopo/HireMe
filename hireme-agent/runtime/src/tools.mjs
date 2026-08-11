@@ -443,6 +443,15 @@ const targetScopedAuthoringTools = new Set([
   "hireme_test_agent_draft",
   "hireme_evaluate_agent_draft",
   "hireme_package_agent_draft",
+  "hireme_start_agent_authoring_session",
+  "hireme_fork_builtin_agent_skill",
+  "hireme_get_agent_authoring_session",
+  "hireme_record_agent_authoring_feedback",
+  "hireme_compile_agent_graph",
+  "hireme_propose_agent_skill_update",
+  "hireme_compare_agent_candidate",
+  "hireme_decide_agent_candidate",
+  "hireme_rollback_agent_candidate",
 ]);
 
 function authoringPolicyTool(tool, targetAgentId) {

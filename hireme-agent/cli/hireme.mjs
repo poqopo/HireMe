@@ -2,7 +2,7 @@
 
 import { readFileSync } from "node:fs";
 import { spawn } from "node:child_process";
-import { appendFile, mkdir, readFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { emitKeypressEvents } from "node:readline";
 import { createInterface } from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
@@ -43,6 +43,7 @@ import {
   loadStandaloneAgentProfile,
 } from "../runtime/src/runtime.mjs";
 import { createDefaultTools } from "../runtime/src/tools.mjs";
+import { runLocalSpecialistAgentGraph } from "../runtime/src/agentGraphExecution.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 loadEnvFiles([resolve(process.cwd(), ".env"), resolve(process.cwd(), ".env.local"), resolve(repoRoot, ".env"), resolve(repoRoot, ".env.local")]);
@@ -67,6 +68,17 @@ const managementRuntimeToolNames = new Set([
   "hireme_add_agent_bootstrap_memory",
   "hireme_test_agent_draft",
   "hireme_evaluate_agent_draft",
+  "hireme_list_builtin_agent_skills",
+  "hireme_view_builtin_agent_skill",
+  "hireme_fork_builtin_agent_skill",
+  "hireme_start_agent_authoring_session",
+  "hireme_get_agent_authoring_session",
+  "hireme_record_agent_authoring_feedback",
+  "hireme_compile_agent_graph",
+  "hireme_propose_agent_skill_update",
+  "hireme_compare_agent_candidate",
+  "hireme_decide_agent_candidate",
+  "hireme_rollback_agent_candidate",
 ]);
 if (
   runtimeMode === "agent_authoring" &&
@@ -2321,6 +2333,14 @@ function printHelp() {
   hireme marketplace usage
   hireme agent list
   hireme agent templates
+  hireme agent builtin-skills
+  hireme agent teach <agent-id> --goal TEXT
+  hireme agent feedback <agent-id> --kind revision_requested --content TEXT
+  hireme agent graph <agent-id>
+  hireme agent graph-run <agent-id> --task TEXT [--run-id ID] [--event-stream]
+  hireme agent graph-resume <agent-id> --run-id ID --decision approved|revision_requested
+  hireme agent improve <agent-id> <skills/name.md> --instruction TEXT
+  hireme agent candidate compare|approve|reject|rollback <agent-id> <proposal-id>
   hireme agent init <agent-id> --brief "What this Agent should do"
   hireme agent create <agent-id> --name NAME [--template basic]
   hireme agent status <agent-id>
@@ -2328,6 +2348,7 @@ function printHelp() {
   hireme agent memory add <agent-id> --content TEXT [--key KEY]
   hireme agent memory replace <agent-id> --content TEXT [--key KEY]
   hireme agent skill add <agent-id> <skill-name> --purpose TEXT
+  hireme agent skill use <agent-id> <builtin-skill-id>
   hireme agent files <agent-id>
   hireme agent read <agent-id> <private-path>
   hireme agent edit <agent-id> <path> --content TEXT --overwrite
@@ -2364,6 +2385,16 @@ Options:
   --creator-id ID       Creator id to stamp on exported Agent packages
   --template NAME       Agent template: basic, artifact, image_spec, or command
   --brief TEXT          Creator brief used by agent init to tailor Harness, memory, and evals
+  --goal TEXT           Creator teaching-session goal
+  --audience TEXT       Intended user or recipient for a teaching session
+  --outcomes TEXT       Pipe-separated concrete Agent outputs
+  --instruction TEXT    Evidence-backed rule proposed for a private skill
+  --expected-impact TEXT
+                        Expected behavior change for a skill proposal
+  --evidence-refs CSV   Explicit authoring evidence ids for a skill proposal
+  --task TEXT           Real user request for baseline-versus-candidate behavior comparison
+  --expected-indicators CSV
+                        Required observable terms or phrases in the candidate response
   --success-criteria TEXT
                         Pipe-separated quality criteria for agent init
   --non-goals TEXT      Pipe-separated boundaries or out-of-scope rules for agent init
@@ -2378,7 +2409,7 @@ Options:
   --name NAME           Display name for agent create
   --content TEXT        UTF-8 content for agent edit
   --key KEY             Stable Bootstrap Memory key for agent memory add
-  --kind KIND           Memory kind: principle, preference, case, failure, fact, or note
+  --kind KIND           Memory kind or explicit feedback kind
   --tags CSV            Comma-separated Bootstrap Memory tags
   --priority NUMBER     Bootstrap Memory priority from 0 to 100
   --from-file PATH      Read agent edit content from a workspace file
@@ -2592,6 +2623,211 @@ async function handleAgentCommand(args, cliOptions = {}) {
     return;
   }
 
+  if (action === "builtin-skills" || action === "builtins") {
+    const listTool = byName.get("hireme_list_builtin_agent_skills");
+    if (!listTool) throw new Error("Built-in Agent skills are not available.");
+    const result = await listTool.handler({});
+    if (cliOptions.json) {
+      output.write(`${JSON.stringify(result, null, 2)}\n`);
+      return;
+    }
+    output.write("Built-in Agent skills:\n");
+    for (const skill of result.skills || []) {
+      output.write(`  ${skill.id}  ${skill.tier}  ${skill.purpose}\n`);
+    }
+    return;
+  }
+
+  if (action === "teach") {
+    const sessionAction = args[1] === "status" ? "status" : "start";
+    const agentId = sessionAction === "status" ? args[2] : args[1];
+    if (!agentId) {
+      output.write("usage: hireme agent teach <agent-id> --goal <job> [--audience TEXT]\n");
+      return;
+    }
+    const toolName = sessionAction === "status"
+      ? "hireme_get_agent_authoring_session"
+      : "hireme_start_agent_authoring_session";
+    const sessionTool = byName.get(toolName);
+    if (!sessionTool) throw new Error("Conversation-first Agent authoring is not available.");
+    if (sessionAction === "start" && !String(cliOptions.goal || "").trim()) {
+      output.write("usage: hireme agent teach <agent-id> --goal <job> [--audience TEXT]\n");
+      return;
+    }
+    const result = await sessionTool.handler({
+      agent_id: agentId,
+      session_id: cliOptions.sessionId,
+      goal: cliOptions.goal,
+      audience: cliOptions.audience,
+      outcomes: parseDetailList(cliOptions.outcomes),
+      success_criteria: parseDetailList(cliOptions.successCriteria),
+      non_goals: parseDetailList(cliOptions.nonGoals),
+    });
+    if (cliOptions.json) {
+      output.write(`${JSON.stringify(result, null, 2)}\n`);
+      return;
+    }
+    output.write([
+      `${result.status === "compiled" ? "compiled" : "teaching"} ${result.agentId}`,
+      `session: ${result.id}`,
+      `status: ${result.status}`,
+      `evidence: ${result.evidenceRefs?.length || 0}`,
+      ...(result.openQuestions || []).map((question) => `question: ${question}`),
+      "",
+    ].join("\n"));
+    return;
+  }
+
+  if (action === "feedback") {
+    const agentId = args[1] || cliOptions.agentId;
+    const feedback = String(cliOptions.content || args.slice(2).join(" ") || "").trim();
+    if (!agentId || !cliOptions.kind || !feedback) {
+      output.write("usage: hireme agent feedback <agent-id> --kind <kind> --content <explicit feedback>\n");
+      return;
+    }
+    const feedbackTool = byName.get("hireme_record_agent_authoring_feedback");
+    if (!feedbackTool) throw new Error("Agent authoring feedback is not available.");
+    const result = await feedbackTool.handler({
+      agent_id: agentId,
+      session_id: cliOptions.sessionId,
+      kind: cliOptions.kind,
+      feedback,
+      evaluation_task: cliOptions.task,
+      target_node_id: cliOptions.targetNode,
+      target_skill: cliOptions.targetSkill,
+    });
+    if (cliOptions.json) output.write(`${JSON.stringify(result, null, 2)}\n`);
+    else output.write(`recorded ${result.kind} evidence ${result.id}\nsession: ${result.sessionId}\n`);
+    return;
+  }
+
+  if (action === "graph") {
+    const agentId = args[1] || cliOptions.agentId;
+    if (!agentId) {
+      output.write("usage: hireme agent graph <agent-id> [--session-id ID]\n");
+      return;
+    }
+    const graphTool = byName.get("hireme_compile_agent_graph");
+    if (!graphTool) throw new Error("Agent graph authoring is not available.");
+    const result = await graphTool.handler({
+      agent_id: agentId,
+      session_id: cliOptions.sessionId,
+      skill_refs: parseCommaList(cliOptions.skills),
+      max_revision_attempts: cliOptions.maxRevisionAttempts,
+    });
+    if (cliOptions.json) {
+      output.write(`${JSON.stringify(result, null, 2)}\n`);
+      return;
+    }
+    output.write([
+      `compiled graph for ${result.agentId}`,
+      `digest: ${result.validation.digest}`,
+      `nodes: ${result.validation.nodeCount}`,
+      `edges: ${result.validation.edgeCount}`,
+      `revision: ${result.workflow.revision}`,
+      "",
+    ].join("\n"));
+    return;
+  }
+
+  if (action === "graph-run" || action === "graph-resume") {
+    const agentId = args[1] || cliOptions.agentId;
+    if (action === "graph-resume" && !cliOptions.runId) {
+      output.write("usage: hireme agent graph-resume <agent-id> --run-id ID --decision approved|revision_requested [--event-stream]\n");
+      return;
+    }
+    const runId = safeName(cliOptions.runId || `graph-${Date.now().toString(36)}`);
+    const task = String(cliOptions.task || args.slice(2).join(" ") || "").trim();
+    if (!agentId || (action === "graph-run" && !task)) {
+      output.write("usage: hireme agent graph-run <agent-id> --task <request> [--run-id ID] [--event-stream]\n");
+      return;
+    }
+    const graphRunDir = resolve(stateDir, "graph-runs");
+    const checkpointPath = resolve(graphRunDir, `${runId}.json`);
+    let checkpoint = null;
+    if (action === "graph-resume") {
+      checkpoint = JSON.parse(await readFile(checkpointPath, "utf8"));
+    }
+    const eventStream = cliOptions.eventStream === true;
+    const result = await runLocalSpecialistAgentGraph({
+      root: process.env.HIREME_LOCAL_SPECIALIST_ROOT || resolve(repoRoot, "examples/local-specialist-agents"),
+      stateDir: resolve(stateDir, "graph-memory", runId),
+      agent_id: agentId,
+      task,
+      modelProvider: activeProvider,
+      runId,
+      checkpoint,
+      decision: cliOptions.decision,
+      onEvent: (event) => {
+        if (eventStream) output.write(`${JSON.stringify({ type: "graph_event", runId, event })}\n`);
+      },
+    });
+    await mkdir(graphRunDir, { recursive: true });
+    const temporaryPath = `${checkpointPath}.${process.pid}.tmp`;
+    await writeFile(temporaryPath, `${JSON.stringify(result.checkpoint, null, 2)}\n`, "utf8");
+    await rename(temporaryPath, checkpointPath);
+    if (eventStream) output.write(`${JSON.stringify({ type: "graph_result", runId, result })}\n`);
+    else if (cliOptions.json) output.write(`${JSON.stringify(result, null, 2)}\n`);
+    else output.write(`${result.outputText || result.status}\n`);
+    return;
+  }
+
+  if (action === "improve") {
+    const agentId = args[1] || cliOptions.agentId;
+    const targetPath = args[2] || cliOptions.path;
+    const instruction = String(cliOptions.instruction || args.slice(3).join(" ") || "").trim();
+    if (!agentId || !targetPath || !instruction) {
+      output.write("usage: hireme agent improve <agent-id> <skills/name.md> --instruction <rule>\n");
+      return;
+    }
+    const proposalTool = byName.get("hireme_propose_agent_skill_update");
+    if (!proposalTool) throw new Error("Agent skill proposals are not available.");
+    const result = await proposalTool.handler({
+      agent_id: agentId,
+      session_id: cliOptions.sessionId,
+      target_path: targetPath,
+      instruction,
+      expected_impact: cliOptions.expectedImpact,
+      evidence_refs: parseCommaList(cliOptions.evidenceRefs),
+      evaluation_task: cliOptions.task,
+      expected_indicators: parseCommaList(cliOptions.expectedIndicators),
+    });
+    if (cliOptions.json) output.write(`${JSON.stringify(result, null, 2)}\n`);
+    else output.write(`proposed ${result.id}\ntarget: ${result.targetPath}\nbase revision: ${result.baseRevision}\nnext: hireme agent candidate compare ${agentId} ${result.id}\n`);
+    return;
+  }
+
+  if (action === "candidate") {
+    const candidateAction = args[1];
+    const agentId = args[2] || cliOptions.agentId;
+    const proposalId = args[3] || cliOptions.proposalId;
+    if (!candidateAction || !agentId || !proposalId) {
+      output.write("usage: hireme agent candidate compare|approve|reject|rollback <agent-id> <proposal-id>\n");
+      return;
+    }
+    let result;
+    if (candidateAction === "compare") {
+      const compareTool = byName.get("hireme_compare_agent_candidate");
+      result = await compareTool.handler({ agent_id: agentId, proposal_id: proposalId });
+    } else if (["approve", "reject"].includes(candidateAction)) {
+      const decideTool = byName.get("hireme_decide_agent_candidate");
+      result = await decideTool.handler({
+        agent_id: agentId,
+        proposal_id: proposalId,
+        decision: candidateAction === "approve" ? "approved" : "rejected",
+      });
+    } else if (candidateAction === "rollback") {
+      const rollbackTool = byName.get("hireme_rollback_agent_candidate");
+      result = await rollbackTool.handler({ agent_id: agentId, proposal_id: proposalId });
+    } else {
+      throw new Error(`Unsupported candidate action: ${candidateAction}`);
+    }
+    if (cliOptions.json) output.write(`${JSON.stringify(result, null, 2)}\n`);
+    else if (candidateAction === "compare") output.write(`candidate verdict: ${result.verdict}\nchecks: ${result.checks.filter((check) => check.passed).length}/${result.checks.length}\n`);
+    else output.write(`candidate ${result.status}\nrevision: ${result.workflow?.revision || result.appliedRevision || result.rollbackRevision || "unchanged"}\n`);
+    return;
+  }
+
   if (action === "create" || action === "new") {
     const agentId = args[1] || cliOptions.agentId;
     if (!agentId) {
@@ -2747,8 +2983,27 @@ async function handleAgentCommand(args, cliOptions = {}) {
 
   if (action === "skill" || action === "skills") {
     const skillAction = args[1] || "add";
+    if (skillAction === "use" || skillAction === "fork") {
+      const agentId = args[2] || cliOptions.agentId;
+      const builtinSkillId = args[3] || cliOptions.skillId;
+      if (!agentId || !builtinSkillId) {
+        output.write("usage: hireme agent skill use <agent-id> <builtin-skill-id>\n");
+        return;
+      }
+      const forkTool = byName.get("hireme_fork_builtin_agent_skill");
+      if (!forkTool) throw new Error("Built-in skill forking is not available.");
+      const result = await forkTool.handler({
+        agent_id: agentId,
+        skill_id: builtinSkillId,
+        target_skill_name: cliOptions.skillName,
+        overwrite: cliOptions.overwrite === true,
+      });
+      if (cliOptions.json) output.write(`${JSON.stringify(result, null, 2)}\n`);
+      else output.write(`forked ${result.sourceSkillId}\npath: ${result.targetPath}\nrevision: ${result.workflow.revision}\n`);
+      return;
+    }
     if (!["add", "create"].includes(skillAction)) {
-      output.write("usage: hireme agent skill add <agent-id> <skill-name> --purpose <reusable procedure>\n");
+      output.write("usage: hireme agent skill add <agent-id> <skill-name> --purpose <reusable procedure> | skill use <agent-id> <builtin-skill-id>\n");
       return;
     }
     const agentId = args[2] || cliOptions.agentId;
@@ -3796,6 +4051,7 @@ function parseArgs(argv) {
         "skipEval",
         "noValidate",
         "replace",
+        "eventStream",
       ].includes(key)
     ) {
       parsed[key] = true;

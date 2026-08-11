@@ -24,6 +24,7 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.110.2",
+    "@xyflow/react": "^12.11.2",
     "lucide-react": "latest",
     "react": "latest",
     "react-dom": "latest"

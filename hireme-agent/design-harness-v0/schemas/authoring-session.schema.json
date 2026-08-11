@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hireme.dev/schemas/authoring-session.v1.json",
+  "title": "HireMe Authoring Session",
+  "type": "object",
+  "required": ["schema", "id", "agentId", "status", "goal", "decisions", "openQuestions", "evidenceRefs"],
+  "properties": {
+    "schema": { "const": "hireme.authoring_session.v1" },
+    "id": { "type": "string" },
+    "agentId": { "type": "string" },
+    "status": { "enum": ["collecting", "ready_to_compile", "compiled", "closed"] },
+    "goal": { "type": "string", "minLength": 12 },
+    "decisions": { "type": "object" },
+    "openQuestions": { "type": "array", "items": { "type": "string" } },
+    "evidenceRefs": { "type": "array", "items": { "type": "string" } }
+  },
+  "additionalProperties": true
+}

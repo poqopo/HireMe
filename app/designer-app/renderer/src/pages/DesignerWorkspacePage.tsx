@@ -52,13 +52,17 @@ import {
   KeyboardEvent,
   PointerEvent as ReactPointerEvent,
   ReactNode,
+  Suspense,
+  lazy,
   useCallback,
   useEffect,
   useRef,
   useState,
 } from "react";
 
-type ViewId = "studio" | "chat" | "discover" | "agents" | "earnings" | "review";
+const AgentStudio = lazy(() => import("../components/AgentStudio").then((module) => ({ default: module.AgentStudio })));
+
+type ViewId = "studio" | "agent-studio" | "chat" | "discover" | "agents" | "earnings" | "review";
 type AgentCategory = "디자인" | "글쓰기" | "비즈니스" | "리서치" | "생산성";
 type BillingMode = "run" | "subscription" | "hybrid";
 type AgentOwnership = "mine" | "market";
@@ -1279,6 +1283,7 @@ function HireMeWorkspace({
         const ready = await window.hiremeDesktop.prepareAgentManagement({
           conversationId,
           agentId: agent.id,
+          databaseId: agent.databaseId,
           name: agent.name,
           category: agent.category,
           headline: agent.headline,
@@ -1305,6 +1310,7 @@ function HireMeWorkspace({
           title: `${agent.name} 관리`,
         });
       }
+      setView("agent-studio");
       showToast("관리 모드를 열었어요", "검증된 관리 세션에서 Private Harness를 확인하고 수정할 수 있습니다.");
     } catch (error) {
       showToast("관리 모드를 열지 못했어요", publicErrorMessage(error));
@@ -2009,6 +2015,7 @@ function HireMeWorkspace({
   const managementInspectorOpen = view === "chat" && activeAuthoring;
   const inspectorClosed =
     view === "studio" ||
+    view === "agent-studio" ||
     view === "discover" ||
     view === "agents" ||
     (view === "chat" && !managementInspectorOpen);
@@ -2221,6 +2228,31 @@ function HireMeWorkspace({
           />
         )}
 
+        {view === "agent-studio" && activeConversation && activeAgent && activeManagementSession && (
+          <Suspense fallback={<div className="agent-studio-loading"><LoaderCircle className="spin" size={20} /> Agent Studio를 불러오고 있어요</div>}>
+            <AgentStudio
+              key={`${activeAgent.id}:${activeManagementSession.id}`}
+              agent={activeAgent}
+              conversation={activeConversation}
+              managementSession={activeManagementSession}
+              workspace={workspace}
+              runActive={Boolean(runs[activeConversation.id])}
+              onBack={() => navigateToView("agents")}
+              onOpenChat={() => setView("chat")}
+              onCoachSend={(text) => sendMessage(text, [])}
+              onCancelRun={(runId) => { void window.hiremeDesktop?.cancelRun(runId); }}
+              onNotify={showToast}
+              onRevisionChange={(phase, revision) => {
+                setAgents((current) => current.map((item) => (
+                  item.id === activeAgent.id
+                    ? { ...item, authoring: { ...item.authoring, phase, revision } }
+                    : item
+                )));
+              }}
+            />
+          </Suspense>
+        )}
+
         {view === "discover" && (
           <ProjectStartView
             agents={agents.filter((agent) => !isRetiredMockAgent(agent))}
@@ -2406,6 +2438,7 @@ function HireMeWorkspace({
                 const ready = await window.hiremeDesktop.prepareAgentManagement({
                   conversationId,
                   agentId: target.id,
+                  databaseId: target.databaseId,
                   name: String(updates.name || target.name),
                   category: String(updates.category || target.category),
                   headline: String(updates.headline || target.headline),

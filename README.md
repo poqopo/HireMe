@@ -38,6 +38,11 @@ npm run supabase:start
 npm run agent:start -- --help
 ```
 
+Designer App에서 `My Agents`의 Agent를 열고 `관리`를 선택하면 그래프 중심의
+Agent Studio로 진입한다. 캔버스에서 안전한 실행 순서, 노드별 private skill,
+Explore/Human Gate, 수정 횟수를 조절한 뒤 변경 미리보기와 Apply를 거친다.
+Playground는 실제 그래프를 실행하고 Human Gate에서 승인 또는 수정 요청을 기다린다.
+
 ## Verify
 
 ```bash

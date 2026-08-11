@@ -106,9 +106,17 @@ function normalizeMime(value, path) {
 
 async function edgeErrorMessage(error) {
   try {
-    if (error?.context && typeof error.context.json === "function") {
-      const payload = await error.context.json();
+    const context = error?.context;
+    if (context && typeof context.json === "function") {
+      const payload = await (typeof context.clone === "function" ? context.clone() : context).json();
       if (payload?.error) return String(payload.error);
+    }
+  } catch {}
+  try {
+    const context = error?.context;
+    if (context && typeof context.text === "function") {
+      const text = await (typeof context.clone === "function" ? context.clone() : context).text();
+      if (text.trim()) return text.trim().slice(0, 500);
     }
   } catch {}
   return error?.message || "디자인 프로젝트 요청에 실패했습니다.";

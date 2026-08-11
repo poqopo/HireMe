@@ -32,6 +32,7 @@ export function createDesktopAgentAuthoringService({
 
   let authoringModulePromise = null;
   let creatorModulePromise = null;
+  let graphModulePromise = null;
   const managementSessions = new Map();
 
   const loadAuthoringModule = () => {
@@ -46,6 +47,13 @@ export function createDesktopAgentAuthoringService({
       join(resolve(runtimeRoot), "hireme-agent/runtime/src/localSpecialistCreatorTools.mjs"),
     ).href);
     return creatorModulePromise;
+  };
+
+  const loadGraphModule = () => {
+    graphModulePromise ||= import(pathToFileURL(
+      join(resolve(runtimeRoot), "hireme-agent/runtime/src/agentGraph.mjs"),
+    ).href);
+    return graphModulePromise;
   };
 
   const authoringPaths = (userId) => {
@@ -411,6 +419,128 @@ export function createDesktopAgentAuthoringService({
       };
     },
 
+    async getStudioSnapshot({ userId, clientId, input } = {}) {
+      const session = requireManagementSession({
+        managementSessions,
+        userId,
+        clientId,
+        conversationId: input?.conversationId,
+        agentId: input?.agentId,
+        sessionId: input?.managementSessionId,
+      });
+      const { tools, paths } = await toolsFor(userId);
+      const statusTool = requireTool(tools, "hireme_get_agent_authoring_status");
+      const skillsTool = requireTool(tools, "hireme_list_builtin_agent_skills");
+      const graphPath = join(paths.specialistRoot, session.agentId, "workflow/graph.json");
+      const [status, catalog, graphText, layout] = await Promise.all([
+        statusTool.handler({ agent_id: session.agentId, refresh_validation: true }),
+        skillsTool.handler({}),
+        readFile(graphPath, "utf8"),
+        readStudioLayout(paths.stateRoot, session.agentId),
+      ]);
+      const graph = JSON.parse(graphText);
+      const graphModule = await loadGraphModule();
+      const validation = graphModule.validateAgentGraph(graph);
+      return {
+        schema: "hireme.desktop.agent_studio_snapshot.v1",
+        agentId: session.agentId,
+        conversationId: session.conversationId,
+        revision: status.workflow?.revision || graph.revision,
+        phase: status.workflow?.phase || "draft",
+        graph,
+        graphValidation: validation,
+        skills: (catalog.skills || []).filter((skill) => skill.tier === "design_starter"),
+        layout,
+        readiness: status.workflow?.readiness || {},
+      };
+    },
+
+    async previewGraphPatch({ userId, clientId, input } = {}) {
+      const session = requireManagementSession({
+        managementSessions,
+        userId,
+        clientId,
+        conversationId: input?.conversationId,
+        agentId: input?.agentId,
+        sessionId: input?.managementSessionId,
+      });
+      const { tools, paths } = await toolsFor(userId);
+      const statusTool = requireTool(tools, "hireme_get_agent_authoring_status");
+      const [status, graphText, graphModule] = await Promise.all([
+        statusTool.handler({ agent_id: session.agentId, refresh_validation: true }),
+        readFile(join(paths.specialistRoot, session.agentId, "workflow/graph.json"), "utf8"),
+        loadGraphModule(),
+      ]);
+      const graph = JSON.parse(graphText);
+      const currentRevision = Number(status.workflow?.revision || 0);
+      const currentValidation = graphModule.validateAgentGraph(graph);
+      if (Number(input?.expectedRevision) !== currentRevision || input?.expectedGraphDigest !== currentValidation.digest) {
+        throw managementError("Agent graph changed. Refresh Studio before applying this edit.", "agent_graph_revision_conflict");
+      }
+      const candidate = applyGuidedGraphPatch(graph, input?.patch, currentRevision + 1);
+      const validation = graphModule.validateAgentGraph(candidate);
+      if (!validation.valid) throw managementError(validation.errors.join("; "), "invalid_agent_graph_patch");
+      return {
+        schema: "hireme.desktop.agent_graph_patch_preview.v1",
+        agentId: session.agentId,
+        baseRevision: currentRevision,
+        candidateRevision: currentRevision + 1,
+        baseDigest: currentValidation.digest,
+        candidateDigest: validation.digest,
+        graph: candidate,
+        validation,
+        diff: summarizeGraphDiff(graph, candidate),
+      };
+    },
+
+    async applyGraphPatch({ userId, clientId, input } = {}) {
+      const preview = await this.previewGraphPatch({ userId, clientId, input });
+      const session = requireManagementSession({
+        managementSessions,
+        userId,
+        clientId,
+        conversationId: input?.conversationId,
+        agentId: input?.agentId,
+        sessionId: input?.managementSessionId,
+      });
+      const { tools } = await toolsFor(userId);
+      const updateTool = requireTool(tools, "hireme_update_agent_draft_file");
+      const result = await updateTool.handler({
+        agent_id: session.agentId,
+        path: "workflow/graph.json",
+        content: `${JSON.stringify(preview.graph, null, 2)}\n`,
+        overwrite: true,
+        validate_after_update: true,
+      });
+      return {
+        schema: "hireme.desktop.agent_graph_patch_apply.v1",
+        status: "applied",
+        agentId: session.agentId,
+        graph: preview.graph,
+        graphValidation: preview.validation,
+        diff: preview.diff,
+        revision: result.workflow?.revision || preview.candidateRevision,
+        phase: result.workflow?.phase || "valid",
+      };
+    },
+
+    async saveStudioLayout({ userId, clientId, input } = {}) {
+      const session = requireManagementSession({
+        managementSessions,
+        userId,
+        clientId,
+        conversationId: input?.conversationId,
+        agentId: input?.agentId,
+        sessionId: input?.managementSessionId,
+      });
+      const paths = authoringPaths(userId);
+      const layout = normalizeStudioLayout(input?.layout);
+      const target = studioLayoutPath(paths.stateRoot, session.agentId);
+      await mkdir(join(paths.stateRoot, "authoring", "layouts"), { recursive: true });
+      await writeFile(target, `${JSON.stringify(layout, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+      return { schema: "hireme.desktop.agent_studio_layout.v1", agentId: session.agentId, layout };
+    },
+
     async updatePrivateHarnessFile({ userId, clientId, input } = {}) {
       const session = requireManagementSession({
         managementSessions,
@@ -758,6 +888,109 @@ function isManagedHarnessPath(pathValue) {
   const extensionIndex = path.lastIndexOf(".");
   const extension = extensionIndex >= 0 ? path.slice(extensionIndex).toLowerCase() : "";
   return managedHarnessTextExtensions.has(extension);
+}
+
+function applyGuidedGraphPatch(baseGraph, rawPatch, revision) {
+  const patch = rawPatch && typeof rawPatch === "object" ? rawPatch : {};
+  const nodeMap = new Map((baseGraph.nodes || []).map((node) => [node.id, structuredClone(node)]));
+  const requestedOrder = Array.isArray(patch.middleOrder) ? patch.middleOrder.map(String) : ["analyze", "decide", "explore"];
+  const exploreEnabled = patch.exploreEnabled !== false;
+  const humanGateEnabled = patch.humanGateEnabled !== false;
+  const allowedMiddle = new Set(["analyze", "decide", "explore"]);
+  if (requestedOrder.some((id) => !allowedMiddle.has(id)) || new Set(requestedOrder).size !== requestedOrder.length) {
+    throw managementError("Only analyze, decide, and explore may be reordered.", "invalid_agent_graph_patch");
+  }
+  const middleOrder = requestedOrder.filter((id) => exploreEnabled || id !== "explore");
+  for (const required of ["analyze", "decide"]) {
+    if (!middleOrder.includes(required)) throw managementError(`${required} is required.`, "invalid_agent_graph_patch");
+  }
+  if (exploreEnabled && !middleOrder.includes("explore")) middleOrder.push("explore");
+  const skillRefs = patch.skillRefs && typeof patch.skillRefs === "object" ? patch.skillRefs : {};
+  for (const [nodeId, skillRefValue] of Object.entries(skillRefs)) {
+    if (!nodeMap.has(nodeId)) throw managementError(`Unknown graph node: ${nodeId}`, "invalid_agent_graph_patch");
+    const skillRef = String(skillRefValue || "").trim();
+    if (skillRef && !/^[a-z0-9][a-z0-9._-]{0,159}$/.test(skillRef)) {
+      throw managementError(`Invalid skill reference for ${nodeId}.`, "invalid_agent_graph_patch");
+    }
+    nodeMap.get(nodeId).skillRef = skillRef || null;
+  }
+  const path = ["intake", ...middleOrder, "produce", "evaluate", ...(humanGateEnabled ? ["human-gate"] : []), "deliver"];
+  const nodes = path.map((id) => nodeMap.get(id)).filter(Boolean);
+  if (nodes.length !== path.length) throw managementError("The Agent graph is missing a protected node.", "invalid_agent_graph_patch");
+  const maxRevisionAttempts = clampInteger(patch.maxRevisionAttempts, 1, 5, baseGraph.budgets?.maxRevisionAttempts || 2);
+  const edges = [];
+  for (let index = 0; index < path.indexOf("evaluate"); index += 1) {
+    edges.push({ from: path[index], to: path[index + 1], when: "completed" });
+  }
+  edges.push({
+    from: "evaluate",
+    to: humanGateEnabled ? "human-gate" : "deliver",
+    when: "passed",
+  });
+  edges.push({ from: "evaluate", to: "produce", when: "revise", loop: "revision", maxTraversals: maxRevisionAttempts });
+  if (humanGateEnabled) {
+    edges.push({ from: "human-gate", to: "deliver", when: "approved" });
+    edges.push({ from: "human-gate", to: "produce", when: "revision_requested", loop: "revision", maxTraversals: maxRevisionAttempts });
+  }
+  return {
+    ...structuredClone(baseGraph),
+    revision,
+    nodes,
+    edges,
+    budgets: {
+      maxSteps: Math.max(nodes.length, Math.min(200, Number(baseGraph.budgets?.maxSteps) || 24)),
+      maxRevisionAttempts,
+    },
+  };
+}
+
+function summarizeGraphDiff(baseGraph, candidateGraph) {
+  const baseSkills = Object.fromEntries((baseGraph.nodes || []).map((node) => [node.id, node.skillRef || null]));
+  const candidateSkills = Object.fromEntries((candidateGraph.nodes || []).map((node) => [node.id, node.skillRef || null]));
+  const changedSkills = Object.keys(candidateSkills).filter((id) => baseSkills[id] !== candidateSkills[id]);
+  return {
+    middleOrder: candidateGraph.nodes.map((node) => node.id).filter((id) => ["analyze", "decide", "explore"].includes(id)),
+    exploreEnabled: candidateGraph.nodes.some((node) => node.id === "explore"),
+    humanGateEnabled: candidateGraph.nodes.some((node) => node.id === "human-gate"),
+    maxRevisionAttempts: candidateGraph.budgets.maxRevisionAttempts,
+    changedSkills,
+  };
+}
+
+function normalizeStudioLayout(value) {
+  const raw = value && typeof value === "object" ? value : {};
+  const positions = {};
+  for (const [nodeId, position] of Object.entries(raw.positions || {})) {
+    if (!/^[a-z0-9][a-z0-9._-]{0,79}$/.test(nodeId)) continue;
+    const x = Number(position?.x);
+    const y = Number(position?.y);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+    positions[nodeId] = { x: Math.max(-10_000, Math.min(10_000, x)), y: Math.max(-10_000, Math.min(10_000, y)) };
+  }
+  return {
+    positions,
+    viewport: {
+      x: Number.isFinite(Number(raw.viewport?.x)) ? Number(raw.viewport.x) : 0,
+      y: Number.isFinite(Number(raw.viewport?.y)) ? Number(raw.viewport.y) : 0,
+      zoom: Math.max(0.2, Math.min(2, Number(raw.viewport?.zoom) || 1)),
+    },
+  };
+}
+
+function studioLayoutPath(stateRoot, agentId) {
+  return join(resolve(stateRoot), "authoring", "layouts", `${normalizeAgentId(agentId)}.json`);
+}
+
+async function readStudioLayout(stateRoot, agentId) {
+  return readFile(studioLayoutPath(stateRoot, agentId), "utf8")
+    .then(JSON.parse)
+    .then(normalizeStudioLayout)
+    .catch(() => normalizeStudioLayout(null));
+}
+
+function clampInteger(value, min, max, fallback) {
+  const number = Number(value);
+  return Number.isInteger(number) ? Math.max(min, Math.min(max, number)) : fallback;
 }
 
 function normalizeConversationId(value) {

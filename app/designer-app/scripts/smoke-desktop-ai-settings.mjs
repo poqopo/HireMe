@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { createModelProvider } from "../../../hireme-agent/runtime/src/providers.mjs";
 import {
   createAiProviderService,
@@ -11,8 +11,7 @@ import {
 } from "../electron/aiProviders.mjs";
 
 const tempRoot = resolve(".hireme/tmp/desktop-ai-settings-smoke");
-const fixturePath = resolve("scripts/fixtures/codex-login-fixture.mjs");
-const execFixturePath = resolve("scripts/fixtures/codex-exec-fixture.mjs");
+const execFixturePath = resolve("../../hireme-agent/scripts/fixtures/codex-exec-fixture.mjs");
 const userId = randomUUID();
 const secondUserId = randomUUID();
 await rm(tempRoot, { recursive: true, force: true });
@@ -39,11 +38,10 @@ try {
   const service = createAiProviderService({
     userDataDir: tempRoot,
     fetchImpl: ollamaFetch,
-    codexCommandResolver: async () => ({ command: process.execPath, args: [fixturePath] }),
+    openAICodexAdapter: createFixtureCodexAdapter(),
     imageBridgeCommand: process.execPath,
     imageBridgeArgs: ["image-bridge-fixture.mjs"],
     onStateChange: (state) => changes.push(state),
-    commandTimeoutMs: 5000,
     loginTimeoutMs: 5000,
   });
 
@@ -59,21 +57,19 @@ try {
   assert.ok(changes.some((state) => state.codex.connecting));
 
   const imageAuthPath = join(tempRoot, "providers", userId, "codex", "hireme-image-auth.json");
-  await rm(imageAuthPath, { force: true });
-  const repaired = await service.getSettings({ user });
-  assert.equal(repaired.codex.connected, true);
-  assert.equal(JSON.parse(await readFile(imageAuthPath, "utf8")).selectedProfileId, "openai:fixture@example.com");
-
   const codexSelection = await service.saveDeviceSettings({ user, provider: "codex" });
   assert.deepEqual(codexSelection, { provider: "codex", model: null });
   const codexRuntime = await service.resolveRuntime({
     user: { ...user, aiSetupCompleted: true },
   });
-  assert.equal(codexRuntime.provider, "codex");
-  assert.equal(codexRuntime.env.HIREME_CODEX_COMMAND, process.execPath);
+  assert.equal(codexRuntime.provider, "openai-codex");
   assert.equal(codexRuntime.env.OPENAI_API_KEY, "");
-  assert.match(codexRuntime.env.CODEX_HOME, new RegExp(userId));
+  assert.equal(codexRuntime.env.HIREME_OPENAI_CODEX_AUTH_PATH, imageAuthPath);
   assert.equal(codexRuntime.env.HIREME_CODEX_IMAGE_GEN_COMMAND, process.execPath);
+  assert.doesNotThrow(() => createModelProvider({
+    provider: codexRuntime.provider,
+    model: codexRuntime.model,
+  }));
 
   const imageAuth = JSON.parse(await readFile(codexRuntime.env.HIREME_OPENAI_CODEX_AUTH_PATH, "utf8"));
   assert.equal(imageAuth.profiles[imageAuth.selectedProfileId].provider, "openai");
@@ -150,9 +146,8 @@ try {
 
   const cancelService = createAiProviderService({
     userDataDir: join(tempRoot, "cancel"),
-    env: { ...process.env, HIREME_FIXTURE_LOGIN_DELAY_MS: "3000" },
     fetchImpl: async () => new Response(JSON.stringify({ models: [] }), { status: 200 }),
-    codexCommandResolver: async () => ({ command: process.execPath, args: [fixturePath] }),
+    openAICodexAdapter: createFixtureCodexAdapter({ connectDelayMs: 3000 }),
     loginTimeoutMs: 5000,
   });
   const cancelUser = { ...user, id: randomUUID() };
@@ -170,4 +165,64 @@ try {
 
 function shellQuote(value) {
   return `'${String(value).replaceAll("'", `'"'"'`)}'`;
+}
+
+function createFixtureCodexAdapter({ connectDelayMs = 0 } = {}) {
+  return {
+    async inspect({ authPath, connecting = false }) {
+      const configured = await readFile(authPath, "utf8").then(() => true).catch(() => false);
+      return {
+        installed: true,
+        connected: configured && !connecting,
+        connecting,
+        status: connecting ? "connecting" : configured ? "connected" : "not_connected",
+        error: null,
+      };
+    },
+    async connect({ authPath, signal }) {
+      await abortableDelay(connectDelayMs, signal);
+      await mkdir(dirname(authPath), { recursive: true });
+      await writeFile(authPath, JSON.stringify({
+        selectedProfileId: "openai:fixture@example.com",
+        profiles: {
+          "openai:fixture@example.com": {
+            provider: "openai",
+            access: "fixture-access-token",
+            refresh: "fixture-refresh-token",
+          },
+        },
+      }));
+    },
+    async disconnect({ authPath }) {
+      await rm(authPath, { force: true });
+    },
+    runtime({ authPath, imageBridgeCommand, imageBridgeArgs, imageTimeoutMs }) {
+      return {
+        provider: "openai-codex",
+        model: null,
+        env: {
+          HIREME_OPENAI_CODEX_AUTH_PATH: authPath,
+          HIREME_CODEX_IMAGE_GEN_COMMAND: imageBridgeCommand || "",
+          HIREME_CODEX_IMAGE_GEN_ARGS: JSON.stringify(imageBridgeArgs || []),
+          HIREME_CODEX_IMAGE_GEN_TIMEOUT_MS: String(imageTimeoutMs),
+          OPENAI_API_KEY: "",
+        },
+      };
+    },
+  };
+}
+
+function abortableDelay(milliseconds, signal) {
+  return new Promise((resolveDelay, rejectDelay) => {
+    if (signal?.aborted) return rejectDelay(signal.reason || new Error("취소"));
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolveDelay();
+    }, milliseconds);
+    const onAbort = () => {
+      clearTimeout(timer);
+      rejectDelay(signal.reason || new Error("취소"));
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
 }

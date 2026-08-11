@@ -2,7 +2,7 @@ import {
   getOpenAICodexAuthStatus,
   loginOpenAICodex,
   logoutOpenAICodex,
-} from "../agent/src/openaiCodexProvider.mjs";
+} from "../../../hireme-agent/runtime/src/openaiCodexImageProvider.mjs";
 
 /**
  * Desktop provider adapters own authentication and runtime configuration.

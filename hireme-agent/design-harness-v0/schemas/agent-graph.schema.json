@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hireme.dev/schemas/agent-graph.v1.json",
+  "title": "HireMe Agent Graph",
+  "type": "object",
+  "required": ["schema", "id", "agentId", "revision", "entryNodeId", "terminalNodeIds", "budgets", "nodes", "edges"],
+  "properties": {
+    "schema": { "const": "hireme.agent_graph.v1" },
+    "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,79}$" },
+    "agentId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,79}$" },
+    "revision": { "type": "integer", "minimum": 1 },
+    "authoringDigest": { "type": ["string", "null"], "pattern": "^sha256:" },
+    "entryNodeId": { "type": "string" },
+    "terminalNodeIds": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string" } },
+    "budgets": {
+      "type": "object",
+      "required": ["maxSteps", "maxRevisionAttempts"],
+      "properties": {
+        "maxSteps": { "type": "integer", "minimum": 1, "maximum": 200 },
+        "maxRevisionAttempts": { "type": "integer", "minimum": 1, "maximum": 5 }
+      },
+      "additionalProperties": false
+    },
+    "nodes": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "type", "inputSchemaRef", "outputSchemaRef", "capabilities", "completionGate"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,79}$" },
+          "type": { "enum": ["intake", "analyze", "decide", "explore", "produce", "evaluate", "human_gate", "deliver"] },
+          "skillRef": { "type": ["string", "null"] },
+          "inputSchemaRef": { "type": "string" },
+          "outputSchemaRef": { "type": "string" },
+          "capabilities": { "type": "array", "uniqueItems": true, "items": { "type": "string" } },
+          "completionGate": { "type": "array", "minItems": 1, "items": { "type": "string" } }
+        },
+        "additionalProperties": false
+      }
+    },
+    "edges": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["from", "to", "when"],
+        "properties": {
+          "from": { "type": "string" },
+          "to": { "type": "string" },
+          "when": { "type": "string" },
+          "loop": { "const": "revision" },
+          "maxTraversals": { "type": "integer", "minimum": 1, "maximum": 5 }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

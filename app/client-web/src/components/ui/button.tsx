@@ -4,12 +4,12 @@ import type { ButtonHTMLAttributes } from "react";
 import { cn } from "@/lib/utils";
 
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-xl text-sm font-semibold transition disabled:pointer-events-none disabled:opacity-45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-700/25",
+  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-semibold transition disabled:pointer-events-none disabled:opacity-45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#465CFF]/25",
   {
     variants: {
       variant: {
-        default: "bg-emerald-800 text-white shadow-sm hover:bg-emerald-900",
-        outline: "border border-stone-300 bg-white text-stone-800 hover:border-emerald-700 hover:text-emerald-800",
+        default: "bg-[#465CFF] text-white shadow-none hover:bg-[#354AE6]",
+        outline: "border border-[#D8D4CC] bg-white text-[#161616] hover:border-[#465CFF] hover:text-[#465CFF]",
         ghost: "text-stone-600 hover:bg-stone-100 hover:text-stone-950",
       },
       size: { default: "h-11 px-5", sm: "h-9 px-3 text-xs", lg: "h-13 px-7 text-base", icon: "size-10" },

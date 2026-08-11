@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { mkdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import {
   createLocalSpecialistAgentTemplate,
@@ -17,6 +18,7 @@ import {
   readBootstrapMemory,
   upsertBootstrapMemory,
 } from "./specialistMemory.mjs";
+import { createAuthoringCoachTools } from "./authoringCoach.mjs";
 
 const workflowSchemaVersion = "hireme.agent_authoring.workflow.v1";
 const operationSchemaVersion = "hireme.agent_authoring.operation.v1";
@@ -73,7 +75,7 @@ export function createAgentAuthoringTools({
   const root = resolve(workspaceRoot, specialistRoot);
   const stateRoot = resolve(stateDir);
 
-  return [
+  const coreTools = [
     {
       name: "hireme_list_agent_authoring_templates",
       description:
@@ -322,6 +324,23 @@ export function createAgentAuthoringTools({
       handler: async (args = {}) =>
         packageAgentDraft({ root, workspaceRoot, stateRoot, ...args }),
     },
+  ];
+  return [
+    ...coreTools,
+    ...createAuthoringCoachTools({
+      stateRoot,
+      getAgentStatus: (args) => getAgentAuthoringStatus({ root, stateRoot, ...args }),
+      readAgentFile: (args) => readAgentDraftFile({ root, ...args }),
+      updateAgentFile: (args) => updateAgentDraftFile({ root, stateRoot, ...args }),
+      validateAgent: (args) => validateLocalSpecialistAgent({ root, ...args }),
+      validateCandidate: (args) => validateAgentCandidate({ root, ...args }),
+      compareCandidateBehavior: (args) => compareAgentCandidateBehavior({
+        root,
+        stateRoot,
+        modelProvider,
+        ...args,
+      }),
+    }),
   ];
 }
 
@@ -2091,4 +2110,118 @@ function normalizeBoolean(value, fallback) {
 
 function sha256(value) {
   return createHash("sha256").update(String(value), "utf8").digest("hex");
+}
+
+async function validateAgentCandidate({ root, agent_id, path, content, expected_sha256 } = {}) {
+  const id = normalizeAgentId(agent_id);
+  const tempRoot = await mkdtemp(join(tmpdir(), "hireme-agent-candidate-"));
+  try {
+    await cp(join(resolve(root), id), join(tempRoot, id), { recursive: true, force: false });
+    await updateLocalSpecialistAgentTemplateFile({
+      root: tempRoot,
+      agent_id: id,
+      path,
+      content,
+      overwrite: true,
+      expected_sha256,
+    });
+    return await validateLocalSpecialistAgent({ root: tempRoot, agent_id: id });
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+async function compareAgentCandidateBehavior({
+  root,
+  stateRoot,
+  modelProvider,
+  agent_id,
+  path,
+  content,
+  expected_sha256,
+  task,
+  expected_indicators = [],
+} = {}) {
+  const id = normalizeAgentId(agent_id);
+  const taskText = String(task || "").trim();
+  const indicators = [...new Set((Array.isArray(expected_indicators) ? expected_indicators : [])
+    .map((item) => String(item || "").trim())
+    .filter(Boolean))];
+  if (!taskText || !indicators.length) {
+    return { ran: false, reason: "evaluation_task_and_expected_indicators_required" };
+  }
+  if (!modelProvider || typeof modelProvider.complete !== "function" || modelProvider.provider === "fixture") {
+    return { ran: false, reason: "model_backed_provider_required", mode: "preview" };
+  }
+
+  const tempRoot = await mkdtemp(join(tmpdir(), "hireme-agent-behavior-"));
+  try {
+    await cp(join(resolve(root), id), join(tempRoot, id), { recursive: true, force: false });
+    await updateLocalSpecialistAgentTemplateFile({
+      root: tempRoot,
+      agent_id: id,
+      path,
+      content,
+      overwrite: true,
+      expected_sha256,
+    });
+    const baseline = await runLocalSpecialistAgent({
+      root,
+      memoryStore: createSpecialistMemoryStore({ stateDir: join(tempRoot, "baseline-memory") }),
+      modelProvider,
+      agent_id: id,
+      task: taskText,
+      current_user_id: "creator-candidate-baseline",
+      conversation_id: "candidate-comparison",
+    });
+    const candidate = await runLocalSpecialistAgent({
+      root: tempRoot,
+      memoryStore: createSpecialistMemoryStore({ stateDir: join(tempRoot, "candidate-memory") }),
+      modelProvider,
+      agent_id: id,
+      task: taskText,
+      current_user_id: "creator-candidate-evaluation",
+      conversation_id: "candidate-comparison",
+    });
+    const baselineText = String(baseline.outputText || "");
+    const candidateText = String(candidate.outputText || "");
+    const normalize = (value) => String(value || "").toLocaleLowerCase();
+    const baselineMatched = indicators.filter((indicator) => normalize(baselineText).includes(normalize(indicator)));
+    const candidateMatched = indicators.filter((indicator) => normalize(candidateText).includes(normalize(indicator)));
+    const candidateMissing = indicators.filter((indicator) => !candidateMatched.includes(indicator));
+    const modelBacked = baseline.runtime?.runner?.modelBacked === true && candidate.runtime?.runner?.modelBacked === true;
+    const ran = baseline.status === "completed" && candidate.status === "completed" && modelBacked;
+    return {
+      ran,
+      reason: ran ? null : "model_run_not_completed",
+      mode: "model",
+      taskSha256: `sha256:${sha256(taskText)}`,
+      expectedIndicators: indicators,
+      baseline: {
+        status: baseline.status,
+        outputSha256: `sha256:${sha256(baselineText)}`,
+        outputChars: baselineText.length,
+      },
+      candidate: {
+        status: candidate.status,
+        outputSha256: `sha256:${sha256(candidateText)}`,
+        outputChars: candidateText.length,
+      },
+      baselineMatched,
+      candidateMatched,
+      candidateMissing,
+      candidateMatchedAll: candidateMissing.length === 0,
+      meaningfulDifference: candidateMissing.length === 0 &&
+        sha256(baselineText) !== sha256(candidateText) &&
+        candidateMatched.length > baselineMatched.length,
+    };
+  } catch (err) {
+    return {
+      ran: false,
+      reason: "behavioral_run_failed",
+      errorCode: String(err?.code || "behavioral_run_failed"),
+    };
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true }).catch(() => {});
+  }
 }

@@ -14,6 +14,7 @@ import {
   publicExecutionPolicy,
   validateExecutionPolicy,
 } from "./executionPolicy.mjs";
+import { validateAgentGraph } from "./agentGraph.mjs";
 
 const inputSchemaVersion = "hireme.specialist_agent.input.v1";
 const outputSchemaVersion = "hireme.specialist_agent.output.v1";
@@ -442,6 +443,15 @@ export async function validateLocalSpecialistAgent({ root, agent_id, agentId } =
   const manifestValidation = validateManifest(agent.manifest);
   const bootstrapMemory = await readBootstrapMemory({ agentRoot: agent.root });
   const memoryValidation = bootstrapMemorySummary(bootstrapMemory);
+  const graph = await readJson(join(agent.root, "workflow/graph.json")).catch((error) => {
+    if (error?.code === "ENOENT") return null;
+    return { __readError: error?.message || String(error) };
+  });
+  const graphValidation = graph
+    ? graph.__readError
+      ? { valid: false, errors: [graph.__readError], digest: null }
+      : validateAgentGraph(graph)
+    : { valid: true, errors: [], digest: null };
   return {
     type: "hireme_local_specialist_agent_validation",
     agent: publicLocalAgent(agent),
@@ -451,6 +461,12 @@ export async function validateLocalSpecialistAgent({ root, agent_id, agentId } =
       outputSchema: ioContract.includes(outputSchemaVersion),
     },
     manifest: manifestValidation,
+    graph: {
+      present: Boolean(graph),
+      valid: graphValidation.valid,
+      digest: graphValidation.digest,
+      errors: graphValidation.errors,
+    },
     memory: {
       bootstrap: memoryValidation,
       precedence: ["current_request", "session", "user", "bootstrap"],
@@ -460,6 +476,7 @@ export async function validateLocalSpecialistAgent({ root, agent_id, agentId } =
       ioContract.includes(inputSchemaVersion) &&
       ioContract.includes(outputSchemaVersion) &&
       manifestValidation.valid &&
+      graphValidation.valid &&
       memoryValidation.valid,
   };
 }

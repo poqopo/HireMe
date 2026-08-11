@@ -209,6 +209,64 @@ try {
     (error) => error?.code === "hash_mismatch",
   );
 
+  const studioSnapshot = await service.getStudioSnapshot({ userId, clientId, input: managementRequest });
+  assert.equal(studioSnapshot.graphValidation.valid, true);
+  assert.ok(studioSnapshot.graph.nodes.some((node) => node.id === "human-gate"));
+  const guidedPatch = {
+    middleOrder: ["decide", "analyze", "explore"],
+    exploreEnabled: true,
+    humanGateEnabled: true,
+    maxRevisionAttempts: 3,
+    skillRefs: Object.fromEntries(studioSnapshot.graph.nodes.map((node) => [node.id, node.skillRef])),
+  };
+  const graphPreview = await service.previewGraphPatch({
+    userId,
+    clientId,
+    input: {
+      ...managementRequest,
+      expectedRevision: studioSnapshot.revision,
+      expectedGraphDigest: studioSnapshot.graphValidation.digest,
+      patch: guidedPatch,
+    },
+  });
+  assert.equal(graphPreview.validation.valid, true);
+  assert.equal(graphPreview.graph.budgets.maxRevisionAttempts, 3);
+  const graphApplied = await service.applyGraphPatch({
+    userId,
+    clientId,
+    input: {
+      ...managementRequest,
+      expectedRevision: studioSnapshot.revision,
+      expectedGraphDigest: studioSnapshot.graphValidation.digest,
+      patch: guidedPatch,
+    },
+  });
+  assert.equal(graphApplied.status, "applied");
+  assert.ok(graphApplied.revision > studioSnapshot.revision);
+  await service.saveStudioLayout({
+    userId,
+    clientId,
+    input: {
+      ...managementRequest,
+      layout: { positions: { intake: { x: 24, y: 48 } }, viewport: { x: 1, y: 2, zoom: 0.9 } },
+    },
+  });
+  const studioReloaded = await service.getStudioSnapshot({ userId, clientId, input: managementRequest });
+  assert.deepEqual(studioReloaded.layout.positions.intake, { x: 24, y: 48 });
+  await assert.rejects(
+    service.previewGraphPatch({
+      userId,
+      clientId,
+      input: {
+        ...managementRequest,
+        expectedRevision: studioSnapshot.revision,
+        expectedGraphDigest: studioSnapshot.graphValidation.digest,
+        patch: guidedPatch,
+      },
+    }),
+    (error) => error?.code === "agent_graph_revision_conflict",
+  );
+
   const bundledManagement = await service.prepareManagement({
     userId,
     clientId,
