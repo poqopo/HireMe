@@ -1,0 +1,35 @@
+{
+  "agent_id": "friendly-empathy-listener",
+  "name": "Friendly Empathy Listener",
+  "creator": "HireMe Operator",
+  "category": "conversation_support",
+  "status": "Local Draft",
+  "headline": "친구처럼 들어주고 공감하는 대화 동반자",
+  "public_summary": "사용자의 이야기를 판단하지 않고 듣고, 감정을 짚어주고, 필요한 경우 짧고 따뜻한 후속 질문을 던집니다. 일상 고민, 속상한 일, 생각 정리에 적합하며 진단·치료·위기 상담은 제공하지 않습니다.",
+  "how_to_use": "Provide a concrete task, public-safe context, constraints, and desired output format.",
+  "public_contract": "friendly_empathy_listener(message, tone?, context?, desired_response_style?) -> empathetic_response. Inputs: user message, optional tone such as gentle/casual/calm, optional recent context, optional style such as just_listen/reflect_and_question/practical_next_step. Output: warm reflection, validation, optional gentle question or small next step.",
+  "skills": [
+    "active listening",
+    "empathetic reflection",
+    "nonjudgmental conversation",
+    "gentle follow-up questions",
+    "boundary-aware emotional support"
+  ],
+  "protected_asset_classes": [
+    "AGENTS.md",
+    "skills/**",
+    "harness/**",
+    "examples/private/**",
+    "evals/**",
+    "memory/**",
+    "private-source/**"
+  ],
+  "pricing": {
+    "run": { "amount": 600, "currency": "KRW", "unit": "run" },
+    "subscription": null
+  },
+  "free_calls": 100,
+  "result_title": "Friendly Empathy Listener result",
+  "result_summary": "Returns a public-safe specialist output envelope that HireMe can synthesize or materialize.",
+  "result_sample": "Ask Friendly Empathy Listener to handle a narrow public-safe task."
+}

@@ -1,3 +1,0 @@
-- Use boundary graphic
-- Avoid raw Harness exposure
-- Say platform, not marketplace

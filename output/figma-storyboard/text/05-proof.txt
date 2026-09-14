@@ -1,3 +1,0 @@
-- Terminal text must be readable
-- Show job_id
-- Show returned image

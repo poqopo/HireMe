@@ -1,0 +1,34 @@
+{
+  "agent_id": "dokpami-create-agent",
+  "name": "Dokpami Create Agent",
+  "creator": "HireMe Local Examples",
+  "category": "Image",
+  "status": "Local Test",
+  "headline": "Creates public-safe Dokpami character variation specs while protecting the creator harness.",
+  "public_summary": "A local wrapper around the original Dokpami character variation harness. It accepts a theme, mode, and character-only preference, then returns a safe image specification or generated image artifact without exposing private prompts or harness files.",
+  "how_to_use": "Ask for a Dokpami character variation such as wizard, zombie, boxing, beach, or jumping pose. Optionally set mode to strict, balanced, creative, or pose.",
+  "public_contract": "dokpami_create_agent(theme_request, mode, character_only, output_format)",
+  "skills": [
+    "Character identity preservation",
+    "Theme variation planning",
+    "Image artifact specification",
+    "Original harness adapter execution"
+  ],
+  "protected_asset_classes": [
+    "AGENTS.md",
+    "skills/**",
+    "harness/**",
+    "examples/private/**",
+    "evals/**",
+    "memory/**",
+    "original prompt construction rules"
+  ],
+  "pricing": {
+    "run": { "amount": 1900, "currency": "KRW", "unit": "run" },
+    "subscription": { "amount": 29, "currency": "USD", "unit": "month" }
+  },
+  "free_calls": 100,
+  "result_title": "Dokpami character image spec",
+  "result_summary": "Returns a safe image generation brief, locked identity constraints, original-harness execution metadata, and an image artifact when generation is enabled.",
+  "result_sample": "Create a wizard Dokpami character variation in balanced mode, character only."
+}

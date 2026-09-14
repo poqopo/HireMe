@@ -1,63 +1,60 @@
 {
   "name": "hireme",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
+  "description": "A desktop and CLI workspace for hiring protected specialist Agents.",
+  "author": "HireMe",
   "type": "module",
+  "main": "apps/desktop/main.mjs",
+  "bin": {
+    "hireme": "bin/hireme.mjs"
+  },
   "scripts": {
     "dev": "npm run web:dev",
     "web:dev": "vite --config apps/web/vite.config.ts",
     "web:build": "tsc -b apps/web && vite build --config apps/web/vite.config.ts",
     "web:preview": "vite preview --config apps/web/vite.config.ts",
-    "gateway:dev": "node apps/gateway/src/index.mjs",
-    "gateway:start": "node apps/gateway/src/index.mjs",
-    "deploy:check": "npm run web:build && node --check apps/gateway/src/index.mjs && node --check plugins/hireme/mcp/server.mjs",
-    "gateway:smoke": "node scripts/smoke-gateway.mjs",
-    "agent:validate-folder": "node scripts/validate-example-agent.mjs",
-    "agent:seal-folder": "node scripts/seal-example-agent.mjs",
-    "seal:inspect": "node scripts/inspect-seal-artifact.mjs",
-    "seal:publish:walrus": "node scripts/publish-sealed-agent-to-walrus.mjs",
-    "platform:encrypt": "node scripts/seal-example-agent.mjs",
-    "platform:inspect": "node scripts/inspect-seal-artifact.mjs",
-    "platform:publish:walrus": "node scripts/publish-sealed-agent-to-walrus.mjs",
-    "platform:smoke:walrus": "node scripts/smoke-platform-encryption-walrus.mjs",
-    "agent:create-folder:smoke": "node scripts/smoke-create-agent-from-folder.mjs",
-    "memwal:publish": "node scripts/publish-memwal-snapshot.mjs",
-    "memwal:read": "node scripts/read-memwal-snapshot.mjs",
-    "walrus:publish:test1": "node scripts/publish-walrus-agent-folder.mjs examples/wal_test1 --agent-id wal-test1 --epochs 1",
-    "walrus:read:test1": "node scripts/read-walrus-agent-folder.mjs --agent-id wal-test1 --task \"Describe this Walrus Agent folder\"",
-    "sui:build": "sui move build --path move/hireme",
-    "sui:test": "sui move test --path move/hireme",
-    "sui:publish:hireme": "node scripts/publish-sui-hireme-package.mjs",
-    "sui:payment:smoke": "node scripts/smoke-sui-payment.mjs",
+    "desktop:config": "node scripts/write-desktop-public-config.mjs",
+    "desktop:config:required": "node scripts/write-desktop-public-config.mjs --required",
+    "desktop:dev": "npm run desktop:config && concurrently -k -s first -n renderer,desktop \"npm run web:dev -- --host 127.0.0.1 --port 5173\" \"wait-on http://127.0.0.1:5173 && cross-env HIREME_DEV_PROFILE=1 HIREME_DEV_SERVER_URL=http://127.0.0.1:5173 electron .\"",
+    "desktop:package": "npm run desktop:config:required && npm run web:build && electron-builder --dir",
+    "desktop:dist": "npm run desktop:config:required && npm run web:build && electron-builder",
+    "desktop:check": "npm run desktop:config && node --check apps/desktop/main.mjs && node --check apps/desktop/auth.mjs && node --check apps/desktop/data.mjs && node --check apps/desktop/aiProviders.mjs && node --check apps/desktop/agentAuthoring.mjs && node --check apps/desktop/managementIpcError.mjs && node --check apps/desktop/runIpcError.mjs && node --check apps/desktop/rendererTrust.mjs && node --check apps/desktop/runLifecycle.mjs && node --check apps/desktop/preload.cjs",
+    "desktop:auth:smoke": "npm run desktop:config:required && node scripts/smoke-desktop-auth.mjs",
+    "desktop:data:smoke": "node scripts/smoke-desktop-data.mjs",
+    "desktop:authoring:smoke": "node scripts/smoke-desktop-agent-authoring.mjs",
+    "desktop:security:smoke": "node scripts/smoke-desktop-security.mjs",
+    "desktop:ai:smoke": "node scripts/smoke-desktop-ai-settings.mjs",
+    "deploy:check": "npm run web:build && npm run desktop:check",
+    "hireme": "node bin/hireme.mjs",
+    "hireme:smoke": "node scripts/smoke-hireme-cli.mjs",
+    "hireme:ux:smoke": "node scripts/smoke-cli-ux.mjs",
+    "agent:run": "node apps/agent/src/index.mjs",
+    "agent:smoke": "node scripts/smoke-standalone-agent.mjs",
+    "agent:specialist:smoke": "node scripts/smoke-local-specialist-agent.mjs",
+    "agent:specialist:create:smoke": "node scripts/smoke-local-specialist-creator.mjs",
+    "agent:authoring:smoke": "node scripts/smoke-agent-authoring-layer.mjs",
+    "agent:management:smoke": "node scripts/smoke-management-mode.mjs",
+    "agent:memory:smoke": "node scripts/smoke-specialist-memory.mjs",
+    "agent:protected-runtime:smoke": "node scripts/smoke-protected-runtime-agent.mjs",
+    "agent:marketplace:smoke": "node scripts/smoke-marketplace-entitlements.mjs",
+    "agent:source:smoke": "node scripts/smoke-agent-source-layer.mjs",
+    "agent:usage:smoke": "node scripts/smoke-usage-ledger-quota.mjs",
+    "agent:package:encrypt:smoke": "node scripts/smoke-encrypted-agent-package.mjs",
+    "agent:package:publish": "node scripts/publish-agent-package.mjs",
+    "agent:package:runtime:smoke": "node scripts/smoke-supabase-agent-runtime.mjs",
+    "agent:hybrid-billing:smoke": "node scripts/smoke-hybrid-execution-billing.mjs",
     "build": "npm run web:build",
     "lint": "eslint .",
-    "plugin:smoke": "node scripts/smoke-hireme-plugin.mjs",
-    "plugin:export": "node scripts/export-codex-plugin-repo.mjs",
-    "supabase:seed": "node scripts/seed-supabase-demo.mjs",
     "supabase:smoke": "node scripts/smoke-supabase.mjs",
-    "supabase:types": "supabase gen types --linked --schema public --lang typescript > apps/web/src/types/database.ts",
+    "supabase:types": "supabase gen types --linked --schema public --lang typescript > apps/web/src/database.generated.ts",
     "preview": "npm run web:preview"
   },
   "dependencies": {
-    "@mysten-incubation/memwal": "^0.0.7",
-    "@mysten/dapp-kit": "^1.1.0",
-    "@mysten/enoki": "^1.1.0",
-    "@mysten/sui": "^2.19.0",
-    "@mysten/walrus": "^1.2.1",
-    "@radix-ui/react-avatar": "latest",
-    "@radix-ui/react-slot": "latest",
-    "@radix-ui/react-tabs": "latest",
-    "@supabase/supabase-js": "latest",
-    "@tailwindcss/vite": "latest",
-    "@tanstack/react-query": "^5.101.0",
-    "class-variance-authority": "latest",
-    "clsx": "latest",
+    "@supabase/supabase-js": "^2.110.2",
     "lucide-react": "latest",
     "react": "latest",
-    "react-dom": "latest",
-    "react-router-dom": "^7.17.0",
-    "tailwind-merge": "latest",
-    "tailwindcss": "latest"
+    "react-dom": "latest"
   },
   "devDependencies": {
     "@eslint/js": "latest",
@@ -65,12 +62,100 @@
     "@types/react": "latest",
     "@types/react-dom": "latest",
     "@vitejs/plugin-react": "latest",
+    "concurrently": "latest",
+    "cross-env": "latest",
+    "electron": "latest",
+    "electron-builder": "latest",
     "eslint": "latest",
     "eslint-plugin-react-hooks": "latest",
     "eslint-plugin-react-refresh": "latest",
     "globals": "latest",
     "typescript": "latest",
     "typescript-eslint": "latest",
-    "vite": "latest"
+    "vite": "latest",
+    "wait-on": "latest"
+  },
+  "build": {
+    "appId": "com.hireme.desktop",
+    "productName": "HireMe",
+    "asar": true,
+    "artifactName": "HireMe-${version}-${os}-${arch}.${ext}",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "apps/web/dist/**/*",
+      "apps/desktop/**/*",
+      {
+        "from": "apps/agent/src",
+        "to": "apps/agent/src",
+        "filter": [
+          "managementModePolicy.mjs"
+        ]
+      },
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "bin",
+        "to": "runtime/bin",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "apps/agent",
+        "to": "runtime/apps/agent",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "examples/local-specialist-agents",
+        "to": "runtime/examples/local-specialist-agents",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "scripts",
+        "to": "runtime/scripts",
+        "filter": [
+          "openai-codex-image-gen-native.mjs",
+          "openai-codex-image-gen-bridge.mjs",
+          "fixtures/codex-image-gen-fixture.mjs"
+        ]
+      }
+    ],
+    "protocols": [
+      {
+        "name": "HireMe authentication callback",
+        "schemes": [
+          "hireme"
+        ]
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "icon": "build/icon.icns",
+      "identity": null,
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    },
+    "win": {
+      "icon": "build/icon.png",
+      "target": [
+        "nsis"
+      ]
+    },
+    "linux": {
+      "category": "Office",
+      "icon": "build/icon.png",
+      "target": [
+        "AppImage"
+      ]
+    }
   }
 }

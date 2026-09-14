@@ -1,9692 +1,5508 @@
 import {
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type CSSProperties,
-  type ChangeEvent,
-  type FormEvent,
-  type ReactNode,
-  type RefObject,
-} from "react";
-import type { Session } from "@supabase/supabase-js";
-import {
-  BrowserRouter,
-  Link,
-  Navigate,
-  Route,
-  Routes,
-  useLocation,
-  useNavigate,
-  useParams,
-} from "react-router-dom";
-import { isGoogleWallet } from "@mysten/enoki";
-import {
-  useConnectWallet,
-  useCurrentAccount,
-  useCurrentWallet,
-  useSuiClient,
-  useSignAndExecuteTransaction,
-  useSignTransaction,
-  useWallets,
-} from "@mysten/dapp-kit";
-import { Transaction } from "@mysten/sui/transactions";
-import {
-  ArrowUp,
-  ArrowLeft,
+  ArrowUpRight,
   Bot,
-  Braces,
+  Brain,
   BriefcaseBusiness,
+  CalendarDays,
+  Check,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
-  CircleDollarSign,
   Clock3,
+  Compass,
   Copy,
-  ExternalLink,
-  ImageIcon,
-  LockKeyhole,
+  Cpu,
+  DollarSign,
+  Download,
+  FileText,
+  FolderOpen,
+  HardDrive,
+  Info,
+  LayoutGrid,
+  ListChecks,
   LoaderCircle,
-  LogIn,
+  LockKeyhole,
   LogOut,
-  MessageCircle,
-  PackageOpen,
-  RotateCcw,
+  Menu,
+  MessageCircleQuestion,
+  Palette,
+  Paperclip,
+  PenLine,
+  Plus,
+  ReceiptText,
+  RefreshCw,
   Search,
-  ServerCog,
+  Send,
+  Settings,
   ShieldCheck,
+  SlidersHorizontal,
+  Sparkles,
+  Square,
   Star,
-  Terminal,
+  Target,
   TrendingUp,
-  UploadCloud,
-  UserRound,
-  WalletCards,
+  Trash2,
+  Upload,
+  Wallet,
   X,
-  AlertTriangle,
-  type LucideIcon,
+  Zap,
 } from "lucide-react";
-import { categories } from "@/lib/agents";
 import {
-  loadMarketplaceAgents,
-  sortAgentsNewestFirst,
-  type AgentDataSource,
-} from "@/lib/agentRepository";
-import { isSupabaseConfigured, supabase } from "@/lib/supabase";
-import type { SealedHarnessRecord } from "@/lib/sealWalrus";
-import { isEnokiConfigured } from "@/lib/sui";
-import type { Agent, AgentTeam } from "@/types/agent";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { CopyableCodeBlock } from "@/components/CopyableCodeBlock";
-import { DebugCallPage } from "../pages/DebugCallPage";
-import { DocsPage } from "../pages/DocsPage";
+  FormEvent,
+  KeyboardEvent,
+  PointerEvent as ReactPointerEvent,
+  ReactNode,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 
-const trialCallAllowance = 100;
-const defaultAgentStorageEpochs = 7;
-const hiremeGatewayOrigin = "https://hireme-gateway.onrender.com";
-const codexCreatorSetupCommand = [
-  "# Install the HireMe Creator plugin",
-  "codex plugin marketplace add poqopo/HireMe --ref main",
-  "codex plugin add hireme-creator --marketplace hireme-local",
-  "",
-  "# Connect the hired-Agent MCP server to the Render gateway",
-  "codex mcp remove hireme || true",
-  `codex mcp add hireme --url ${hiremeGatewayOrigin}/mcp --oauth-resource ${hiremeGatewayOrigin}/mcp`,
-  "codex mcp login --scopes hireme:agents,hireme:call,hireme:manage hireme",
-].join("\n");
+type ViewId = "studio" | "chat" | "discover" | "agents" | "earnings" | "review";
+type AgentCategory = "디자인" | "글쓰기" | "비즈니스" | "리서치" | "생산성";
+type BillingMode = "run" | "subscription" | "hybrid";
+type AgentOwnership = "mine" | "market";
+type WorkScope = "created" | "hired";
 
-const makeAgentSteps = [
-  {
-    title: "Start with a template",
-    copy: "Ask our plugin for a template. If you already have a working Agent folder, skip this step.",
-  },
-  {
-    title: "Add your know-how",
-    copy: "Add the knowledge that makes your Agent valuable: prompts, examples, rubrics, skills, and hidden checks.",
-  },
-  {
-    title: "Publish and earn",
-    copy: "Set pricing and get paid when clients use the Agent.",
-  },
-];
-
-const publishProgressSteps = [
-  "Preparing publish",
-  "Uploading result media",
-  "Publishing protected Harness",
-  "Saving Agent listing",
-  "Opening Agent page",
-] as const;
-
-const heroBeforeHarnessImage =
-  "/assets/before/TalkMedia_i_9d68a183fdb2.png.png";
-const heroAfterHarnessImages = [
-  "/assets/after/TalkMedia_i_992129d3c2e9.jpg.jpg",
-  "/assets/after/TalkMedia_i_ba3f99282062.jpg.jpg",
-  "/assets/after/TalkMedia_i_c1054053616e.jpg.jpg",
-  "/assets/after/TalkMedia_i_c2e84200e6f5.jpg.jpg",
-  "/assets/after/TalkMedia_i_d8524efc8c6d.jpg.jpg"
-];
-
-const creatorIpLayers = [
-  {
-    label: "Client sees",
-    items: ["Skills", "Price", "Sample input", "Result media"],
-  },
-  {
-    label: "Creator keeps",
-    items: ["AGENTS.md", "Prompts", "Rubrics", "Examples", "Hidden checks"],
-  },
-];
-
-function useScrollReveal(scopeRef: RefObject<HTMLElement | null>) {
-  useEffect(() => {
-    const scope = scopeRef.current;
-
-    if (!scope) {
-      return;
-    }
-
-    const targets = Array.from(
-      scope.querySelectorAll<HTMLElement>("[data-reveal]"),
-    );
-
-    if (!targets.length) {
-      return;
-    }
-
-    if (
-      window.matchMedia("(prefers-reduced-motion: reduce)").matches ||
-      !("IntersectionObserver" in window)
-    ) {
-      targets.forEach((target) => {
-        target.classList.add("reveal-visible");
-      });
-      return;
-    }
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        entries.forEach((entry) => {
-          if (!entry.isIntersecting) {
-            return;
-          }
-
-          entry.target.classList.add("reveal-visible");
-          observer.unobserve(entry.target);
-        });
-      },
-      {
-        root: null,
-        rootMargin: "0px 0px -12% 0px",
-        threshold: 0.16,
-      },
-    );
-
-    targets.forEach((target) => {
-      observer.observe(target);
-    });
-
-    return () => {
-      observer.disconnect();
-    };
-  }, [scopeRef]);
-}
-
-function revealDelayStyle(delayMs: number): CSSProperties {
-  const revealDelayProperty = "--reveal-delay" as const;
-  return {
-    [revealDelayProperty]: `${delayMs}ms`,
-  } as CSSProperties;
-}
-
-const authStorageKey = "hireme-demo-auth-user";
-const accessStorageKey = "hireme-demo-agent-access-v1";
-const createdAgentsStorageKey = "hireme-demo-created-agents-v1";
-const tryChatSessionsStorageKey = "hireme-demo-try-chat-sessions-v1";
-const tryChatTranscriptsStorageKey = "hireme-demo-try-chat-transcripts-v2";
-const tryChatImageDbName = "hireme-demo-try-chat-images";
-const tryChatImageStoreName = "images";
-const tryChatImageDbVersion = 1;
-const legacyTryChatTranscriptsStorageKeys = [
-  "hireme-demo-try-chat-transcripts-v1",
-];
-const tryChatPendingRestoreTtlMs = 5 * 60 * 1000;
-const tryChatMemWalDebugThresholdMs = 2 * 60 * 1000;
-const tryMemWalMaxAutoPollTargets = 1;
-const tryMemWalPollMaxAttempts = 5;
-const tryMemWalInitialPollDelayMs = 30_000;
-const tryMemWalPollIntervalMs = 10_000;
-const typicalOutputStorageBucket =
-  import.meta.env.VITE_HIREME_TYPICAL_OUTPUT_BUCKET || "hireme-agent-media";
-const gatewayUrl = (
-  import.meta.env.VITE_HIREME_GATEWAY_URL || "http://localhost:8787"
-).replace(/\/$/, "");
-const gatewayApiKey = import.meta.env.VITE_HIREME_GATEWAY_API_KEY || "";
-const tryChatDebugEnabled =
-  import.meta.env.DEV || import.meta.env.VITE_HIREME_DEBUG_TRY === "true";
-const hiddenMarketplaceAgentIds = new Set(["codex-builder"]);
-const hiddenMarketplaceAgentHandles = new Set(["@agents/codex-builder"]);
-const topicFilters = categories.filter(
-  (category): category is Agent["category"] => category !== "All",
-);
-
-function debugTryChat(label: string, details?: Record<string, unknown>) {
-  if (!tryChatDebugEnabled) return;
-  if (details) {
-    console.info(`[HireMe Try] ${label}`, details);
-    return;
-  }
-  console.info(`[HireMe Try] ${label}`);
-}
-
-function warnTryChat(label: string, details?: Record<string, unknown>) {
-  if (!tryChatDebugEnabled) return;
-  if (details) {
-    console.warn(`[HireMe Try] ${label}`, details);
-    return;
-  }
-  console.warn(`[HireMe Try] ${label}`);
-}
-
-function tryMemWalPollDelayMs(attemptIndex: number) {
-  return attemptIndex === 0
-    ? tryMemWalInitialPollDelayMs
-    : tryMemWalPollIntervalMs;
-}
-
-const categoryPricing: Record<
-  Agent["category"],
-  {
-    basePriceUsd: number;
-    Icon: LucideIcon;
-    iconClassName: string;
-  }
-> = {
-  Research: {
-    basePriceUsd: 0.12,
-    Icon: Search,
-    iconClassName: "from-[#eff6ff] to-[#dbeafe] text-[#1d4ed8]",
-  },
-  Code: {
-    basePriceUsd: 0.18,
-    Icon: Braces,
-    iconClassName: "from-[#f0fdf4] to-[#dcfce7] text-[#15803d]",
-  },
-  Data: {
-    basePriceUsd: 0.16,
-    Icon: ServerCog,
-    iconClassName: "from-[#ecfeff] to-[#cffafe] text-[#0e7490]",
-  },
-  Image: {
-    basePriceUsd: 0.2,
-    Icon: ImageIcon,
-    iconClassName: "from-[#fff7ed] to-[#dbeafe] text-[#1d4ed8]",
-  },
-};
-const catalogViews = [
-  { id: "agents", label: "Single Agent" },
-  { id: "teams", label: "Agent Team" },
-] as const;
-
-type CatalogView = (typeof catalogViews)[number]["id"];
-
-type AuthUser = {
-  id?: string;
-  displayName?: string;
-  email: string;
-  wallet: string;
-  provider?: string;
+type AgentHarness = {
+  role: string;
+  workflow: string;
 };
 
-type AgentAccessType = "trial" | "hired";
-
-type AgentAccessRecord = {
-  id: string;
-  agentId: string;
-  hirerId: string;
-  status: "active" | "expired";
-  accessType: AgentAccessType;
-  receiptObjectId: string;
-  trialCallsRemaining: number | null;
-  pricePerCallUsd: number;
-  ownerSuiAddress?: string | null;
-  paymentIntentId?: string | null;
-  paymentTxDigest?: string | null;
-  paymentAmountMist?: string | null;
-  paymentAmountSui?: string | null;
-  paymentCurrency?: string | null;
-  paymentNetwork?: string | null;
-  createdAt: string;
-  updatedAt: string;
-  expiresAt: string | null;
-  source: "gateway" | "local";
-  gatewayError?: string;
+type AgentMemory = {
+  bootstrap: string;
+  session: boolean;
+  user: boolean;
 };
 
-type CreatedAgentRecord = {
-  id: string;
-  creatorId: string;
-  creatorEmail: string;
-  creatorInfoUrl?: string;
-  agentName: string;
-  agentSlug: string;
-  headline?: string;
-  description: string;
-  howToUse?: string;
-  typicalOutputSample?: string;
-  typicalOutputMediaUrl?: string;
-  typicalOutputMediaPath?: string;
-  typicalOutputMediaType?: "image" | "video";
-  avgLatencyMs?: number;
-  avgTokenCount?: number;
-  activeUsers?: number;
-  pricePerCallUsd: number;
-  walrusBlobId: string;
-  suiObjectId: string;
-  ciphertextDigest: string;
-  fileCount: number;
-  createdAt: string;
-  updatedAt?: string;
-  currentVersionNumber?: number;
-  status: "Local Draft" | "Published";
-  source: "local" | "gateway";
-  gatewayError?: string;
+type AgentAuthoringState = {
+  phase: string;
+  revision: number;
+  packagePath?: string;
+  packageDigest?: string;
 };
 
-type AgentDraft = {
-  category: Agent["category"] | "";
-  agentName: string;
-  headline: string;
-  description: string;
-  creatorInfoUrl: string;
-  howToUse: string;
-  sampleInput: string;
-  creatorFeeUsd: string;
-};
+type DesignQuestionKind = "single" | "multi" | "short" | "long";
 
-type GatewayAgentRegistrationResult = {
-  status?: string;
-  registeredAt?: string;
-  publicAgent?: GatewayPublicAgent;
-  protectedArtifact?: {
-    network?: "walrus-testnet" | "walrus-mainnet";
-    encryptionProvider?: string;
-    platformKmsKeyId?: string;
-    ciphertextFormat?: string;
-    sealPolicyId?: string;
-    sealEncryptionId?: string;
-    sealThreshold?: number | null;
-    sealKeyServerIds?: string[];
-    walrusBlobId?: string;
-    suiObjectId?: string;
-    ciphertextDigest?: string;
-    folderManifestDigest?: string;
-    storageEpochs?: number;
-  };
-  upload?: {
-    storageProvider?: string;
-    storageEpochs?: number;
-    ciphertextSizeBytes?: number;
-    plaintextArchiveSizeBytes?: number;
-    entryPreview?: string[];
-    entryCount?: number;
-    folderManifestDigest?: string;
-    walrusStoreError?: string | null;
-  };
-  supabase?: {
-    status?: string;
-    reason?: string;
-    error?: string;
-  };
-  version?: {
-    versionNumber?: number;
-    releaseNotes?: string;
-  };
-};
-
-type MyPageTab = "registered" | "hired" | "activity";
-
-type MyActivityItem = {
+type DesignQuestion = {
   id: string;
   label: string;
-  title: string;
-  description: string;
-  timestamp: string;
-  tone: "registered" | "hired" | "trial" | "result" | "payment" | "failed";
+  helper?: string;
+  kind: DesignQuestionKind;
+  required: boolean;
+  options?: string[];
 };
 
-type GatewayPublicAgent = {
-  id?: string;
-  name?: string;
-  handle?: string;
-  creator?: string;
-  creatorInfoUrl?: string;
-  category?: Agent["category"];
-  status?: Agent["status"];
-  headline?: string;
-  publicSummary?: string;
-  howToUse?: string;
-  publicSkills?: string[];
-  publicContract?: string;
-  memwalPolicy?: string;
-  hiddenAssetClasses?: string[];
-  sealedHarness?: Agent["sealedHarness"];
-  pricePerCallUsd?: number;
-  pricePer1MTokensSui?: number;
-  freeCalls?: number;
-  rating?: number;
-  historicalCalls?: number;
-  medianLatencyMs?: number;
-  avgInputTokens?: number | null;
-  avgOutputTokens?: number | null;
-  createdAt?: string;
-  updatedAt?: string;
-  currentVersionNumber?: number;
-  versionPublishedAt?: string;
+type DesignDecisionSystem = {
+  purpose: string;
+  priorities: string[];
+  avoid: string[];
+  qualityBar: string[];
+  questions: DesignQuestion[];
+  priorityCount?: number;
+  qualityBarCount?: number;
 };
 
-type GatewayAccessPayload = Omit<Partial<AgentAccessRecord>, "source"> & {
-  source?: string;
-  storageSource?: string;
-  agent?: GatewayPublicAgent;
+type Agent = {
+  databaseId?: string;
+  id: string;
+  name: string;
+  creator: string;
+  category: AgentCategory;
+  headline: string;
+  summary: string;
+  skills: string[];
+  resultTypes: string[];
+  outputExamples?: AgentOutputExample[];
+  image?: string;
+  accent: "green" | "coral" | "blue" | "yellow" | "violet" | "charcoal";
+  rating: number;
+  reviews: number;
+  uses: number;
+  billingMode: BillingMode;
+  runPrice?: number;
+  subscriptionPrice?: number;
+  version: string;
+  ownership: AgentOwnership;
+  status: "공개" | "검토 중" | "초안";
+  revenue30d?: number;
+  subscribers?: number;
+  runtime: "local" | "protected" | "preview";
+  hired?: boolean;
+  source?: "database" | "local";
+  harness?: AgentHarness;
+  memory?: AgentMemory;
+  authoring?: AgentAuthoringState;
+  designSystem?: DesignDecisionSystem;
 };
 
-type GatewayAgentCallResponse = {
-  activeAgentId?: string;
-  agentId?: string;
-  callId?: string;
-  traceId?: string;
-  attachments?: unknown[];
-  codexView?: unknown;
-  conversationId?: string | null;
-  error?: unknown;
-  message?: string;
-  memoryJobId?: string | null;
-  outputText?: string | null;
-  responseMode?: string;
-  resultAttachments?: unknown[];
-  status?: string;
-  result?: {
-    outputText?: string;
-    outputMode?: string;
-    type?: string;
-    attachments?: unknown[];
-    outputFiles?: unknown[];
-  };
-  jsonOutput?: {
-    responseMode?: string;
-    payload?: {
-      attachments?: unknown[];
-      outputText?: string;
-      outputFiles?: unknown[];
-      summary?: string;
-      [key: string]: unknown;
-    };
-    localCodex?: {
-      shouldAct?: boolean;
-      instruction?: string;
-      preferredSource?: string;
-    };
-  };
-  ledgerEvent?: {
-    mcpConversationId?: string | null;
-    responseDigest?: string;
-    status?: string;
-  };
-  memory?: {
-    status?: string;
-    jobId?: string;
-    waitForMemory?: boolean | null;
-    conversationStored?: boolean | null;
-  };
-  userMemWal?: {
-    stored?: boolean;
-    status?: string;
-    jobId?: string;
-    recordPath?: string;
-  };
-  mcpConversation?: {
-    stored?: boolean;
-    status?: string;
-    configured?: boolean;
-    conversationId?: string;
-    memoryJobId?: string | null;
-    blobId?: string | null;
-    indexJobId?: string | null;
-    error?: {
-      code?: string;
-      message?: string;
-    } | null;
-  };
-  authorization?: {
-    trialCallsRemaining?: number | null;
-  };
-  suiEscrowSettlement?: {
-    status?: string;
-    reason?: string;
-    txDigest?: string;
-    escrowObjectId?: string;
-    actualMist?: string;
-    actualSui?: string;
-  } | null;
+type Attachment = {
+  name: string;
+  path?: string;
+  size?: number;
+  mimeType?: string;
+  previewUrl?: string;
+  kind?: string;
+  storageKey?: string;
 };
 
-type GatewaySuiEscrowOpenIntentPayload = {
-  status?: string;
-  settlementRequired?: boolean;
-  packageId?: string;
-  openCallEscrowTarget?: string;
-  clockObjectId?: string;
-  agentVersionObjectId?: string;
-  hirerWalletObjectId?: string;
-  creatorWalletObjectId?: string;
-  maxMist?: string;
-  requestDigest?: string;
-  requestDigestBytes?: number[];
-  expiresAtMs?: string;
+type AgentOutputExample = Attachment & {
+  description?: string;
+  previewText?: string;
 };
 
-type SuiCallEscrowPayload = {
-  escrowObjectId: string;
-  openTxDigest: string;
-  agentVersionObjectId: string;
-  hirerWalletObjectId: string;
-  creatorWalletObjectId: string;
-  maxMist: string;
-  requestDigest: string;
-  expiresAtMs: string;
-};
-
-type GatewayAgentStreamEvent = {
-  data: GatewayAgentCallResponse;
-  event: string;
-};
-
-type TryChatMessage = {
+type ChatMessage = {
   id: string;
   role: "user" | "assistant";
   text: string;
-  attachments?: TryChatAttachment[];
-  callId?: string | null;
-  conversationId?: string | null;
-  createdAt: string;
-  pending?: boolean;
-  error?: boolean;
-  memWalBlobId?: string | null;
-  memoryJobId?: string | null;
-  memWalStatus?: TryMemWalDisplayStatus | null;
-  responseMode?: string | null;
-  traceId?: string | null;
+  at: string;
+  status?: "queued" | "sent" | "failed" | "cancelled";
+  elapsedMs?: number;
+  attachments?: Attachment[];
+  artifacts?: Attachment[];
+  streaming?: boolean;
+  retry?: { text: string; attachments: Attachment[] };
 };
 
-type TryChatAttachment = {
+type Conversation = {
   id: string;
-  type: "image";
-  url: string;
-  label: string;
-  localImageKey?: string | null;
-  mimeType?: string | null;
-};
-
-type TryChatImageRecord = {
-  key: string;
-  url: string;
-  label: string;
-  mimeType: string | null;
+  title: string;
+  agentId: string;
   updatedAt: string;
+  messages: ChatMessage[];
+  archived?: boolean;
+  storage?: "database" | "local";
+  provider?: string | null;
+  model?: string | null;
+  mode?: "work" | "agent_authoring";
 };
 
-type TryMemWalDisplayStatus = "pending" | "stored" | "failed";
-
-type TryConversationContext = {
-  agentId: string;
-  callId?: string | null;
-  conversationId: string;
-  memWalStatus: string;
-  conversationStored: boolean | null;
-  mcpConversationStatus: string | null;
-  memWalBlobId?: string | null;
-  userMemWalStatus: string | null;
-  memoryJobId?: string | null;
-  traceId?: string | null;
-  waitForMemory?: boolean | null;
+type RunState = {
+  runId: string;
+  startedAt: number;
+  steps: string[];
+  image?: boolean;
 };
 
-type TryClientConversationContext = {
-  agentId: string;
-  conversationId: string;
-  messages: Array<{
-    role: "user" | "assistant";
-    text: string;
-    createdAt?: string;
-    memWalStatus?: TryMemWalDisplayStatus | null;
-    callId?: string | null;
-    traceId?: string | null;
-    memoryJobId?: string | null;
-  }>;
-  source: "web_try_local_transcript";
-  updatedAt: string;
+type QueuedRequest = {
+  messageId: string;
+  text: string;
+  attachments: Attachment[];
+  at: string;
+  kind?: "draft_output";
 };
 
-type TryChatTranscriptRecord = {
-  conversationContext: TryConversationContext | null;
-  messages: TryChatMessage[];
-  updatedAt: string;
+type ToastState = {
+  id: number;
+  title: string;
+  detail?: string;
 };
 
-type GatewayMemWalResultPayload = {
-  id?: string;
-  callId?: string;
-  agentId?: string;
-  hirerId?: string;
-  createdAt?: string;
-  visibility?: string;
-  requestDigest?: string;
-  responseDigest?: string;
-  ciphertextDigest?: string;
-  ciphertextFormat?: string;
-  encryptionProvider?: string;
-  recordPath?: string;
-  safeSummary?: {
-    type?: string;
-    resultKeys?: string[];
-    jsonOutputSchema?: string | null;
-    rawResultReturnedInRecord?: boolean;
-  };
-};
+type ModalState =
+  | { type: "new-chat"; scope: WorkScope }
+  | { type: "new-agent" }
+  | { type: "delete-agent"; agentId: string }
+  | { type: "agent-profile"; agentId: string }
+  | { type: "edit-agent"; agentId: string }
+  | { type: "delete-conversation"; conversationId: string }
+  | null;
 
-type GatewaySuiPaymentActivityPayload = {
-  verificationId?: string;
-  intentId?: string;
-  agentId?: string;
-  hirerId?: string;
-  txDigest?: string;
-  status?: "verified" | "failed" | "skipped" | string;
-  verificationMode?: string;
-  network?: string;
-  expectedAmountMist?: string;
-  expectedAmountSui?: string;
-  observedRecipientAmountMist?: string | null;
-  observedRecipientAmountSui?: string | null;
-  effectStatus?: string | null;
-  failureReason?: string | null;
-  createdAt?: string;
-};
-
-type GatewayWalletAgentStatPayload = {
-  agentId: string;
-  agentUuid?: string | null;
-  name?: string;
-  owned?: boolean;
-  totalEarnedSui?: string;
-  myEarnedSui?: string;
-  claimableSui?: string;
-  mySpentSui?: string;
-  totalCallCount?: number;
-  earnedCallCount?: number;
-  spentCallCount?: number;
-  lastEarnedAt?: string | null;
-  lastChargedAt?: string | null;
-};
-
-type GatewayWalletSummaryPayload = {
-  status?: string;
-  reason?: string;
-  balance?: {
-    availableSui?: string;
-    netBalanceSui?: string;
-    claimableEarningsSui?: string;
-    topUpSui?: string;
-    spentSui?: string;
-    earnedSui?: string;
-    claimedSui?: string;
-  };
-  agents?: GatewayWalletAgentStatPayload[];
-  ledger?: {
-    spendCallCount?: number;
-    earningCallCount?: number;
-    ownedAgentCount?: number;
-  };
-  source?: string;
-};
-
-function isMarketplaceAgentVisible(agent: Agent) {
-  return (
-    !hiddenMarketplaceAgentIds.has(agent.id) &&
-    !hiddenMarketplaceAgentHandles.has(agent.handle) &&
-    agent.name !== "Codex Builder"
-  );
-}
-
-function App() {
-  const [authUser, setAuthUser] = useState<AuthUser | null>(readStoredAuthUser);
-  const [isLoginOpen, setIsLoginOpen] = useState(false);
-  const updateAuthUser = (user: AuthUser | null) => {
-    setAuthUser(user);
-    writeStoredAuthUser(user);
-  };
-
-  useEffect(() => {
-    if (!supabase) return;
-    let cancelled = false;
-
-    async function applySession() {
-      const { data } = await supabase!.auth.getSession();
-      if (!data.session) return;
-      const user = authUserFromSupabaseSession(data.session);
-      await syncGatewayWebSession(
-        data.session.access_token,
-        user.wallet,
-        user.displayName,
-      );
-      if (!cancelled) {
-        setAuthUser(user);
-        writeStoredAuthUser(user);
-      }
-    }
-
-    void applySession();
-    const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
-      if (!session) {
-        const localUser = readStoredAuthUser();
-        if (
-          event !== "SIGNED_OUT" &&
-          typeof localUser?.provider === "string" &&
-          localUser.provider.startsWith("local")
-        ) {
-          setAuthUser(localUser);
-          return;
-        }
-        setAuthUser(null);
-        writeStoredAuthUser(null);
-        return;
-      }
-      const user = authUserFromSupabaseSession(session);
-      setAuthUser(user);
-      writeStoredAuthUser(user);
-      void syncGatewayWebSession(
-        session.access_token,
-        user.wallet,
-        user.displayName,
-      );
-    });
-
-    return () => {
-      cancelled = true;
-      listener.subscription.unsubscribe();
-    };
-  }, []);
-
-  async function logout() {
-    if (supabase) {
-      await supabase.auth.signOut();
-    }
-    await clearGatewayWebSession();
-    updateAuthUser(null);
-  }
-
-  return (
-    <BrowserRouter>
-      <AppShell
-        authUser={authUser}
-        isLoginOpen={isLoginOpen}
-        onHomeClick={() => {
-          window.scrollTo({
-            top: 0,
-            behavior: prefersReducedMotion() ? "auto" : "smooth",
-          });
-        }}
-        onLogin={updateAuthUser}
-        onLoginClose={() => setIsLoginOpen(false)}
-        onLoginOpen={() => setIsLoginOpen(true)}
-        onLogout={() => {
-          void logout();
-        }}
-        onProfileSaved={(displayName) => {
-          if (!authUser) return;
-          updateAuthUser({ ...authUser, displayName });
-        }}
-        onWalletLinked={(wallet) => {
-          if (!authUser) return;
-          updateAuthUser({ ...authUser, wallet });
-        }}
-      />
-    </BrowserRouter>
-  );
-}
-
-function AppShell({
-  authUser,
-  isLoginOpen,
-  onHomeClick,
-  onLogin,
-  onLoginClose,
-  onLoginOpen,
-  onLogout,
-  onProfileSaved,
-  onWalletLinked,
-}: {
-  authUser: AuthUser | null;
-  isLoginOpen: boolean;
-  onHomeClick: () => void;
-  onLogin: (user: AuthUser | null) => void;
-  onLoginClose: () => void;
-  onLoginOpen: () => void;
-  onLogout: () => void;
-  onProfileSaved: (displayName: string) => void;
-  onWalletLinked: (wallet: string) => void;
-}) {
-  const location = useLocation();
-  const currentAccount = useCurrentAccount();
-  const signTransaction = useSignTransaction();
-  const [showBackToTop, setShowBackToTop] = useState(false);
-  const [reducedMotion, setReducedMotion] = useState(false);
-  const walletObjectEnsureAttemptsRef = useRef(new Set<string>());
-
-  useEffect(() => {
-    const mediaQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
-    const updatePreference = () => setReducedMotion(mediaQuery.matches);
-    updatePreference();
-    mediaQuery.addEventListener("change", updatePreference);
-    return () => mediaQuery.removeEventListener("change", updatePreference);
-  }, []);
-
-  useEffect(() => {
-    if (location.pathname !== "/") {
-      return;
-    }
-
-    const threshold = 600;
-    const updateVisibility = () => {
-      setShowBackToTop(window.scrollY >= threshold);
-    };
-
-    const frame = window.requestAnimationFrame(updateVisibility);
-    window.addEventListener("scroll", updateVisibility, { passive: true });
-    window.addEventListener("resize", updateVisibility);
-    return () => {
-      window.cancelAnimationFrame(frame);
-      window.removeEventListener("scroll", updateVisibility);
-      window.removeEventListener("resize", updateVisibility);
-    };
-  }, [location.pathname]);
-
-  useEffect(() => {
-    if (!authUser?.wallet || !currentAccount?.address) return;
-    const userWallet = normalizeSuiAddressForCompare(authUser.wallet);
-    const connectedWallet = normalizeSuiAddressForCompare(currentAccount.address);
-    if (!userWallet || userWallet !== connectedWallet) return;
-    const ensureKey = `${authUser.id}:${userWallet}`;
-    if (walletObjectEnsureAttemptsRef.current.has(ensureKey)) return;
-    walletObjectEnsureAttemptsRef.current.add(ensureKey);
-
-    void ensureSponsoredGatewaySuiWalletObject({
-      displayName: authUser.displayName,
-      signTransaction: signTransaction.mutateAsync,
-      suiAddress: authUser.wallet,
-    }).catch((error) => {
-      console.warn(
-        "[HireMe] Sui wallet object fallback failed",
-        error instanceof Error ? error.message : error,
-      );
-    });
-  }, [
-    authUser?.displayName,
-    authUser?.id,
-    authUser?.wallet,
-    currentAccount?.address,
-    signTransaction.mutateAsync,
-  ]);
-
-  const scrollToTop = () => {
-    window.scrollTo({
-      top: 0,
-      behavior: reducedMotion ? "auto" : "smooth",
-    });
-  };
-
-  return (
-    <>
-      <TopNav
-        onHomeClick={onHomeClick}
-        onLogout={onLogout}
-        user={authUser}
-        onLoginClick={onLoginOpen}
-      />
-      <Routes>
-        <Route path="/" element={<LandingPage />} />
-        <Route path="/docs" element={<DocsPage />} />
-        <Route path="/debug/call" element={<DebugCallPage />} />
-        <Route path="/login" element={<LoginPage onLogin={onLogin} />} />
-        <Route
-          path="/auth/callback"
-          element={<AuthCallbackPage onLogin={onLogin} />}
-        />
-        <Route path="/auth/enoki/callback" element={<EnokiCallbackPage />} />
-        <Route
-          path="/agents"
-          element={
-            <ExploreAgentsPage
-              onRequireLogin={onLoginOpen}
-              user={authUser}
-            />
-          }
-        />
-        <Route
-          path="/agents/create"
-          element={<CreateAgentPage user={authUser} />}
-        />
-        <Route
-          path="/agents/:agentId/edit"
-          element={<EditAgentPage user={authUser} />}
-        />
-        <Route
-          path="/agents/:agentId"
-          element={
-            <AgentDetailPage
-              onRequireLogin={onLoginOpen}
-              user={authUser}
-            />
-          }
-        />
-        <Route
-          path="/my"
-          element={
-            <MyAgentsPage
-              onLogout={onLogout}
-              onWalletLinked={onWalletLinked}
-              onRequireLogin={onLoginOpen}
-              user={authUser}
-            />
-          }
-        />
-        <Route path="*" element={<Navigate replace to="/" />} />
-      </Routes>
-      {location.pathname === "/" ? (
-          <BackToTopButton
-            onClick={scrollToTop}
-            reducedMotion={reducedMotion}
-            visible={location.pathname === "/" && showBackToTop}
-          />
-      ) : null}
-      <LoginDialog open={isLoginOpen} onClose={onLoginClose} />
-      <ProfileNameDialog
-        key={authUser?.id || "signed-out"}
-        onSaved={onProfileSaved}
-        user={authUser}
-      />
-    </>
-  );
-}
-
-function prefersReducedMotion() {
-  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-}
-
-function BackToTopButton({
-  onClick,
-  reducedMotion,
-  visible,
-}: {
-  onClick: () => void;
-  reducedMotion: boolean;
-  visible: boolean;
-}) {
-  return (
-    <button
-      aria-label="맨 위로 이동"
-      className={[
-        "fixed right-5 bottom-[calc(1.25rem+env(safe-area-inset-bottom))] z-30 inline-flex size-11 items-center justify-center rounded-full border border-[rgba(49,130,246,0.18)] bg-[rgba(255,255,255,0.82)] text-[#3182f6] shadow-[0_16px_40px_rgba(15,52,96,0.14)] backdrop-blur-[14px] transition-[opacity,transform,box-shadow,background-color,border-color] duration-300 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(49,130,246,0.35)] focus-visible:ring-offset-2 md:right-6 md:bottom-[calc(1.5rem+env(safe-area-inset-bottom))]",
-        reducedMotion ? "" : "hover:-translate-y-0.5 hover:border-[rgba(49,130,246,0.26)] hover:bg-white",
-        visible ? "pointer-events-auto opacity-100 translate-y-0" : "pointer-events-none opacity-0 translate-y-3",
-      ].join(" ")}
-      onClick={onClick}
-      type="button"
-    >
-      <ArrowUp className="size-4" />
-    </button>
-  );
-}
-
-function readStoredAuthUser() {
-  try {
-    const raw = window.localStorage.getItem(authStorageKey);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as AuthUser;
-    return parsed.email ? parsed : null;
-  } catch {
-    return null;
-  }
-}
-
-function writeStoredAuthUser(user: AuthUser | null) {
-  try {
-    if (!user) {
-      window.localStorage.removeItem(authStorageKey);
-      return;
-    }
-    window.localStorage.setItem(authStorageKey, JSON.stringify(user));
-  } catch {
-    // Local demo auth can still work without storage.
-  }
-}
-
-function authUserFromSupabaseSession(session: Session): AuthUser {
-  const metadata = session.user.user_metadata || {};
-  return {
-    id: session.user.id,
-    displayName: String(metadata.hireme_display_name || ""),
-    email:
-      session.user.email ||
-      String(metadata.email || metadata.full_name || "unknown@hireme.local"),
-    wallet: String(metadata.sui_address || metadata.wallet || ""),
-    provider:
-      session.user.app_metadata?.provider ||
-      session.user.app_metadata?.providers?.[0] ||
-      "supabase",
-  };
-}
-
-async function syncGatewayWebSession(
-  accessToken: string,
-  suiAddress?: string,
-  displayName?: string,
-) {
-  const response = await fetch(`${gatewayUrl}/oauth/web-session`, {
-    method: "POST",
-    credentials: "include",
-    headers: {
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
-      access_token: accessToken,
-      sui_address: suiAddress || undefined,
-      display_name: displayName || undefined,
-    }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Gateway web session failed: ${await response.text()}`);
-  }
-}
-
-async function syncGatewaySuiWallet(suiAddress: string, displayName?: string) {
-  if (!supabase) {
-    throw new Error("Supabase Auth is not configured.");
-  }
-  const { data, error } = await supabase.auth.getSession();
-  if (error) throw error;
-  if (!data.session) {
-    throw new Error("Login before connecting a Sui wallet.");
-  }
-  const { error: updateError } = await supabase.auth.updateUser({
-    data: {
-      sui_address: suiAddress,
-    },
-  });
-  if (updateError) throw updateError;
-  await syncGatewayWebSession(data.session.access_token, suiAddress, displayName);
-}
-
-async function ensureSponsoredGatewaySuiWalletObject({
-  displayName,
-  signTransaction,
-  suiAddress,
-}: {
-  displayName?: string;
-  signTransaction: SignTransaction;
-  suiAddress: string;
-}) {
-  if (!supabase) {
-    throw new Error("Supabase Auth is not configured.");
-  }
-  const { data, error } = await supabase.auth.getSession();
-  if (error) throw error;
-  if (!data.session) {
-    throw new Error("Login before creating a Sui wallet object.");
-  }
-
-  const intentResponse = await fetch(
-    `${gatewayUrl}/v1/me/sui-wallet/sponsored-create-intent`,
+const outputExampleCatalog: Record<string, AgentOutputExample[]> = {
+  "dokpami-create-agent": [
     {
-      method: "POST",
-      headers: gatewayRequestHeaders(),
-      body: JSON.stringify({
-        access_token: data.session.access_token,
-        sui_address: suiAddress,
-        display_name: displayName || undefined,
-      }),
+      name: "dokpami-sad-result.png",
+      mimeType: "image/png",
+      size: 1_842_000,
+      previewUrl: "/assets/after/dokpami-result-preview.png",
+      description: "원본 캐릭터의 인상을 유지해 완성한 최종 PNG",
     },
-  );
-  if (!intentResponse.ok) {
-    throw new Error(`Gateway wallet object intent failed: ${await intentResponse.text()}`);
-  }
-
-  const intent = (await intentResponse.json()) as {
-    status?: string;
-    sponsoredRequired?: boolean;
-    digest?: string;
-    bytes?: string;
-  };
-  if (intent.status === "existing" || intent.sponsoredRequired === false) return;
-  if (!intent.digest || !intent.bytes) {
-    throw new Error("Gateway did not return a sponsored wallet creation transaction.");
-  }
-
-  const signed = await signTransaction({ transaction: intent.bytes });
-  const executeResponse = await fetch(
-    `${gatewayUrl}/v1/me/sui-wallet/sponsored-create-execute`,
     {
-      method: "POST",
-      headers: gatewayRequestHeaders(),
-      body: JSON.stringify({
-        access_token: data.session.access_token,
-        sui_address: suiAddress,
-        display_name: displayName || undefined,
-        digest: intent.digest,
-        signature: signed.signature,
-      }),
-    },
-  );
-  if (!executeResponse.ok) {
-    throw new Error(`Gateway wallet object creation failed: ${await executeResponse.text()}`);
-  }
-}
-
-async function saveProfileDisplayName(displayName: string, suiAddress?: string) {
-  const normalized = displayName.trim().replace(/\s+/g, " ");
-  if (normalized.length < 2) {
-    throw new Error("Name must be at least 2 characters.");
-  }
-  if (normalized.length > 40) {
-    throw new Error("Name must be 40 characters or fewer.");
-  }
-  if (!supabase) return normalized;
-
-  const { data: sessionData, error: sessionError } =
-    await supabase.auth.getSession();
-  if (sessionError) throw sessionError;
-  const session = sessionData.session;
-  if (!session) {
-    throw new Error("Login before setting your name.");
-  }
-
-  const { error } = await supabase.auth.updateUser({
-    data: {
-      hireme_display_name: normalized,
-    },
-  });
-  if (error) throw error;
-
-  await syncGatewayWebSession(
-    session.access_token,
-    suiAddress || String(session.user.user_metadata?.sui_address || ""),
-    normalized,
-  );
-  return normalized;
-}
-
-async function clearGatewayWebSession() {
-  try {
-    await fetch(`${gatewayUrl}/oauth/web-session`, {
-      method: "DELETE",
-      credentials: "include",
-    });
-  } catch {
-    // Supabase logout still clears the browser session.
-  }
-}
-
-async function signInWithGoogle(returnTo?: string | null) {
-  if (!supabase || !isSupabaseConfigured) {
-    throw new Error("Supabase Auth is not configured.");
-  }
-  const callbackUrl = new URL("/auth/callback", window.location.origin);
-  if (returnTo) {
-    callbackUrl.searchParams.set("return_to", returnTo);
-  }
-  const { data, error } = await supabase.auth.signInWithOAuth({
-    provider: "google",
-    options: {
-      redirectTo: callbackUrl.toString(),
-      skipBrowserRedirect: true,
-    },
-  });
-  if (error) throw error;
-  if (!data.url) {
-    throw new Error("Supabase did not return a Google login URL.");
-  }
-  window.location.assign(data.url);
-}
-
-function readAuthCallbackError(location: { hash: string; search: string }) {
-  const searchParams = new URLSearchParams(location.search);
-  const hashParams = new URLSearchParams(location.hash.replace(/^#/, ""));
-  const error =
-    searchParams.get("error_description") ||
-    hashParams.get("error_description") ||
-    searchParams.get("error") ||
-    hashParams.get("error");
-  return error ? new Error(error) : null;
-}
-
-function formatAuthCallbackError(err: unknown) {
-  const message =
-    err instanceof Error ? err.message : "Could not complete Google sign-in.";
-  if (message.includes("No Supabase session")) {
-    return `Google returned to HireMe, but Supabase did not create a session. Add ${window.location.origin}/auth/callback to the Supabase Redirect URLs and try again.`;
-  }
-  if (message.includes("Gateway web session failed")) {
-    return `Google sign-in worked, but HireMe could not sync the gateway session. Check the gateway Supabase keys and try again. ${message}`;
-  }
-  if (message.includes("Supabase Auth is not configured")) {
-    return "Supabase Auth is not configured for this deployment.";
-  }
-  return message;
-}
-
-type EnokiWallets = ReturnType<typeof useWallets>;
-type ConnectWallet = ReturnType<typeof useConnectWallet>["mutateAsync"];
-type SignAndExecuteTransaction = (input: {
-  transaction: Transaction | string;
-}) => Promise<unknown>;
-type SignTransaction = (input: {
-  transaction: Transaction | string;
-}) => Promise<{
-  bytes: string;
-  signature: string;
-}>;
-
-async function connectEnokiGoogleAddress({
-  connectWallet,
-  wallets,
-}: {
-  connectWallet: ConnectWallet;
-  wallets: EnokiWallets;
-}) {
-  if (!isEnokiConfigured) {
-    throw new Error("Enoki is not configured.");
-  }
-
-  const googleWallet = wallets.find((wallet) => isGoogleWallet(wallet));
-  if (!googleWallet) {
-    throw new Error("Enoki Google wallet is not available.");
-  }
-
-  const connectResult = await connectWallet({ wallet: googleWallet });
-  const account = connectResult.accounts[0];
-  if (!account?.address) {
-    throw new Error("No Sui address was returned from Enoki.");
-  }
-  return account.address;
-}
-
-function safeReturnTo(value: string | null) {
-  if (!value) return null;
-  try {
-    const target = new URL(value);
-    const gateway = new URL(gatewayUrl);
-    if (
-      target.origin === gateway.origin &&
-      target.pathname === "/oauth/authorize"
-    ) {
-      return target.toString();
-    }
-    if (target.origin === window.location.origin) {
-      return target.toString();
-    }
-  } catch {
-    return null;
-  }
-  return null;
-}
-
-function hirerIdFor(user: AuthUser) {
-  return normalizeHirerId(user.email || user.wallet || "local-hirer");
-}
-
-function creatorIdFor(user: AuthUser) {
-  return normalizeHirerId(user.wallet || user.email || user.displayName || "local-creator");
-}
-
-function normalizeHirerId(value: string) {
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9:._@-]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 96) || "local-hirer";
-}
-
-function gatewayRequestHeaders() {
-  const headers: Record<string, string> = {
-    "content-type": "application/json",
-  };
-  if (gatewayApiKey) {
-    headers.authorization = `Bearer ${gatewayApiKey}`;
-    headers["x-hireme-gateway-key"] = gatewayApiKey;
-  }
-  return headers;
-}
-
-function gatewayAuthHeaders() {
-  const headers: Record<string, string> = {};
-  if (gatewayApiKey) {
-    headers.authorization = `Bearer ${gatewayApiKey}`;
-    headers["x-hireme-gateway-key"] = gatewayApiKey;
-  }
-  return headers;
-}
-
-async function createAgentWithGatewayUpload({
-  draft,
-  agentSlug,
-  totalPricePerCallUsd,
-  publicCapability,
-  typicalOutputUpload,
-  harnessFile,
-  user,
-}: {
-  draft: {
-    category: Agent["category"] | "";
-    agentName: string;
-    headline: string;
-    description: string;
-    creatorInfoUrl: string;
-    howToUse: string;
-    sampleInput: string;
-  };
-  agentSlug: string;
-  totalPricePerCallUsd: number;
-  publicCapability: string;
-  typicalOutputUpload: {
-    path: string;
-    type: "image" | "video";
-    url: string;
-  } | null;
-  harnessFile: File;
-  user: AuthUser | null;
-}): Promise<GatewayAgentRegistrationResult> {
-  const creator =
-    user?.displayName || user?.email || user?.wallet || "Web creator";
-  const creatorInfoUrl = normalizeCreatorInfoUrl(draft.creatorInfoUrl);
-  const metadata = {
-    agent_id: agentSlug,
-    name: draft.agentName,
-    handle: `@agents/${agentSlug}`,
-    creator,
-    creator_info_url: creatorInfoUrl || null,
-    category: draft.category || "Code",
-    status: "Available",
-    headline: draft.headline,
-    public_summary: draft.description || draft.headline,
-    how_to_use: draft.howToUse,
-    public_mcp_contract: publicCapability,
-    memwal_policy:
-      "Hirer-visible results are stored in hirer-scoped memWal records. Creator private files stay behind the gateway.",
-    skills: ["Protected Harness", "Codex MCP"],
-    protected_asset_classes: [
-      "Agent Harness archive",
-      "AGENTS.md",
-      "skills/**",
-      "private prompts",
-    ],
-    price_per_1m_tokens_sui: totalPricePerCallUsd,
-    price_per_1m_tokens_usd: totalPricePerCallUsd,
-    price_per_call_usd: totalPricePerCallUsd,
-    free_calls: trialCallAllowance,
-    storage_network: "walrus-testnet",
-    storage_epochs: defaultAgentStorageEpochs,
-    result_title: "Sample Input",
-    result_summary: "",
-    result_sample: draft.sampleInput,
-    result_media_url: typicalOutputUpload?.url,
-    result_media_type: typicalOutputUpload?.type,
-    metadata: {
-      source: "web_create_agent",
-      creatorInfoUrl: creatorInfoUrl || null,
-      howToUse: draft.howToUse,
-      sampleInput: draft.sampleInput,
-      typicalOutputMediaPath: typicalOutputUpload?.path,
-    },
-  };
-  const formData = new FormData();
-  formData.append("metadata", JSON.stringify(metadata));
-  formData.append("harness", harnessFile, harnessFile.name);
-
-  const response = await fetch(`${gatewayUrl}/v1/agents/create`, {
-    method: "POST",
-    headers: gatewayAuthHeaders(),
-    body: formData,
-  });
-
-  if (!response.ok) {
-    throw new Error(`Gateway ${response.status}: ${await response.text()}`);
-  }
-
-  return (await response.json()) as GatewayAgentRegistrationResult;
-}
-
-async function updateAgentWithGatewayUpload({
-  agent,
-  harnessFile,
-  releaseNotes,
-  user,
-}: {
-  agent: Agent;
-  harnessFile: File;
-  releaseNotes: string;
-  user: AuthUser | null;
-}): Promise<GatewayAgentRegistrationResult> {
-  const creator =
-    agent.creator || user?.displayName || user?.email || user?.wallet || "Web creator";
-  const tokenPrice = agent.pricePer1MTokensSui ?? agent.pricePerCallUsd;
-  const metadata = {
-    agent_id: agent.id,
-    name: agent.name,
-    handle: agent.handle,
-    creator,
-    creator_info_url: agent.creatorInfoUrl || null,
-    category: agent.category,
-    status: agent.status,
-    headline: agent.headline,
-    public_summary: agent.publicSummary || agent.headline,
-    how_to_use: agent.howToUse || null,
-    public_mcp_contract:
-      agent.publicContract || `${agent.id}(task, context, budget_calls)`,
-    memwal_policy: agent.memwalPolicy,
-    skills: agent.skills,
-    protected_asset_classes: agent.protectedAssets?.length
-      ? agent.protectedAssets
-      : ["AGENTS.md", "skills/**", "private prompts"],
-    price_per_1m_tokens_sui: tokenPrice,
-    price_per_1m_tokens_usd: tokenPrice,
-    price_per_call_usd: tokenPrice,
-    free_calls: trialCallAllowance,
-    storage_network: "walrus-testnet",
-    storage_epochs: defaultAgentStorageEpochs,
-    release_notes: releaseNotes || "Updated from the HireMe web creator UI.",
-    result_title: agent.resultPreview.title,
-    result_summary: agent.resultPreview.summary,
-    result_sample: agent.resultPreview.sample,
-    result_media_url: agent.resultPreview.mediaUrl,
-    result_media_type: agent.resultPreview.mediaType,
-    metadata: {
-      source: "web_update_agent",
-      creatorInfoUrl: agent.creatorInfoUrl || null,
-      howToUse: agent.howToUse || null,
-      updatedBy:
-        user?.email || user?.wallet || user?.displayName || "anonymous-web-user",
-    },
-  };
-  const formData = new FormData();
-  formData.append("metadata", JSON.stringify(metadata));
-  formData.append("harness", harnessFile, harnessFile.name);
-
-  const response = await fetch(`${gatewayUrl}/v1/agents/update`, {
-    method: "POST",
-    headers: gatewayAuthHeaders(),
-    body: formData,
-  });
-
-  if (!response.ok) {
-    throw new Error(`Gateway ${response.status}: ${await response.text()}`);
-  }
-
-  return (await response.json()) as GatewayAgentRegistrationResult;
-}
-
-async function updateAgentMetadataWithGateway({
-  agent,
-  user,
-}: {
-  agent: Agent;
-  user: AuthUser | null;
-}): Promise<GatewayAgentRegistrationResult> {
-  const tokenPrice = agent.pricePer1MTokensSui ?? agent.pricePerCallUsd;
-  const payload = {
-    agent_id: agent.id,
-    name: agent.name,
-    handle: agent.handle,
-    creator:
-      agent.creator || user?.displayName || user?.email || user?.wallet || "Web creator",
-    creator_info_url: agent.creatorInfoUrl || null,
-    category: agent.category,
-    status: agent.status,
-    headline: agent.headline,
-    public_summary: agent.publicSummary || agent.headline,
-    how_to_use: agent.howToUse || null,
-    public_mcp_contract:
-      agent.publicContract || `${agent.id}(task, context, budget_calls)`,
-    memwal_policy: agent.memwalPolicy,
-    skills: agent.skills?.length ? agent.skills : ["Protected Harness", "Codex MCP"],
-    protected_asset_classes: agent.protectedAssets?.length
-      ? agent.protectedAssets
-      : ["AGENTS.md", "skills/**", "private prompts"],
-    price_per_1m_tokens_sui: tokenPrice,
-    price_per_1m_tokens_usd: tokenPrice,
-    price_per_call_usd: tokenPrice,
-    free_calls: agent.freeCalls,
-    version_number: Math.max(1, Math.trunc(agent.currentVersionNumber || 1)) + 1,
-    release_notes: "Updated from the HireMe web edit page.",
-    storage_network: agent.sealedHarness.network,
-    seal_policy_id: agent.sealedHarness.sealPolicyId,
-    walrus_blob_id: agent.sealedHarness.walrusBlobId,
-    sui_object_id: agent.sealedHarness.suiObjectId,
-    ciphertext_digest: agent.sealedHarness.ciphertextDigest,
-    result_title: agent.resultPreview.title,
-    result_summary: agent.resultPreview.summary,
-    result_sample: agent.resultPreview.sample,
-    result_media_url: agent.resultPreview.mediaUrl,
-    result_media_type: agent.resultPreview.mediaType,
-    metadata: {
-      source: "web_edit_agent_metadata",
-      creatorInfoUrl: agent.creatorInfoUrl || null,
-      howToUse: agent.howToUse || null,
-      updatedBy:
-        user?.email || user?.wallet || user?.displayName || "anonymous-web-user",
-    },
-  };
-
-  const response = await fetch(`${gatewayUrl}/v1/agents/register`, {
-    method: "POST",
-    headers: gatewayRequestHeaders(),
-    body: JSON.stringify(payload),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Gateway ${response.status}: ${await response.text()}`);
-  }
-
-  return (await response.json()) as GatewayAgentRegistrationResult;
-}
-
-function readAllAgentAccess() {
-  try {
-    const raw = window.localStorage.getItem(accessStorageKey);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw) as AgentAccessRecord[];
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
-function readUserAgentAccess(user: AuthUser) {
-  const hirerId = hirerIdFor(user);
-  return readAllAgentAccess().filter((record) => record.hirerId === hirerId);
-}
-
-function writeUserAgentAccess(user: AuthUser, records: AgentAccessRecord[]) {
-  try {
-    const hirerId = hirerIdFor(user);
-    const others = readAllAgentAccess().filter((record) => record.hirerId !== hirerId);
-    window.localStorage.setItem(
-      accessStorageKey,
-      JSON.stringify([...others, ...records]),
-    );
-  } catch {
-    // My Page can still show the in-memory state for this render.
-  }
-}
-
-function upsertAccessRecord(
-  records: AgentAccessRecord[],
-  nextRecord: AgentAccessRecord,
-) {
-  const withoutCurrent = records.filter(
-    (record) => record.agentId !== nextRecord.agentId,
-  );
-  return [nextRecord, ...withoutCurrent].sort((a, b) =>
-    b.updatedAt.localeCompare(a.updatedAt),
-  );
-}
-
-function markAccessRecordUsed(record: AgentAccessRecord) {
-  if (
-    record.accessType !== "trial" ||
-    record.trialCallsRemaining === null ||
-    record.trialCallsRemaining === undefined
-  ) {
-    return { ...record, updatedAt: new Date().toISOString() };
-  }
-
-  return {
-    ...record,
-    trialCallsRemaining: Math.max(0, record.trialCallsRemaining - 1),
-    updatedAt: new Date().toISOString(),
-  };
-}
-
-function readAllCreatedAgents() {
-  try {
-    const raw = window.localStorage.getItem(createdAgentsStorageKey);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw) as CreatedAgentRecord[];
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
-function readUserCreatedAgents(user: AuthUser) {
-  const creatorId = creatorIdFor(user);
-  return readAllCreatedAgents()
-    .filter((record) => record.creatorId === creatorId)
-    .sort((a, b) =>
-      (b.updatedAt || b.createdAt).localeCompare(a.updatedAt || a.createdAt),
-    );
-}
-
-function writeCreatedAgentRecord(record: CreatedAgentRecord) {
-  try {
-    const records = readAllCreatedAgents().filter((item) => item.id !== record.id);
-    window.localStorage.setItem(
-      createdAgentsStorageKey,
-      JSON.stringify([record, ...records]),
-    );
-    window.dispatchEvent(new Event("hireme-created-agents-updated"));
-  } catch {
-    // The sealed preview still renders even when local persistence is unavailable.
-  }
-}
-
-async function createAgentAccessRecord({
-  accessType,
-  agent,
-  user,
-}: {
-  accessType: AgentAccessType;
-  agent: Agent;
-  user: AuthUser;
-}) {
-  const hirerId = hirerIdFor(user);
-  const payload = {
-    agent_id: agent.id,
-    hirer_id: hirerId,
-    wallet_address: user.wallet,
-    email: user.email,
-    source: accessType === "trial" ? "web_try" : "web_hire",
-    ...(accessType === "trial" ? { trial_calls: trialCallAllowance } : {}),
-  };
-  const endpoint = accessType === "trial" ? "/v1/agents/try" : "/v1/agents/hire";
-
-  try {
-    debugTryChat("access/request", {
-      accessType,
-      agentId: agent.id,
-      endpoint,
-      gatewayUrl,
-      hasEmail: Boolean(user.email),
-      hasWallet: Boolean(user.wallet),
-      hirerId,
-    });
-    const response = await fetch(`${gatewayUrl}${endpoint}`, {
-      method: "POST",
-      headers: gatewayRequestHeaders(),
-      body: JSON.stringify(payload),
-    });
-    debugTryChat("access/response", {
-      agentId: agent.id,
-      endpoint,
-      ok: response.ok,
-      status: response.status,
-    });
-
-    if (response.ok) {
-      const result = await response.json();
-      debugTryChat("access/gateway-record", {
-        accessId: result.access?.id,
-        agentId: result.access?.agentId || agent.id,
-        receiptObjectId: result.access?.receiptObjectId,
-        source: result.access?.source,
-        storageSource: result.access?.storageSource,
-        trialCallsRemaining: result.access?.trialCallsRemaining,
-      });
-      return mapGatewayAccessRecord(result.access, agent, "gateway");
-    }
-    const gatewayError = `Gateway ${response.status}: ${await response.text()}`;
-    warnTryChat("access/fallback-local", {
-      accessType,
-      agentId: agent.id,
-      error: gatewayError,
-      hirerId,
-    });
-    return createLocalAccessRecord({
-      accessType,
-      agent,
-      hirerId,
-      gatewayError,
-    });
-  } catch (error) {
-    warnTryChat("access/request-failed", {
-      accessType,
-      agentId: agent.id,
-      error: error instanceof Error ? error.message : String(error),
-      hirerId,
-    });
-    return createLocalAccessRecord({
-      accessType,
-      agent,
-      hirerId,
-      gatewayError:
-        error instanceof Error ? error.message : "Gateway request failed",
-    });
-  }
-}
-
-async function createPaidAgentAccessRecord({
-  agent,
-  signAndExecuteTransaction,
-  user,
-}: {
-  agent: Agent;
-  signAndExecuteTransaction: SignAndExecuteTransaction;
-  user: AuthUser;
-}) {
-  const hirerId = hirerIdFor(user);
-  if (!user.wallet) {
-    throw new Error("Connect your SUI wallet before pressing Hire!.");
-  }
-
-  const intentResponse = await fetch(`${gatewayUrl}/v1/payments/sui/intent`, {
-    method: "POST",
-    headers: gatewayRequestHeaders(),
-    body: JSON.stringify({
-      agent_id: agent.id,
-      hirer_id: hirerId,
-      wallet_address: user.wallet,
-      email: user.email,
-    }),
-  });
-
-  if (!intentResponse.ok) {
-    throw new Error(`Gateway ${intentResponse.status}: ${await intentResponse.text()}`);
-  }
-
-  const intentResult = (await intentResponse.json()) as {
-    intent?: {
-      intentId?: string;
-      amountMist?: string;
-      recipientAddress?: string;
-    };
-    transaction?: {
-      amountMist?: string;
-      recipientAddress?: string;
-    };
-  };
-  const intentId = intentResult.intent?.intentId;
-  const amountMist =
-    intentResult.transaction?.amountMist || intentResult.intent?.amountMist || "";
-  const recipientAddress =
-    intentResult.transaction?.recipientAddress ||
-    intentResult.intent?.recipientAddress ||
-    "";
-
-  if (!intentId || !amountMist || !recipientAddress) {
-    throw new Error("Gateway did not return a complete SUI payment intent.");
-  }
-
-  const tx = new Transaction();
-  const [paymentCoin] = tx.splitCoins(tx.gas, [amountMist]);
-  tx.transferObjects([paymentCoin], recipientAddress);
-  const execution = await signAndExecuteTransaction({ transaction: tx });
-  const txDigest = readSuiTransactionDigest(execution);
-  if (!txDigest) {
-    throw new Error("SUI wallet did not return a transaction digest.");
-  }
-
-  const confirmResponse = await fetch(`${gatewayUrl}/v1/payments/sui/confirm`, {
-    method: "POST",
-    headers: gatewayRequestHeaders(),
-    body: JSON.stringify({
-      intent_id: intentId,
-      tx_digest: txDigest,
-      agent_id: agent.id,
-      hirer_id: hirerId,
-      wallet_address: user.wallet,
-      email: user.email,
-    }),
-  });
-
-  if (!confirmResponse.ok) {
-    throw new Error(`Gateway ${confirmResponse.status}: ${await confirmResponse.text()}`);
-  }
-
-  const confirmResult = (await confirmResponse.json()) as {
-    access?: GatewayAccessPayload;
-  };
-  return mapGatewayAccessRecord(confirmResult.access, agent, "gateway");
-}
-
-async function loadGatewayMyAgentAccess(user: AuthUser) {
-  const hirerId = hirerIdFor(user);
-  const response = await fetch(`${gatewayUrl}/v1/my/agents`, {
-    method: "POST",
-    headers: gatewayRequestHeaders(),
-    body: JSON.stringify({
-      hirer_id: hirerId,
-      wallet_address: user.wallet,
-      email: user.email,
-    }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Gateway ${response.status}: ${await response.text()}`);
-  }
-
-  const result = (await response.json()) as {
-    agents?: GatewayAccessPayload[];
-  };
-  const agents: Agent[] = [];
-  const records = (result.agents || []).map((item) => {
-    const agent = mapGatewayPublicAgentToAgent(item.agent);
-    agents.push(agent);
-    return mapGatewayAccessRecord(item, agent, "gateway");
-  });
-
-  return { agents, records };
-}
-
-async function openSuiCallEscrowForPaidSend({
-  access,
-  agent,
-  agentTask,
-  conversationId,
-  signAndExecuteTransaction,
-  user,
-}: {
-  access: AgentAccessRecord;
-  agent: Agent;
-  agentTask: string;
-  conversationId: string;
-  signAndExecuteTransaction: SignAndExecuteTransaction;
-  user: AuthUser;
-}): Promise<SuiCallEscrowPayload | null> {
-  if (access.accessType !== "hired") return null;
-  if (!user.wallet) {
-    throw new Error("Connect your SUI wallet before sending a paid Agent call.");
-  }
-
-  const response = await fetch(`${gatewayUrl}/v1/settlements/sui/escrow/open-intent`, {
-    method: "POST",
-    headers: gatewayRequestHeaders(),
-    body: JSON.stringify({
-      agent_id: agent.id,
-      hirer_id: access.hirerId || hirerIdFor(user),
-      hire_receipt_object_id: access.receiptObjectId,
-      wallet_address: user.wallet,
-      email: user.email,
-      task: agentTask,
-      budget_calls: 1,
-      conversation_id: conversationId,
-    }),
-  });
-  if (!response.ok) {
-    throw new Error(`Gateway ${response.status}: ${await response.text()}`);
-  }
-
-  const intent = (await response.json()) as GatewaySuiEscrowOpenIntentPayload;
-  if (intent.settlementRequired === false || intent.status === "not_required") {
-    return null;
-  }
-  const missing = [
-    ["openCallEscrowTarget", intent.openCallEscrowTarget],
-    ["agentVersionObjectId", intent.agentVersionObjectId],
-    ["hirerWalletObjectId", intent.hirerWalletObjectId],
-    ["creatorWalletObjectId", intent.creatorWalletObjectId],
-    ["maxMist", intent.maxMist],
-    ["requestDigest", intent.requestDigest],
-    ["expiresAtMs", intent.expiresAtMs],
-  ].filter(([, value]) => !value);
-  if (missing.length) {
-    throw new Error(
-      `Gateway did not return complete Sui escrow details: ${missing
-        .map(([key]) => key)
-        .join(", ")}`,
-    );
-  }
-
-  const tx = new Transaction();
-  tx.moveCall({
-    target: intent.openCallEscrowTarget!,
-    arguments: [
-      tx.object(intent.agentVersionObjectId!),
-      tx.object(intent.hirerWalletObjectId!),
-      tx.pure.u64(intent.maxMist!),
-      tx.pure.vector(
-        "u8",
-        validU8Array(intent.requestDigestBytes)
-          ? intent.requestDigestBytes!
-          : utf8Bytes(intent.requestDigest!),
-      ),
-      tx.pure.u64(intent.expiresAtMs!),
-      tx.object(intent.clockObjectId || "0x6"),
-    ],
-  });
-  const execution = await signAndExecuteTransaction({
-    transaction: tx,
-  });
-  const openTxDigest = readSuiTransactionDigest(execution);
-  if (!openTxDigest) {
-    throw new Error("SUI wallet did not return an escrow transaction digest.");
-  }
-  const escrowObjectId = findCreatedSuiObjectId(execution, "CallEscrow");
-  if (!escrowObjectId) {
-    throw new Error("SUI wallet did not return the created CallEscrow object id.");
-  }
-
-  return {
-    escrowObjectId,
-    openTxDigest,
-    agentVersionObjectId: intent.agentVersionObjectId!,
-    hirerWalletObjectId: intent.hirerWalletObjectId!,
-    creatorWalletObjectId: intent.creatorWalletObjectId!,
-    maxMist: intent.maxMist!,
-    requestDigest: intent.requestDigest!,
-    expiresAtMs: intent.expiresAtMs!,
-  };
-}
-
-async function callTryAgent({
-  access,
-  agent,
-  clientConversationContext,
-  conversationId,
-  onEvent,
-  signAndExecuteTransaction,
-  task,
-  user,
-}: {
-  access: AgentAccessRecord;
-  agent: Agent;
-  clientConversationContext?: TryClientConversationContext | null;
-  conversationId: string;
-  onEvent?: (event: GatewayAgentStreamEvent) => void;
-  signAndExecuteTransaction: SignAndExecuteTransaction;
-  task: string;
-  user: AuthUser;
-}) {
-  const agentTask = task.trim();
-  const suiCallEscrow = await openSuiCallEscrowForPaidSend({
-    access,
-    agent,
-    agentTask,
-    conversationId,
-    signAndExecuteTransaction,
-    user,
-  });
-  const streamPayload = {
-    agent_id: agent.id,
-    task: agentTask,
-    response_mode: "direct_answer",
-    source: access.accessType === "trial" ? "web_try" : "web_hire",
-    hirer_id: access.hirerId || hirerIdFor(user),
-    hire_receipt_object_id: access.receiptObjectId,
-    wallet_address: user.wallet,
-    email: user.email,
-    conversation_id: conversationId,
-    client_conversation_context: clientConversationContext,
-    conversation_context_limit: 12,
-    conversation_title: `${agent.name} Try`,
-    mcp_conversation: true,
-    memwal_conversation: true,
-    wait_for_memory: false,
-    waitForMemory: false,
-    sui_call_escrow: suiCallEscrow,
-    sui_call_escrow_required: access.accessType === "hired",
-  };
-  debugTryChat("stream/request", {
-    accessSource: access.source,
-    accessType: access.accessType,
-    agentId: agent.id,
-    clientContextMessages: clientConversationContext?.messages.length || 0,
-    conversationId,
-    gatewayUrl,
-    hasReceipt: Boolean(access.receiptObjectId),
-    hirerId: streamPayload.hirer_id,
-    requiresSuiEscrow: streamPayload.sui_call_escrow_required,
-    taskLength: agentTask.length,
-  });
-  const response = await fetch(`${gatewayUrl}/v1/agent-call/stream`, {
-    method: "POST",
-    headers: gatewayRequestHeaders(),
-    body: JSON.stringify(streamPayload),
-  });
-  debugTryChat("stream/response", {
-    agentId: agent.id,
-    contentType: response.headers.get("content-type"),
-    ok: response.ok,
-    status: response.status,
-  });
-
-  if (!response.ok) {
-    throw new Error(`Gateway ${response.status}: ${await response.text()}`);
-  }
-  if (!response.body) {
-    throw new Error("Gateway stream did not return a readable body.");
-  }
-
-  return readAgentCallStream(response.body, onEvent);
-}
-
-async function readAgentCallStream(
-  body: ReadableStream<Uint8Array>,
-  onEvent?: (event: GatewayAgentStreamEvent) => void,
-) {
-  const reader = body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  let finalCall: GatewayAgentCallResponse | null = null;
-  let streamError: string | null = null;
-  debugTryChat("stream/read-start");
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (value) {
-      buffer += decoder.decode(value, { stream: !done });
-      const parts = buffer.split(/\n\n/);
-      buffer = parts.pop() || "";
-      for (const part of parts) {
-        const event = parseAgentStreamEvent(part);
-        if (!event) continue;
-        debugTryChat("stream/event", {
-          callId: event.data.callId,
-          dataKeys: Object.keys(event.data).slice(0, 16),
-          event: event.event,
-          memoryJobId: event.data.memoryJobId || event.data.memory?.jobId,
-          outputTextLength:
-            event.data.outputText?.length ||
-            event.data.result?.outputText?.length ||
-            event.data.jsonOutput?.payload?.outputText?.length ||
-            0,
-          traceId: event.data.traceId,
-        });
-        onEvent?.(event);
-        finalCall = mergeStreamEventIntoCall(finalCall, event);
-        if (event.event === "error") {
-          streamError =
-            typeof event.data.message === "string"
-              ? event.data.message
-              : "Agent stream failed.";
-        }
-      }
-    }
-    if (done) break;
-  }
-
-  if (buffer.trim()) {
-    const event = parseAgentStreamEvent(buffer);
-    if (event) {
-      debugTryChat("stream/event", {
-        callId: event.data.callId,
-        dataKeys: Object.keys(event.data).slice(0, 16),
-        event: event.event,
-        memoryJobId: event.data.memoryJobId || event.data.memory?.jobId,
-        outputTextLength:
-          event.data.outputText?.length ||
-          event.data.result?.outputText?.length ||
-          event.data.jsonOutput?.payload?.outputText?.length ||
-          0,
-        traceId: event.data.traceId,
-      });
-      onEvent?.(event);
-      finalCall = mergeStreamEventIntoCall(finalCall, event);
-      if (event.event === "error") {
-        streamError =
-          typeof event.data.message === "string"
-            ? event.data.message
-            : "Agent stream failed.";
-      }
-    }
-  }
-
-  if (streamError) throw new Error(streamError);
-  if (!finalCall) throw new Error("Agent stream ended without a result.");
-  debugTryChat("stream/read-complete", {
-    callId: finalCall.callId,
-    memoryJobId: finalCall.memoryJobId || finalCall.memory?.jobId,
-    outputTextLength: extractAgentCallText(finalCall).length,
-    traceId: finalCall.traceId,
-  });
-  return finalCall;
-}
-
-function parseAgentStreamEvent(raw: string): GatewayAgentStreamEvent | null {
-  const lines = raw.split(/\n/);
-  let event = "message";
-  const dataLines: string[] = [];
-
-  for (const line of lines) {
-    if (line.startsWith("event:")) {
-      event = line.slice("event:".length).trim();
-    } else if (line.startsWith("data:")) {
-      dataLines.push(line.slice("data:".length).trim());
-    }
-  }
-
-  if (!dataLines.length) return null;
-  try {
-    return {
-      data: JSON.parse(dataLines.join("\n")) as GatewayAgentCallResponse,
-      event,
-    };
-  } catch (error) {
-    warnTryChat("stream/parse-failed", {
-      error: error instanceof Error ? error.message : String(error),
-      event,
-      rawPreview: raw.slice(0, 500),
-    });
-    return null;
-  }
-}
-
-function mergeStreamEventIntoCall(
-  current: GatewayAgentCallResponse | null,
-  streamEvent: GatewayAgentStreamEvent,
-): GatewayAgentCallResponse {
-  const data = streamEvent.data;
-  if (streamEvent.event === "memwal_pending") {
-    return {
-      ...(current || {}),
-      callId: data.callId || current?.callId,
-      traceId: data.traceId || current?.traceId,
-      conversationId: data.conversationId || current?.conversationId,
-      memory: {
-        ...(current?.memory || {}),
-        conversationStored: data.conversationId ? false : null,
-        jobId: data.memoryJobId || current?.memory?.jobId,
-        status: "pending",
-        waitForMemory: data.memory?.waitForMemory ?? null,
-      },
-      memoryJobId: data.memoryJobId || current?.memoryJobId,
-      userMemWal: {
-        ...(current?.userMemWal || {}),
-        jobId: data.memoryJobId || current?.userMemWal?.jobId,
-        status: "pending",
-        stored: false,
-      },
-    };
-  }
-  if (streamEvent.event === "memwal_stored") {
-    return {
-      ...(current || {}),
-      callId: data.callId || current?.callId,
-      traceId: data.traceId || current?.traceId,
-      memoryJobId: data.memoryJobId || current?.memoryJobId,
-      conversationId:
-        data.mcpConversation?.conversationId ||
-        data.conversationId ||
-        current?.conversationId,
-      mcpConversation: data.mcpConversation || current?.mcpConversation,
-      memory: {
-        ...(current?.memory || {}),
-        conversationStored: data.mcpConversation?.stored ?? null,
-        status: data.mcpConversation?.stored ? "stored" : "pending",
-      },
-      userMemWal: data.userMemWal || current?.userMemWal,
-    };
-  }
-  if (streamEvent.event === "done") {
-    return {
-      ...(current || {}),
-      ...data,
-      memory: data.memory || current?.memory,
-      traceId: data.traceId || current?.traceId,
-    };
-  }
-  if (streamEvent.event === "output_fast" || streamEvent.event === "result") {
-    return {
-      ...(current || {}),
-      ...data,
-      result: data.result || current?.result,
-      jsonOutput: data.jsonOutput || current?.jsonOutput,
-      outputText: data.outputText || current?.outputText,
-      traceId: data.traceId || current?.traceId,
-    };
-  }
-  return {
-    ...(current || {}),
-    ...data,
-  };
-}
-
-function readSuiTransactionDigest(execution: unknown) {
-  return isPlainRecord(execution)
-    ? readRecordString(execution, ["digest", "txDigest", "transactionDigest"])
-    : "";
-}
-
-function findCreatedSuiObjectId(execution: unknown, objectTypeName: string) {
-  if (!isPlainRecord(execution) || !Array.isArray(execution.objectChanges)) {
-    return "";
-  }
-  for (const change of execution.objectChanges) {
-    if (!isPlainRecord(change)) continue;
-    const changeType = readRecordString(change, ["type"]);
-    const objectType = readRecordString(change, ["objectType", "object_type"]);
-    if (
-      changeType === "created" &&
-      (objectType.endsWith(`::${objectTypeName}`) ||
-        objectType.includes(`::${objectTypeName}<`))
-    ) {
-      return readRecordString(change, ["objectId", "object_id"]);
-    }
-  }
-  return "";
-}
-
-function utf8Bytes(value: string) {
-  return Array.from(new TextEncoder().encode(value));
-}
-
-function validU8Array(value: unknown): value is number[] {
-  return (
-    Array.isArray(value) &&
-    value.every(
-      (item) => Number.isInteger(item) && Number(item) >= 0 && Number(item) <= 255,
-    )
-  );
-}
-
-async function loadTryMemoryStatus(memoryJobId: string) {
-  const response = await fetch(`${gatewayUrl}/v1/agent-memory-status`, {
-    method: "POST",
-    headers: gatewayRequestHeaders(),
-    body: JSON.stringify({
-      memory_job_id: memoryJobId,
-    }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Gateway ${response.status}: ${await response.text()}`);
-  }
-
-  return (await response.json()) as GatewayAgentCallResponse;
-}
-
-function tryConversationId(
-  access: AgentAccessRecord,
-  agent: Agent,
-  user: AuthUser,
-  sessionId = "",
-) {
-  const baseConversationId = `web-try-v2-${access.hirerId || hirerIdFor(user)}-${agent.id}`;
-  return sessionId ? `${baseConversationId}-${sessionId}` : baseConversationId;
-}
-
-function extractAgentCallText(call: GatewayAgentCallResponse) {
-  const candidates = [
-    call.outputText,
-    call.result?.outputText,
-    call.jsonOutput?.payload?.outputText,
-    call.jsonOutput?.payload?.summary,
-  ];
-  for (const candidate of candidates) {
-    if (typeof candidate === "string" && candidate.trim()) {
-      return candidate.trim();
-    }
-  }
-  if (call.jsonOutput?.payload) {
-    return JSON.stringify(call.jsonOutput.payload, null, 2);
-  }
-  if (call.result) {
-    return JSON.stringify(call.result, null, 2);
-  }
-  return "The Agent returned an empty response.";
-}
-
-function wait(ms: number) {
-  return new Promise((resolve) => {
-    window.setTimeout(resolve, ms);
-  });
-}
-
-function initialTryChatMessages(agent: Agent): TryChatMessage[] {
-  return [
-    {
-      id: `assistant-${Date.now().toString(36)}`,
-      role: "assistant",
-      text: `Ask ${agent.name} a small test task. The private Harness stays behind the gateway.`,
-      createdAt: new Date().toISOString(),
-    },
-  ];
-}
-
-function tryChatTranscriptKey(
-  access: AgentAccessRecord,
-  agent: Agent,
-  user: AuthUser,
-  sessionId = "",
-) {
-  return `${access.hirerId || hirerIdFor(user)}:${agent.id}:${tryConversationId(
-    access,
-    agent,
-    user,
-    sessionId,
-  )}`;
-}
-
-function tryChatSessionStorageKey(
-  access: AgentAccessRecord,
-  agent: Agent,
-  user: AuthUser,
-) {
-  return `${access.hirerId || hirerIdFor(user)}:${agent.id}`;
-}
-
-function createTryChatSessionId() {
-  return `s-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-}
-
-function readTryChatSessionId(
-  access: AgentAccessRecord,
-  agent: Agent,
-  user: AuthUser,
-) {
-  try {
-    const raw = window.localStorage.getItem(tryChatSessionsStorageKey);
-    if (!raw) return "";
-    const store = JSON.parse(raw) as Record<string, string>;
-    const sessionId = store[tryChatSessionStorageKey(access, agent, user)];
-    return /^[a-z0-9-]+$/i.test(sessionId || "") ? sessionId : "";
-  } catch {
-    return "";
-  }
-}
-
-function writeTryChatSessionId(
-  access: AgentAccessRecord,
-  agent: Agent,
-  user: AuthUser,
-  sessionId: string,
-) {
-  try {
-    const raw = window.localStorage.getItem(tryChatSessionsStorageKey);
-    const store = raw ? (JSON.parse(raw) as Record<string, string>) : {};
-    store[tryChatSessionStorageKey(access, agent, user)] = sessionId;
-    window.localStorage.setItem(tryChatSessionsStorageKey, JSON.stringify(store));
-  } catch {
-    // Reset still works for the open modal even when browser storage is unavailable.
-  }
-}
-
-function buildTryClientConversationContext({
-  agent,
-  conversationId,
-  messages,
-}: {
-  agent: Agent;
-  conversationId: string;
-  messages: TryChatMessage[];
-}): TryClientConversationContext | null {
-  const transcriptMessages = messages
-    .filter((message) => {
-      if (message.pending || message.error) return false;
-      if (!message.text.trim()) return false;
-      if (
-        message.role === "assistant" &&
-        !message.memoryJobId &&
-        !message.responseMode &&
-        message.text.startsWith(`Ask ${agent.name} a small test task.`)
-      ) {
-        return false;
-      }
-      return true;
-    })
-    .slice(-12)
-    .map((message) => ({
-      role: message.role,
-      text: message.text.slice(0, 4000),
-      createdAt: message.createdAt,
-      callId: message.callId || null,
-      memWalStatus: message.memWalStatus || null,
-      memoryJobId: message.memoryJobId || null,
-      traceId: message.traceId || null,
-    }));
-
-  if (!transcriptMessages.length) return null;
-  return {
-    agentId: agent.id,
-    conversationId,
-    messages: transcriptMessages,
-    source: "web_try_local_transcript",
-    updatedAt: new Date().toISOString(),
-  };
-}
-
-function readTryChatTranscript(key: string): TryChatTranscriptRecord | null {
-  try {
-    clearLegacyTryChatTranscripts();
-    const raw = window.localStorage.getItem(tryChatTranscriptsStorageKey);
-    if (!raw) return null;
-    const store = JSON.parse(raw) as Record<string, TryChatTranscriptRecord>;
-    const record = store[key];
-    if (!record || !Array.isArray(record.messages)) return null;
-    const conversationContext = record.conversationContext || null;
-    const storedMessages = record.messages.filter(isTryChatMessage).slice(-80);
-    const latestAssistantId = latestAssistantMessageId(storedMessages);
-    const updatedAt = record.updatedAt || new Date().toISOString();
-    return {
-      conversationContext,
-      messages: storedMessages.map((message) =>
-        recoverStoredTryChatMessage({
-          conversationContext,
-          isLatestAssistant: message.id === latestAssistantId,
-          message,
-          transcriptUpdatedAt: updatedAt,
-        }),
-      ),
-      updatedAt,
-    };
-  } catch {
-    return null;
-  }
-}
-
-function clearLegacyTryChatTranscripts() {
-  try {
-    legacyTryChatTranscriptsStorageKeys.forEach((key) => {
-      window.localStorage.removeItem(key);
-    });
-  } catch {
-    // Chat still works if browser storage is unavailable.
-  }
-}
-
-function writeTryChatTranscript(key: string, record: TryChatTranscriptRecord) {
-  try {
-    const raw = window.localStorage.getItem(tryChatTranscriptsStorageKey);
-    const store = raw
-      ? (JSON.parse(raw) as Record<string, TryChatTranscriptRecord>)
-      : {};
-    store[key] = {
-      ...record,
-      messages: record.messages.map(sanitizeTryChatMessageForStorage).slice(-80),
-      updatedAt: new Date().toISOString(),
-    };
-    const entries = Object.entries(store)
-      .sort(
-        ([, left], [, right]) =>
-          Date.parse(right.updatedAt || "") - Date.parse(left.updatedAt || ""),
-      )
-      .slice(0, 40);
-    window.localStorage.setItem(
-      tryChatTranscriptsStorageKey,
-      JSON.stringify(Object.fromEntries(entries)),
-    );
-  } catch {
-    // Chat still works if browser storage is unavailable or full.
-  }
-}
-
-function deleteTryChatTranscript(key: string) {
-  try {
-    const raw = window.localStorage.getItem(tryChatTranscriptsStorageKey);
-    if (!raw) return;
-    const store = JSON.parse(raw) as Record<string, TryChatTranscriptRecord>;
-    delete store[key];
-    window.localStorage.setItem(
-      tryChatTranscriptsStorageKey,
-      JSON.stringify(store),
-    );
-  } catch {
-    // Reset should not fail just because browser storage is unavailable.
-  }
-}
-
-function isTryChatMessage(value: unknown): value is TryChatMessage {
-  if (!value || typeof value !== "object") return false;
-  const candidate = value as Partial<TryChatMessage>;
-  return (
-    (candidate.role === "user" || candidate.role === "assistant") &&
-    typeof candidate.text === "string" &&
-    typeof candidate.id === "string"
-  );
-}
-
-function sanitizeTryChatMessageForStorage(message: TryChatMessage) {
-  return {
-    ...message,
-    attachments: message.attachments
-      ?.map(sanitizeTryChatAttachmentForStorage)
-      .filter((attachment): attachment is TryChatAttachment => Boolean(attachment)),
-    pending: false,
-  };
-}
-
-function sanitizeTryChatAttachmentForStorage(
-  attachment: TryChatAttachment,
-): TryChatAttachment | null {
-  const isLargeInlineImage =
-    isTryChatDataImageUrl(attachment.url) && attachment.url.length >= 200_000;
-  if (attachment.localImageKey) {
-    return {
-      ...attachment,
-      url: isLargeInlineImage ? "" : attachment.url,
-    };
-  }
-  if (attachment.url.length < 200_000) return attachment;
-  return null;
-}
-
-function tryChatImageStorageKey(messageId: string, attachmentId: string) {
-  return `${messageId}:${attachmentId}`;
-}
-
-function isTryChatDataImageUrl(value: string) {
-  return /^data:image\/[a-z0-9.+-]+;base64,/i.test(value.trim());
-}
-
-function tryChatDataImageMimeType(value: string) {
-  const match = /^data:([^;]+);base64,/i.exec(value.trim());
-  return match?.[1]?.toLowerCase() || null;
-}
-
-function tryChatImageDownloadName(attachment: TryChatAttachment) {
-  const base =
-    attachment.label
-      .trim()
-      .replace(/[^a-z0-9._-]+/gi, "-")
-      .replace(/^-+|-+$/g, "") || "hireme-agent-image";
-  if (/\.[a-z0-9]+$/i.test(base)) return base;
-  const mimeType =
-    attachment.mimeType ||
-    tryChatDataImageMimeType(attachment.url) ||
-    guessImageMimeType(attachment.url);
-  const extension =
-    mimeType === "image/jpeg"
-      ? "jpg"
-      : mimeType === "image/webp"
-        ? "webp"
-        : mimeType === "image/gif"
-          ? "gif"
-          : "png";
-  return `${base}.${extension}`;
-}
-
-function openTryChatImageDb(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    if (!("indexedDB" in window)) {
-      reject(new Error("IndexedDB is unavailable."));
-      return;
-    }
-    const request = window.indexedDB.open(
-      tryChatImageDbName,
-      tryChatImageDbVersion,
-    );
-    request.onupgradeneeded = () => {
-      const db = request.result;
-      if (!db.objectStoreNames.contains(tryChatImageStoreName)) {
-        db.createObjectStore(tryChatImageStoreName, { keyPath: "key" });
-      }
-    };
-    request.onerror = () =>
-      reject(request.error || new Error("Could not open image storage."));
-    request.onsuccess = () => resolve(request.result);
-  });
-}
-
-function idbRequest<T>(request: IDBRequest<T>): Promise<T> {
-  return new Promise((resolve, reject) => {
-    request.onerror = () =>
-      reject(request.error || new Error("IndexedDB request failed."));
-    request.onsuccess = () => resolve(request.result);
-  });
-}
-
-async function writeTryChatImageRecord(record: TryChatImageRecord) {
-  if (!isTryChatDataImageUrl(record.url)) return false;
-  let db: IDBDatabase | null = null;
-  try {
-    db = await openTryChatImageDb();
-    const transaction = db.transaction(tryChatImageStoreName, "readwrite");
-    const store = transaction.objectStore(tryChatImageStoreName);
-    await idbRequest(store.put(record));
-    return true;
-  } catch {
-    return false;
-  } finally {
-    db?.close();
-  }
-}
-
-async function readTryChatImageRecord(
-  key: string,
-): Promise<TryChatImageRecord | null> {
-  let db: IDBDatabase | null = null;
-  try {
-    db = await openTryChatImageDb();
-    const transaction = db.transaction(tryChatImageStoreName, "readonly");
-    const store = transaction.objectStore(tryChatImageStoreName);
-    const record = await idbRequest<TryChatImageRecord | undefined>(
-      store.get(key),
-    );
-    return record || null;
-  } catch {
-    return null;
-  } finally {
-    db?.close();
-  }
-}
-
-function recoverStoredTryChatMessage({
-  conversationContext,
-  isLatestAssistant,
-  message,
-  transcriptUpdatedAt,
-}: {
-  conversationContext: TryConversationContext | null;
-  isLatestAssistant: boolean;
-  message: TryChatMessage;
-  transcriptUpdatedAt: string;
-}) {
-  if (message.role !== "assistant" || message.memWalStatus !== "pending") {
-    return message;
-  }
-
-  const updatedAt = Date.parse(transcriptUpdatedAt || message.createdAt || "");
-  const isStale =
-    Number.isFinite(updatedAt) &&
-    Date.now() - updatedAt > tryChatPendingRestoreTtlMs;
-  if (isStale) {
-    return { ...message, memWalStatus: "failed" as const };
-  }
-
-  if (!message.memoryJobId) {
-    if (
-      isLatestAssistant &&
-      conversationContext?.memoryJobId &&
-      tryMemWalDisplayStatus(conversationContext) === "pending"
-    ) {
-      return {
-        ...message,
-        callId: conversationContext.callId || message.callId || null,
-        conversationId: conversationContext.conversationId,
-        memoryJobId: conversationContext.memoryJobId,
-        traceId: conversationContext.traceId || message.traceId || null,
-      };
-    }
-    return { ...message, memWalStatus: "failed" as const };
-  }
-
-  return message;
-}
-
-function buildTryConversationContext({
-  agentId,
-  call,
-  conversationId,
-}: {
-  agentId: string;
-  call: GatewayAgentCallResponse;
-  conversationId: string;
-}): TryConversationContext {
-  return {
-    agentId,
-    callId: call.callId || null,
-    conversationId:
-      call.mcpConversation?.conversationId ||
-      call.ledgerEvent?.mcpConversationId ||
-      call.conversationId ||
-      conversationId,
-    memWalStatus:
-      call.mcpConversation?.stored === true
-        ? "stored"
-        : call.mcpConversation?.status ||
-          call.memory?.status ||
-          call.ledgerEvent?.status ||
-          "unknown",
-    conversationStored:
-      typeof call.mcpConversation?.stored === "boolean"
-        ? call.mcpConversation.stored
-        : call.memory?.conversationStored ?? null,
-    mcpConversationStatus: call.mcpConversation?.status || null,
-    memWalBlobId: call.mcpConversation?.blobId || null,
-    userMemWalStatus: call.userMemWal?.status || null,
-    memoryJobId:
-      call.mcpConversation?.memoryJobId ||
-      call.userMemWal?.jobId ||
-      call.memory?.jobId ||
-      call.memoryJobId ||
-      null,
-    traceId: call.traceId || call.callId || null,
-    waitForMemory: call.memory?.waitForMemory ?? null,
-  };
-}
-
-function tryMemWalDisplayStatus(
-  conversation: TryConversationContext,
-): TryMemWalDisplayStatus | null {
-  if (conversation.conversationStored === true) {
-    return "stored";
-  }
-  if (
-    conversation.mcpConversationStatus === "failed" ||
-    conversation.memWalStatus === "failed"
-  ) {
-    return "failed";
-  }
-  if (
-    conversation.memWalStatus === "pending" ||
-    conversation.conversationStored === false
-  ) {
-    return "pending";
-  }
-  return null;
-}
-
-function latestAssistantMessageId(messages: TryChatMessage[]) {
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    if (messages[index].role === "assistant") return messages[index].id;
-  }
-  return null;
-}
-
-function pendingAssistantMemoryTargets(
-  messages: TryChatMessage[],
-  fallbackConversationId?: string | null,
-) {
-  return messages
-    .filter(
-      (message) =>
-        message.role === "assistant" &&
-        message.memWalStatus === "pending" &&
-        Boolean(message.memoryJobId),
-    )
-    .slice(-tryMemWalMaxAutoPollTargets)
-    .map((message) => ({
-      conversationId: message.conversationId || fallbackConversationId || "",
-      memoryJobId: message.memoryJobId || "",
-      messageId: message.id,
-    }))
-    .filter((target) => target.conversationId && target.memoryJobId);
-}
-
-function extractTryImageAttachments(call: GatewayAgentCallResponse) {
-  const sources = [
-    call.resultAttachments,
-    call.attachments,
-    call.result?.attachments,
-    call.result?.outputFiles,
-    call.jsonOutput?.payload?.attachments,
-    call.jsonOutput?.payload?.outputFiles,
-  ];
-  const images: TryChatAttachment[] = [];
-  const seen = new Set<string>();
-
-  for (const source of sources) {
-    const values = Array.isArray(source) ? source : source ? [source] : [];
-    for (const value of values) {
-      const image = tryImageAttachmentFromValue(value, images.length);
-      if (!image || seen.has(image.url)) continue;
-      seen.add(image.url);
-      images.push(image);
-      if (images.length >= 6) return images;
-    }
-  }
-
-  return images;
-}
-
-function tryImageAttachmentFromValue(
-  value: unknown,
-  index: number,
-): TryChatAttachment | null {
-  if (typeof value === "string") {
-    if (!looksLikeBrowserImageUrl(value)) return null;
-    return {
-      id: `image-${index}`,
-      label: `Image ${index + 1}`,
-      mimeType: tryChatDataImageMimeType(value) || guessImageMimeType(value) || null,
-      type: "image",
-      url: value,
-    };
-  }
-  if (!isPlainRecord(value)) return null;
-
-  const mimeType =
-    readRecordString(value, ["mimeType", "mime_type", "contentType", "content_type"]) ||
-    guessImageMimeType(
-      readRecordString(value, ["filename", "fileName", "name", "path", "downloadUrl", "url"]) ||
+      name: "dokpami-delivery-notes.md",
+      mimeType: "text/markdown",
+      size: 1_284,
+      description: "제작 방향과 재사용 시 주의점을 정리한 전달 문서",
+      previewText: [
+        "# 독팜희 캐릭터 전달 노트",
         "",
-    );
-  const url =
-    readRecordString(value, ["downloadUrl", "download_url", "url", "href", "src"]) ||
-    relativeGatewayUrl(readRecordString(value, ["downloadPath", "download_path"]));
-  if (url && (isImageMimeType(mimeType) || looksLikeBrowserImageUrl(url))) {
-    return {
-      id: `image-${index}`,
-      label:
-        readRecordString(value, ["filename", "fileName", "name", "title"]) ||
-        `Image ${index + 1}`,
-      mimeType: mimeType || guessImageMimeType(url) || null,
-      type: "image",
-      url,
-    };
-  }
+        "## 적용한 변화",
+        "- 고개를 살짝 숙인 자세와 눈가의 물기를 추가했습니다.",
+        "- 얼굴 비율, 귀 실루엣, 대표 색상은 원본 기준을 유지했습니다.",
+        "- 흐린 창가 조명으로 장면의 감정을 보강했습니다.",
+        "",
+        "## 재사용 기준",
+        "프로필 이미지로 사용할 때는 얼굴과 귀가 잘리지 않도록 중앙 70% 영역을 유지하세요.",
+      ].join("\n"),
+    },
+  ],
+  "launch-brief-specialist": [
+    {
+      name: "launch-brief.md",
+      mimeType: "text/markdown",
+      size: 4_920,
+      description: "목표 고객, 메시지, 채널과 일정을 한 문서로 정리한 출시 브리프",
+      previewText: [
+        "# 프리랜서 협업 도구 출시 브리프",
+        "",
+        "## 핵심 고객",
+        "반복적인 제안서·수정 요청 관리에 시간을 쓰는 1~5인 디자인 스튜디오",
+        "",
+        "## 출시 메시지",
+        "반복 업무는 에이전트에게 맡기고, 최종 판단에 집중하세요.",
+        "",
+        "## 첫 2주 실행",
+        "1. 기존 고객 10명에게 비공개 데모 제공",
+        "2. 작업 전후 시간을 측정해 대표 사례 3개 확보",
+        "3. 사례 기반 소개 페이지와 온보딩 메일 공개",
+      ].join("\n"),
+    },
+    {
+      name: "launch-checklist.csv",
+      mimeType: "text/csv",
+      size: 1_176,
+      description: "담당자와 완료 기준이 포함된 실행 체크리스트",
+      previewText: [
+        "단계,작업,담당,완료 기준",
+        "검증,핵심 고객 인터뷰,PM,10명 응답 확보",
+        "제작,대표 사례 정리,Designer,전후 비교 3건",
+        "배포,온보딩 메일 발송,Marketing,오픈율 45% 이상",
+      ].join("\n"),
+    },
+  ],
+  "brand-voice-editor": [
+    {
+      name: "campaign-copy-set.md",
+      mimeType: "text/markdown",
+      size: 3_840,
+      description: "랜딩 페이지와 SNS에 바로 적용할 수 있는 카피 세트",
+      previewText: [
+        "# 캠페인 카피 세트",
+        "",
+        "## 헤드라인",
+        "일은 맡기고, 결과만 확인하세요.",
+        "",
+        "## 소개 문장",
+        "필요한 전문가를 에이전트로 고용해 반복 작업을 맡기고 중요한 결정에 집중하세요.",
+        "",
+        "## CTA",
+        "내 일을 맡길 에이전트 찾기",
+      ].join("\n"),
+    },
+    {
+      name: "brand-tone-guide.txt",
+      mimeType: "text/plain",
+      size: 1_420,
+      description: "이후 문구에도 일관되게 적용할 말투 기준",
+      previewText: "간결하게 말합니다.\n과장보다 실제 변화를 먼저 보여줍니다.\n전문 용어가 필요하면 바로 다음 문장에서 쉬운 말로 풉니다.\n명령보다 선택 가능한 다음 행동을 제안합니다.",
+    },
+  ],
+  "proposal-writer": [
+    {
+      name: "client-proposal.md",
+      mimeType: "text/markdown",
+      size: 6_280,
+      description: "작업 범위, 일정과 인수 기준이 포함된 고객 제안서",
+      previewText: [
+        "# 브랜드 리뉴얼 제안서",
+        "",
+        "## 목표",
+        "신규 고객이 서비스의 차이를 10초 안에 이해할 수 있는 브랜드 체계를 구축합니다.",
+        "",
+        "## 산출물",
+        "- 핵심 메시지 체계 1식",
+        "- 로고 활용 가이드 PDF",
+        "- 웹 핵심 화면 5종",
+        "",
+        "## 일정",
+        "총 4주, 주 1회 중간 검토를 기준으로 진행합니다.",
+      ].join("\n"),
+    },
+    {
+      name: "scope-estimate.csv",
+      mimeType: "text/csv",
+      size: 980,
+      description: "산출물별 작업량과 가정을 분리한 견적 근거",
+      previewText: "항목,수량,예상일,포함 범위\n메시지 체계,1식,3일,핵심 문장과 보조 문장\n웹 화면,5종,8일,데스크톱 기준\n수정,2회,4일,합의된 범위 내",
+    },
+  ],
+  "morrow-visual-review-service": [
+    {
+      name: "annotated-visual-review.jpg",
+      mimeType: "image/jpeg",
+      size: 946_000,
+      previewUrl: "/assets/after/TalkMedia_i_992129d3c2e9.jpg.jpg",
+      description: "수정 위치와 우선순위를 표시한 주석 이미지",
+    },
+    {
+      name: "visual-feedback.md",
+      mimeType: "text/markdown",
+      size: 2_740,
+      description: "디자이너가 바로 반영할 수 있도록 정리한 수정 지시서",
+      previewText: "# 시안 피드백\n\n## 우선순위 1\n주요 CTA와 보조 CTA의 명암 차이를 키워 첫 행동을 분명히 합니다.\n\n## 우선순위 2\n제목과 본문 사이 여백을 8px 늘려 정보 그룹을 분리합니다.\n\n## 유지할 점\n제품 이미지의 크기와 좌우 정렬 기준은 현재 시안이 적절합니다.",
+    },
+  ],
+  "scope-risk-checker": [
+    {
+      name: "scope-risk-report.md",
+      mimeType: "text/markdown",
+      size: 3_120,
+      description: "계약 전에 합의해야 할 위험과 권장 문구를 정리한 보고서",
+      previewText: "# 작업 범위 리스크 보고서\n\n## 높음: 수정 횟수 미정\n현재 문구는 완료 기준이 없어 일정이 늘어날 수 있습니다.\n권장: 초안 전달 후 통합 피드백 2회를 포함합니다.\n\n## 중간: 원본 파일 인도 범위\n편집 가능한 원본과 사용 폰트의 제공 여부를 계약서에 명시하세요.",
+    },
+    {
+      name: "client-questions.txt",
+      mimeType: "text/plain",
+      size: 760,
+      description: "착수 전에 고객에게 확인할 질문 목록",
+      previewText: "1. 최종 승인 권한을 가진 담당자는 누구인가요?\n2. 수정 요청은 어떤 채널로 취합하나요?\n3. 납품 후 원본 파일과 라이선스도 필요한가요?\n4. 일정이 지연될 때 우선 제외할 산출물은 무엇인가요?",
+    },
+  ],
+};
 
-  const data = readRecordString(value, ["data", "base64", "contentBase64", "blob"]);
-  if (!data) return null;
-  if (data.startsWith("data:image/")) {
-    return {
-      id: `image-${index}`,
-      label:
-        readRecordString(value, ["filename", "fileName", "name", "title"]) ||
-        `Image ${index + 1}`,
-      mimeType: tryChatDataImageMimeType(data) || mimeType || null,
-      type: "image",
-      url: data,
-    };
-  }
-  if (!isImageMimeType(mimeType)) return null;
-  return {
-    id: `image-${index}`,
-    label:
-      readRecordString(value, ["filename", "fileName", "name", "title"]) ||
-      `Image ${index + 1}`,
-    mimeType,
-    type: "image",
-    url: `data:${mimeType};base64,${data.replace(/^data:[^;]+;base64,/i, "")}`,
-  };
-}
+const defaultDesignSystem = (): DesignDecisionSystem => ({
+  purpose: "브랜드의 신뢰를 지키면서 핵심 메시지가 빠르게 읽히는 결과를 만듭니다.",
+  priorities: [
+    "핵심 메시지가 3초 안에 읽혀야 합니다.",
+    "제품 이미지와 문장이 서로 경쟁하지 않아야 합니다.",
+  ],
+  avoid: [
+    "브랜드 인상과 맞지 않는 장식 요소",
+    "한 화면에 너무 많은 메시지",
+  ],
+  qualityBar: [
+    "정보의 우선순위가 한눈에 구분됩니다.",
+    "지정된 브랜드 자산과 금지 규칙을 지킵니다.",
+  ],
+  questions: [
+    {
+      id: "goal",
+      label: "이번 결과로 가장 먼저 만들고 싶은 반응은 무엇인가요?",
+      helper: "디자이너가 정의한 목적 중 하나를 선택해 주세요.",
+      kind: "single",
+      required: true,
+      options: ["신뢰를 쌓기", "즉시 행동 유도", "프리미엄 인상 강화"],
+    },
+    {
+      id: "message",
+      label: "사용자가 가장 먼저 읽어야 할 한 문장은 무엇인가요?",
+      kind: "short",
+      required: true,
+    },
+    {
+      id: "channel",
+      label: "결과를 어디에 사용할 예정인가요?",
+      kind: "multi",
+      required: true,
+      options: ["Instagram 피드", "Instagram 스토리", "웹 배너", "프레젠테이션"],
+    },
+    {
+      id: "context",
+      label: "꼭 반영하거나 피해야 할 맥락이 있나요?",
+      helper: "없다면 비워 두어도 괜찮습니다.",
+      kind: "long",
+      required: false,
+    },
+  ],
+});
 
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
+const seedAgents: Agent[] = [
+  {
+    id: "dokpami-create-agent",
+    name: "독팜희 캐릭터 메이커",
+    creator: "나",
+    category: "디자인",
+    headline: "원본의 인상을 지키며 캐릭터 변형 이미지를 만들어요",
+    summary:
+      "참고 이미지를 바탕으로 표정, 의상, 장면을 바꾸고 결과 PNG를 전달하는 캐릭터 제작 에이전트입니다.",
+    skills: ["캐릭터 디자인", "이미지 생성", "스타일 유지"],
+    resultTypes: ["PNG", "이미지 기획서"],
+    image: "/assets/after/dokpami-result-preview.png",
+    accent: "green",
+    rating: 4.9,
+    reviews: 128,
+    uses: 2431,
+    billingMode: "hybrid",
+    runPrice: 1900,
+    subscriptionPrice: 29000,
+    version: "1.4.2",
+    ownership: "mine",
+    status: "공개",
+    revenue30d: 842000,
+    subscribers: 34,
+    runtime: "local",
+    designSystem: {
+      purpose: "원본 캐릭터의 정체성을 지키면서 요청한 감정과 장면을 명확하게 전달합니다.",
+      priorities: ["얼굴 비율과 실루엣을 먼저 보존합니다.", "테마는 의상·표정·소품으로만 확장합니다."],
+      avoid: ["새로운 종이나 사람 형태로 재해석", "원본보다 복잡한 장식과 배경"],
+      qualityBar: ["원본과 같은 캐릭터로 즉시 인식됩니다.", "요청한 감정이 표정과 자세에서 읽힙니다."],
+      questions: [
+        {
+          id: "emotion",
+          label: "어떤 감정이 가장 먼저 보여야 하나요?",
+          kind: "single",
+          required: true,
+          options: ["기쁨", "슬픔", "긴장", "설렘"],
+        },
+        {
+          id: "scene",
+          label: "캐릭터가 어떤 장면에 있나요?",
+          helper: "장소와 상황을 한 문장으로 적어 주세요.",
+          kind: "short",
+          required: true,
+        },
+        {
+          id: "use",
+          label: "완성된 이미지를 어디에 사용할 예정인가요?",
+          kind: "multi",
+          required: true,
+          options: ["프로필", "SNS 게시물", "스티커", "프레젠테이션"],
+        },
+      ],
+    },
+  },
+  {
+    id: "launch-brief-specialist",
+    name: "런칭 브리프 스페셜리스트",
+    creator: "나",
+    category: "비즈니스",
+    headline: "아이디어를 실행 가능한 출시 계획으로 정리해요",
+    summary:
+      "고객, 핵심 메시지, 채널, 리스크를 빠르게 구조화해 제안서와 실행 브리프로 만듭니다.",
+    skills: ["포지셔닝", "출시 계획", "제안서"],
+    resultTypes: ["문서", "실행 체크리스트"],
+    image: "/assets/after/TalkMedia_i_a3f06a7d329f.jpg.jpg",
+    accent: "coral",
+    rating: 4.8,
+    reviews: 84,
+    uses: 1394,
+    billingMode: "run",
+    runPrice: 900,
+    version: "0.9.8",
+    ownership: "mine",
+    status: "공개",
+    revenue30d: 486000,
+    subscribers: 0,
+    runtime: "local",
+  },
+  {
+    id: "brand-voice-editor",
+    name: "브랜드 보이스 에디터",
+    creator: "Studio Plain",
+    category: "글쓰기",
+    headline: "내 브랜드 말투로 소개문과 캠페인 카피를 다듬어요",
+    summary:
+      "기존 포트폴리오와 브랜드 문서를 읽고 일관된 어조로 소개문, 광고 카피, SNS 문장을 작성합니다.",
+    skills: ["브랜드 카피", "톤앤매너", "교정"],
+    resultTypes: ["문서", "카피 세트"],
+    image: "/assets/after/TalkMedia_i_c2e84200e6f5.jpg.jpg",
+    accent: "blue",
+    rating: 4.9,
+    reviews: 392,
+    uses: 8120,
+    billingMode: "subscription",
+    subscriptionPrice: 24000,
+    version: "2.3.0",
+    ownership: "market",
+    status: "공개",
+    runtime: "preview",
+    hired: true,
+  },
+  {
+    id: "proposal-writer",
+    name: "외주 제안서 라이터",
+    creator: "Freelance Lab",
+    category: "비즈니스",
+    headline: "의뢰 내용을 분석해 설득력 있는 견적·제안서를 만들어요",
+    summary:
+      "고객 요청과 작업 범위를 비교해 일정, 산출물, 가정, 견적 근거가 분명한 제안서를 작성합니다.",
+    skills: ["제안서", "업무 범위", "견적 문구"],
+    resultTypes: ["제안서", "PDF 초안"],
+    image: "/assets/after/TalkMedia_i_d8524efc8c6d.jpg.jpg",
+    accent: "yellow",
+    rating: 4.7,
+    reviews: 211,
+    uses: 4672,
+    billingMode: "run",
+    runPrice: 700,
+    version: "1.8.1",
+    ownership: "market",
+    status: "공개",
+    runtime: "preview",
+  },
+  {
+    id: "morrow-visual-review-service",
+    name: "비주얼 피드백 디렉터",
+    creator: "Morrow Design",
+    category: "디자인",
+    headline: "시안을 보고 우선순위가 분명한 수정 피드백을 정리해요",
+    summary:
+      "브랜드 목적, 정보 위계, 사용 맥락을 기준으로 시안을 검토하고 디자이너가 바로 반영할 수 있게 제안합니다.",
+    skills: ["디자인 리뷰", "정보 위계", "수정 가이드"],
+    resultTypes: ["피드백 문서", "주석 이미지"],
+    image: "/assets/after/TalkMedia_i_992129d3c2e9.jpg.jpg",
+    accent: "violet",
+    rating: 4.8,
+    reviews: 174,
+    uses: 3591,
+    billingMode: "hybrid",
+    runPrice: 1200,
+    subscriptionPrice: 32000,
+    version: "1.2.4",
+    ownership: "market",
+    status: "공개",
+    runtime: "preview",
+    designSystem: {
+      purpose: "브랜드 목적과 사용 맥락을 기준으로 수정 우선순위가 분명한 피드백을 전달합니다.",
+      priorities: ["행동을 만드는 정보 위계를 먼저 봅니다.", "장식보다 가독성과 맥락 적합성을 우선합니다."],
+      avoid: ["취향만으로 내리는 피드백", "근거 없이 전체 스타일을 다시 만드는 제안"],
+      qualityBar: ["수정 우선순위와 이유가 함께 제시됩니다.", "유지할 요소와 바꿀 요소가 구분됩니다."],
+      questions: [
+        {
+          id: "goal",
+          label: "이 시안이 달성해야 하는 가장 중요한 목표는 무엇인가요?",
+          kind: "single",
+          required: true,
+          options: ["클릭·구매 유도", "정보 전달", "브랜드 신뢰 강화", "새로운 인상 만들기"],
+        },
+        {
+          id: "audience",
+          label: "이 결과를 가장 먼저 보게 될 사람은 누구인가요?",
+          kind: "short",
+          required: true,
+        },
+        {
+          id: "concern",
+          label: "현재 가장 고민되는 부분은 무엇인가요?",
+          kind: "multi",
+          required: true,
+          options: ["정보 위계", "가독성", "브랜드 일관성", "이미지 톤", "CTA"],
+        },
+        {
+          id: "keep",
+          label: "이번 수정에서도 반드시 유지해야 할 요소가 있나요?",
+          kind: "long",
+          required: false,
+        },
+      ],
+    },
+  },
+  {
+    id: "scope-risk-checker",
+    name: "작업 범위 리스크 체커",
+    creator: "Contract Works",
+    category: "생산성",
+    headline: "계약 전 빠진 범위와 애매한 수정 조건을 찾아요",
+    summary:
+      "의뢰서와 계약서에서 일정 지연, 무제한 수정, 저작권, 인수 기준처럼 분쟁이 되기 쉬운 항목을 점검합니다.",
+    skills: ["범위 검수", "리스크 점검", "체크리스트"],
+    resultTypes: ["리스크 표", "질문 목록"],
+    accent: "charcoal",
+    rating: 4.6,
+    reviews: 98,
+    uses: 2107,
+    billingMode: "subscription",
+    subscriptionPrice: 19000,
+    version: "1.0.6",
+    ownership: "market",
+    status: "공개",
+    runtime: "preview",
+  },
+];
 
-function readRecordString(
-  value: Record<string, unknown>,
-  keys: string[],
-): string {
-  for (const key of keys) {
-    const candidate = value[key];
-    if (typeof candidate === "string" && candidate.trim()) {
-      return candidate.trim();
-    }
-  }
-  return "";
-}
+const legacyMockAgentIds = new Set([
+  "launch-brief-specialist",
+  "brand-voice-editor",
+  "proposal-writer",
+  "visual-feedback-director",
+  "scope-risk-checker",
+  "friendly-empathy-listener",
+]);
 
-function isImageMimeType(value: string) {
-  return value.toLowerCase().startsWith("image/");
-}
+// Demo records are available only when a developer explicitly enables them.
+// Production installs always start without another person's agent or history.
+const bundledDemoContentEnabled =
+  import.meta.env.DEV && import.meta.env.VITE_HIREME_DEMO_CONTENT === "true";
 
-function guessImageMimeType(value: string) {
-  const path = value.toLowerCase().split("?")[0];
-  if (path.endsWith(".png")) return "image/png";
-  if (path.endsWith(".jpg") || path.endsWith(".jpeg")) return "image/jpeg";
-  if (path.endsWith(".webp")) return "image/webp";
-  if (path.endsWith(".gif")) return "image/gif";
-  return "";
-}
-
-function looksLikeBrowserImageUrl(value: string) {
-  const trimmed = value.trim();
-  return (
-    trimmed.startsWith("data:image/") ||
-    /^https?:\/\//i.test(trimmed) ||
-    (trimmed.startsWith("/") && Boolean(guessImageMimeType(trimmed)))
-  );
-}
-
-function relativeGatewayUrl(path: string) {
-  if (!path) return "";
-  if (/^https?:\/\//i.test(path)) return path;
-  if (!path.startsWith("/")) return "";
-  return `${gatewayUrl}${path}`;
-}
-
-function walrusExplorerBlobUrl(blobId?: string | null) {
-  if (!blobId) return null;
-  return `https://walruscan.com/testnet/blob/${encodeURIComponent(blobId)}`;
-}
-
-function buildTryCodexSnippet({
-  access,
-  agent,
-  conversation,
-  fallbackConversationId,
-  user,
-}: {
-  access: AgentAccessRecord;
-  agent: Agent;
-  conversation: TryConversationContext | null;
-  fallbackConversationId?: string;
-  user: AuthUser;
-}) {
-  const hirerId = access.hirerId || hirerIdFor(user);
-  const conversationId =
-    conversation?.conversationId ||
-    fallbackConversationId ||
-    tryConversationId(access, agent, user);
-  const lines = [
-    "Ask HireMe to continue this web chat.",
-    "",
-    `  Agent: ${conversation?.agentId || agent.id}`,
-    `  Conversation id: ${conversationId}`,
-    `  User: ${user.email || hirerId}`,
-    "  Request: ",
-  ];
-  return lines.join("\n");
-}
-
-async function copyTextToClipboard(value: string) {
-  if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(value);
-    return;
-  }
-
-  const textarea = document.createElement("textarea");
-  textarea.value = value;
-  textarea.setAttribute("readonly", "true");
-  textarea.style.position = "fixed";
-  textarea.style.opacity = "0";
-  document.body.appendChild(textarea);
-  textarea.select();
-  document.execCommand("copy");
-  document.body.removeChild(textarea);
-}
-
-type MarkdownBlock =
-  | { type: "blockquote"; text: string }
-  | { type: "code"; code: string; language: string }
-  | { type: "heading"; depth: 1 | 2 | 3; text: string }
-  | { type: "list"; items: string[]; ordered: boolean }
-  | { type: "paragraph"; text: string };
-
-function TryChatMessageContent({ message }: { message: TryChatMessage }) {
-  if (message.role === "assistant" && message.pending && !message.error) {
-    return <TryPendingAgentActivity label={message.text} />;
-  }
-
-  if (message.role === "assistant" && !message.error) {
-    return <TryMarkdownContent text={message.text} />;
-  }
-
-  return (
-    <div className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
-      {message.text}
-    </div>
-  );
-}
-
-function TryChatMessageMeta({
-  message,
-  nowMs,
-}: {
-  message: TryChatMessage;
-  nowMs: number;
-}) {
-  const showDebugLink = shouldShowTryDebugTraceLink(message, nowMs);
-  if (!message.responseMode && !message.memWalStatus && !showDebugLink) {
-    return null;
-  }
-
-  return (
-    <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] font-medium uppercase tracking-[0.08em] opacity-75">
-      {message.responseMode ? <span>{message.responseMode}</span> : null}
-      {message.memWalStatus ? (
-        <TryMemWalMessageStatus message={message} nowMs={nowMs} />
-      ) : null}
-      {showDebugLink ? <TryDebugTraceLink message={message} /> : null}
-    </div>
-  );
-}
-
-function shouldShowTryDebugTraceLink(
-  message: TryChatMessage,
-  nowMs: number,
-) {
-  return (
-    Boolean(tryDebugTraceSearch(message)) &&
-    message.error === true &&
-    !shouldShowTryMemWalDebugLink(message, nowMs)
-  );
-}
-
-function TryDebugTraceLink({ message }: { message: TryChatMessage }) {
-  const search = tryDebugTraceSearch(message);
-  if (!search) return null;
-  return (
-    <Link
-      className="inline-flex items-center gap-1 rounded-md border border-[#bfdbfe] bg-white/70 px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-[#1d4ed8] transition hover:bg-[#eef5ff]"
-      to={`/debug/call${search}`}
-    >
-      <ExternalLink className="size-3" />
-      Debug trace
-    </Link>
-  );
-}
-
-function tryDebugTraceSearch(message: TryChatMessage) {
-  if (message.role !== "assistant") return null;
-  if (message.callId) {
-    return `?call_id=${encodeURIComponent(message.callId)}`;
-  }
-  if (message.traceId) {
-    return `?trace_id=${encodeURIComponent(message.traceId)}`;
-  }
-  if (message.memoryJobId) {
-    return `?memory_job_id=${encodeURIComponent(message.memoryJobId)}`;
-  }
-  return null;
-}
-
-function shouldShowTryMemWalDebugLink(message: TryChatMessage, nowMs: number) {
-  return (
-    message.memWalStatus === "failed" ||
-    isTryMemWalDebugStale(message, nowMs)
-  );
-}
-
-function isTryMemWalDebugStale(message: TryChatMessage, nowMs: number) {
-  if (message.memWalStatus !== "pending") return false;
-  const createdAt = Date.parse(message.createdAt || "");
-  return (
-    Number.isFinite(createdAt) &&
-    nowMs - createdAt >= tryChatMemWalDebugThresholdMs
-  );
-}
-
-function TryPendingAgentActivity({ label }: { label: string }) {
-  const cleanLabel = label.replace(/\.+$/, "");
-  const characters = Array.from(cleanLabel);
-
-  return (
-    <div aria-live="polite" className="try-agent-pending">
-      <span className="sr-only">{cleanLabel}</span>
-      <span aria-hidden="true" className="try-agent-pending-text">
-        {characters.map((character, index) => (
-          <span
-            className="try-agent-pending-letter"
-            key={`${character}-${index}`}
-            style={{ animationDelay: `${index * 34}ms` }}
-          >
-            {character === " " ? "\u00a0" : character}
-          </span>
-        ))}
-        <span
-          className="try-agent-pending-letter"
-          style={{ animationDelay: `${characters.length * 34}ms` }}
-        >
-          .
-        </span>
-        <span
-          className="try-agent-pending-letter"
-          style={{ animationDelay: `${(characters.length + 1) * 34}ms` }}
-        >
-          .
-        </span>
-        <span
-          className="try-agent-pending-letter"
-          style={{ animationDelay: `${(characters.length + 2) * 34}ms` }}
-        >
-          .
-        </span>
-      </span>
-    </div>
-  );
-}
-
-function TryMarkdownContent({ text }: { text: string }) {
-  const blocks = parseMarkdownBlocks(text);
-  return (
-    <div className="grid min-w-0 max-w-full gap-2 overflow-hidden break-words [overflow-wrap:anywhere]">
-      {blocks.map((block, index) => {
-        const key = `md-${index}`;
-        if (block.type === "heading") {
-          const className =
-            block.depth === 1
-              ? "text-base font-semibold leading-6"
-              : "text-sm font-semibold leading-6";
-          return (
-            <div className={className} key={key}>
-              {renderInlineMarkdown(block.text, key)}
-            </div>
-          );
-        }
-        if (block.type === "code") {
-          return (
-            <pre
-              className="max-h-72 max-w-full overflow-hidden whitespace-pre-wrap break-words rounded-md border border-border bg-white p-3 text-[11px] leading-5 text-[#1c1e54] [overflow-wrap:anywhere]"
-              key={key}
-            >
-              <code className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
-                {block.code}
-              </code>
-            </pre>
-          );
-        }
-        if (block.type === "list") {
-          const ListTag = block.ordered ? "ol" : "ul";
-          return (
-            <ListTag
-              className={`grid gap-1 pl-5 ${
-                block.ordered ? "list-decimal" : "list-disc"
-              }`}
-              key={key}
-            >
-              {block.items.map((item, itemIndex) => (
-                <li key={`${key}-${itemIndex}`}>
-                  {renderInlineMarkdown(item, `${key}-${itemIndex}`)}
-                </li>
-              ))}
-            </ListTag>
-          );
-        }
-        if (block.type === "blockquote") {
-          return (
-            <blockquote
-              className="border-l-2 border-primary/30 pl-3 text-muted-foreground"
-              key={key}
-            >
-              {renderInlineMarkdown(block.text, key)}
-            </blockquote>
-          );
-        }
-        return (
-          <p
-            className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]"
-            key={key}
-          >
-            {renderInlineMarkdown(block.text, key)}
-          </p>
-        );
-      })}
-    </div>
-  );
-}
-
-function parseMarkdownBlocks(text: string): MarkdownBlock[] {
-  const lines = text.replace(/\r\n/g, "\n").split("\n");
-  const blocks: MarkdownBlock[] = [];
-  let index = 0;
-
-  while (index < lines.length) {
-    const line = lines[index];
-    if (!line.trim()) {
-      index += 1;
-      continue;
-    }
-
-    const fence = /^```(\w+)?\s*$/.exec(line.trim());
-    if (fence) {
-      const code: string[] = [];
-      index += 1;
-      while (index < lines.length && !/^```\s*$/.test(lines[index].trim())) {
-        code.push(lines[index]);
-        index += 1;
-      }
-      if (index < lines.length) index += 1;
-      blocks.push({
-        code: code.join("\n"),
-        language: fence[1] || "",
-        type: "code",
-      });
-      continue;
-    }
-
-    const heading = /^(#{1,3})\s+(.+)$/.exec(line);
-    if (heading) {
-      blocks.push({
-        depth: heading[1].length as 1 | 2 | 3,
-        text: heading[2].trim(),
-        type: "heading",
-      });
-      index += 1;
-      continue;
-    }
-
-    const unordered = /^[-*]\s+(.+)$/.exec(line);
-    const ordered = /^\d+\.\s+(.+)$/.exec(line);
-    if (unordered || ordered) {
-      const items: string[] = [];
-      const orderedList = Boolean(ordered);
-      while (index < lines.length) {
-        const match = orderedList
-          ? /^\d+\.\s+(.+)$/.exec(lines[index])
-          : /^[-*]\s+(.+)$/.exec(lines[index]);
-        if (!match) break;
-        items.push(match[1].trim());
-        index += 1;
-      }
-      blocks.push({ items, ordered: orderedList, type: "list" });
-      continue;
-    }
-
-    const quote = /^>\s?(.+)$/.exec(line);
-    if (quote) {
-      const quotes: string[] = [];
-      while (index < lines.length) {
-        const match = /^>\s?(.+)$/.exec(lines[index]);
-        if (!match) break;
-        quotes.push(match[1].trim());
-        index += 1;
-      }
-      blocks.push({ text: quotes.join("\n"), type: "blockquote" });
-      continue;
-    }
-
-    const paragraph: string[] = [line];
-    index += 1;
-    while (
-      index < lines.length &&
-      lines[index].trim() &&
-      !/^```/.test(lines[index].trim()) &&
-      !/^(#{1,3})\s+/.test(lines[index]) &&
-      !/^[-*]\s+/.test(lines[index]) &&
-      !/^\d+\.\s+/.test(lines[index]) &&
-      !/^>\s?/.test(lines[index])
-    ) {
-      paragraph.push(lines[index]);
-      index += 1;
-    }
-    blocks.push({ text: paragraph.join("\n"), type: "paragraph" });
-  }
-
-  return blocks.length ? blocks : [{ text, type: "paragraph" }];
-}
-
-function renderInlineMarkdown(text: string, keyPrefix: string): ReactNode[] {
-  const nodes: ReactNode[] = [];
-  const pattern = /(`[^`]+`|\*\*[^*]+\*\*|\[[^\]]+\]\(https?:\/\/[^)\s]+\))/g;
-  let cursor = 0;
-  let match: RegExpExecArray | null;
-
-  while ((match = pattern.exec(text))) {
-    if (match.index > cursor) {
-      nodes.push(text.slice(cursor, match.index));
-    }
-    const token = match[0];
-    const key = `${keyPrefix}-${match.index}`;
-    if (token.startsWith("`")) {
-      nodes.push(
-        <code
-          className="break-words rounded bg-white px-1 py-0.5 font-mono text-[0.92em] text-[#1c1e54] [overflow-wrap:anywhere]"
-          key={key}
-        >
-          {token.slice(1, -1)}
-        </code>,
-      );
-    } else if (token.startsWith("**")) {
-      nodes.push(<strong key={key}>{token.slice(2, -2)}</strong>);
-    } else {
-      const link = /^\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)$/.exec(token);
-      if (link) {
-        nodes.push(
-          <a
-            className="font-medium text-primary underline-offset-4 hover:underline"
-            href={link[2]}
-            key={key}
-            rel="noreferrer"
-            target="_blank"
-          >
-            {link[1]}
-          </a>,
-        );
-      } else {
-        nodes.push(token);
-      }
-    }
-    cursor = match.index + token.length;
-  }
-
-  if (cursor < text.length) {
-    nodes.push(text.slice(cursor));
-  }
-
-  return nodes;
-}
-
-async function loadGatewayMyMemWalResults(user: AuthUser) {
-  const hirerId = hirerIdFor(user);
-  const response = await fetch(`${gatewayUrl}/v1/my/memwal-results`, {
-    method: "POST",
-    headers: gatewayRequestHeaders(),
-    body: JSON.stringify({
-      hirer_id: hirerId,
-      wallet_address: user.wallet,
-      email: user.email,
-    }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Gateway ${response.status}: ${await response.text()}`);
-  }
-
-  const result = (await response.json()) as {
-    results?: GatewayMemWalResultPayload[];
-  };
-  return result.results || [];
-}
-
-async function loadGatewayMyPaymentActivity(user: AuthUser) {
-  const hirerId = hirerIdFor(user);
-  const response = await fetch(`${gatewayUrl}/v1/my/payment-activity`, {
-    method: "POST",
-    headers: gatewayRequestHeaders(),
-    body: JSON.stringify({
-      hirer_id: hirerId,
-      wallet_address: user.wallet,
-      email: user.email,
-      limit: 50,
-    }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Gateway ${response.status}: ${await response.text()}`);
-  }
-
-  const result = (await response.json()) as {
-    results?: GatewaySuiPaymentActivityPayload[];
-  };
-  return result.results || [];
-}
-
-async function loadGatewayWalletSummary(user: AuthUser) {
-  const response = await fetch(`${gatewayUrl}/v1/my/wallet-summary`, {
-    method: "POST",
-    headers: gatewayRequestHeaders(),
-    body: JSON.stringify(walletRequestPayload(user)),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Gateway ${response.status}: ${await response.text()}`);
-  }
-
-  return (await response.json()) as GatewayWalletSummaryPayload;
-}
-
-async function topUpGatewayWallet(user: AuthUser, amountSui = "1") {
-  const response = await fetch(`${gatewayUrl}/v1/my/wallet/top-up`, {
-    method: "POST",
-    headers: gatewayRequestHeaders(),
-    body: JSON.stringify({
-      ...walletRequestPayload(user),
-      amount_sui: amountSui,
-    }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Gateway ${response.status}: ${await response.text()}`);
-  }
-
-  return (await response.json()) as GatewayWalletSummaryPayload;
-}
-
-async function claimGatewayWalletEarnings(user: AuthUser) {
-  const response = await fetch(`${gatewayUrl}/v1/my/wallet/claim`, {
-    method: "POST",
-    headers: gatewayRequestHeaders(),
-    body: JSON.stringify(walletRequestPayload(user)),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Gateway ${response.status}: ${await response.text()}`);
-  }
-
-  return (await response.json()) as GatewayWalletSummaryPayload;
-}
-
-function walletRequestPayload(user: AuthUser) {
-  return {
-    hirer_id: hirerIdFor(user),
-    wallet_address: user.wallet,
-    email: user.email,
-    display_name: displayNameFor(user),
-  };
-}
-
-function mapGatewayAccessRecord(
-  access: GatewayAccessPayload | undefined,
-  agent: Agent,
-  source: AgentAccessRecord["source"],
-): AgentAccessRecord {
-  const fallback = createLocalAccessRecord({
-    accessType: access?.accessType || "trial",
-    agent,
-    hirerId: access?.hirerId || "local-hirer",
-  });
-
-  return {
-    ...fallback,
-    ...access,
-    accessType: access?.accessType === "hired" ? "hired" : "trial",
-    status: access?.status === "expired" ? "expired" : "active",
-    receiptObjectId: access?.receiptObjectId || fallback.receiptObjectId,
-    trialCallsRemaining:
-      access?.trialCallsRemaining === undefined
-        ? fallback.trialCallsRemaining
-        : access.trialCallsRemaining,
-    pricePerCallUsd: access?.pricePerCallUsd ?? agent.pricePerCallUsd,
-    source,
-  };
-}
-
-function mapGatewayPublicAgentToAgent(agent: GatewayPublicAgent | undefined): Agent {
-  const id = agent?.id || "unknown-agent";
-  const skills = agent?.publicSkills?.length ? agent.publicSkills : ["MCP"];
-  const headline = agent?.headline || "Protected HireMe Agent.";
-  const pricePerCallUsd = agent?.pricePer1MTokensSui ?? agent?.pricePerCallUsd ?? 0;
-  const latencyMs = agent?.medianLatencyMs ?? 0;
-
-  return {
-    id,
-    name: agent?.name || id,
-    handle: agent?.handle || `@agents/${id}`,
-    creator: agent?.creator || "Unknown creator",
-    creatorInfoUrl: agent?.creatorInfoUrl,
-    team: {
-      id,
-      name: `${agent?.name || id} Team`,
-      handle: `@teams/${id}`,
-      owner: agent?.creator || "Unknown owner",
-      headline,
-      publicSummary: agent?.publicSummary || headline,
-      agentCount: 1,
-      accent: "from-[#533afd] to-[#6ee7f9]",
-      billing: {
-        unit: "per_agent",
-        basePriceUsd: pricePerCallUsd,
-        includedCalls: agent?.freeCalls ?? 0,
-        overagePricePerCallUsd: pricePerCallUsd,
-        note: `${formatAgentPrice(pricePerCallUsd)} through the executing agent ledger.`,
+const seedConversations: Conversation[] = [
+  {
+    id: "chat-dokpami-breakup",
+    title: "슬퍼하는 독팜희 시안",
+    agentId: "dokpami-create-agent",
+    updatedAt: new Date(Date.now() - 1000 * 60 * 9).toISOString(),
+    messages: [
+      {
+        id: "m1",
+        role: "user",
+        text: "헤어진 뒤 창가에서 슬퍼하고 있는 독팜희를 그려줘. 원본 느낌은 유지해줘.",
+        at: new Date(Date.now() - 1000 * 60 * 13).toISOString(),
+        status: "sent",
+        attachments: [
+          {
+            name: "dokpami-reference.png",
+            mimeType: "image/png",
+            previewUrl: "/assets/before/TalkMedia_i_9d68a183fdb2.png.png",
+          },
+        ],
       },
-    },
-    teamRole: "Specialist",
-    listedIndividually: true,
-    category: agent?.category || "Code",
-    categories: [agent?.category || "Code"],
-    status: agent?.status || "Available",
-    headline,
-    publicSummary: agent?.publicSummary || headline,
-    howToUse: agent?.howToUse,
-    publicContract: agent?.publicContract || "hireme_agent(task)",
-    memwalPolicy: agent?.memwalPolicy || "Gateway-managed protected Agent.",
-    skills,
-    protectedAssets: agent?.hiddenAssetClasses || ["AGENTS.md", "skills/**"],
-    sealedHarness:
-      agent?.sealedHarness || {
-        network: "walrus-testnet",
-        sealPolicyId: `platform:agent:${id}`,
-        walrusBlobId: `gateway-managed:${id}`,
-        suiObjectId: "pending",
-        ciphertextDigest: "registered-with-protected-artifacts",
-        visibility:
-          "Protected artifact details are resolved by the gateway at call time.",
-    },
-    pricePerCallUsd,
-    pricePer1MTokensSui: pricePerCallUsd,
-    freeCalls: agent?.freeCalls ?? 0,
-    rating: agent?.rating ?? 0,
-    calls: agent?.historicalCalls ?? 0,
-    latencyMs,
-    avgInputTokens: agent?.avgInputTokens ?? 800,
-    avgOutputTokens: agent?.avgOutputTokens ?? 700,
-    createdAt: agent?.createdAt,
-    updatedAt: agent?.updatedAt || agent?.createdAt,
-    currentVersionNumber: agent?.currentVersionNumber,
-    versionPublishedAt: agent?.versionPublishedAt,
-    resultPreview: {
-      title: `${skills[0]} result`,
-      summary: `Returns safe ${agent?.publicContract || "hireme_agent(task)"} output with gateway authorization metadata.`,
-      sample: `${headline} Response includes action items, constraints, and verification notes.`,
-    },
-    mcpPackage: `mcp://hireme/${id}`,
-    accent: "from-[#533afd] to-[#6ee7f9]",
-  };
-}
-
-function createdAgentRecordToAgent(record: CreatedAgentRecord, user?: AuthUser | null): Agent {
-  const category = inferAgentCategory(record.agentSlug, record.headline || record.description);
-  const tokenPrice = record.pricePerCallUsd;
-  const creator =
-    user?.displayName?.trim() ||
-    record.creatorEmail ||
-    record.creatorId ||
-    "Web creator";
-
-  return {
-    id: record.agentSlug,
-    name: record.agentName,
-    handle: `@agents/${record.agentSlug}`,
-    creator,
-    creatorInfoUrl: record.creatorInfoUrl,
-    team: {
-      id: record.agentSlug,
-      name: `${record.agentName} Team`,
-      handle: `@teams/${record.agentSlug}`,
-      owner: creator,
-      headline: record.headline || record.description,
-      publicSummary: record.description,
-      agentCount: 1,
-      accent: "from-[#533afd] to-[#6ee7f9]",
-      billing: {
-        unit: "per_agent",
-        basePriceUsd: tokenPrice,
-        includedCalls: trialCallAllowance,
-        overagePricePerCallUsd: tokenPrice,
-        note: `${formatAgentPrice(tokenPrice)} through the executing agent ledger.`,
+      {
+        id: "m2",
+        role: "assistant",
+        text: "원본 캐릭터의 얼굴 비율과 실루엣을 유지하고, 고개를 살짝 숙인 표정과 흐린 창가 장면으로 구성했어요. PNG 결과는 작업 폴더에 저장했습니다.",
+        at: new Date(Date.now() - 1000 * 60 * 9).toISOString(),
+        elapsedMs: 18420,
+        artifacts: [
+          {
+            name: "dokpami-sad-result.png",
+            mimeType: "image/png",
+            previewUrl: "/assets/after/dokpami-result-preview.png",
+            kind: "image",
+          },
+        ],
       },
-    },
-    teamRole: "Specialist",
-    listedIndividually: true,
-    category,
-    categories: [category],
-    status: "Available",
-    headline: record.headline || record.description,
-    publicSummary: record.description,
-    howToUse: record.howToUse,
-    publicContract: `${record.agentSlug}(task, context, budget_calls)`,
-    memwalPolicy:
-      "Hirer-visible results are stored in hirer-scoped memWal records. Creator private files stay behind the gateway.",
-    skills: ["Protected Harness", "Codex MCP"],
-    protectedAssets: ["Agent Harness archive", "AGENTS.md", "skills/**"],
-    sealedHarness: {
-      network: "walrus-testnet",
-      sealPolicyId: `platform:agent:${record.agentSlug}`,
-      walrusBlobId: record.walrusBlobId,
-      suiObjectId: record.suiObjectId,
-      ciphertextDigest: record.ciphertextDigest,
-      visibility:
-        "Protected artifact details are resolved by the gateway at call time.",
-    },
-    pricePerCallUsd: tokenPrice,
-    pricePer1MTokensSui: tokenPrice,
-    freeCalls: trialCallAllowance,
-    rating: 0,
-    calls: 0,
-    latencyMs: record.avgLatencyMs || 0,
-    avgInputTokens: record.avgTokenCount || 0,
-    avgOutputTokens: 0,
-    activeUsers: record.activeUsers,
-    createdAt: record.createdAt,
-    updatedAt: record.updatedAt || record.createdAt,
-    currentVersionNumber: record.currentVersionNumber || 1,
-    resultPreview: {
-      title: "Sample Input",
-      summary: record.typicalOutputSample || record.description,
-      sample: record.typicalOutputSample || "",
-      mediaUrl: record.typicalOutputMediaUrl,
-      mediaType: record.typicalOutputMediaType,
-    },
-    mcpPackage: `mcp://hireme/${record.agentSlug}`,
-    accent: "from-[#533afd] to-[#6ee7f9]",
-  };
-}
+    ],
+  },
+  {
+    id: "chat-proposal",
+    title: "카페 브랜딩 제안서",
+    agentId: "proposal-writer",
+    updatedAt: new Date(Date.now() - 1000 * 60 * 60 * 3).toISOString(),
+    messages: [
+      {
+        id: "m3",
+        role: "user",
+        text: "성수동 카페 리브랜딩 문의에 보낼 1차 제안서를 만들어줘.",
+        at: new Date(Date.now() - 1000 * 60 * 60 * 3).toISOString(),
+        status: "sent",
+      },
+    ],
+  },
+  {
+    id: "chat-brand-copy",
+    title: "포트폴리오 소개문 수정",
+    agentId: "brand-voice-editor",
+    updatedAt: new Date(Date.now() - 1000 * 60 * 60 * 26).toISOString(),
+    messages: [],
+  },
+];
 
-function inferAgentCategory(agentId: string, text = ""): Agent["category"] {
-  const haystack = `${agentId} ${text}`.toLowerCase();
-  if (haystack.includes("image") || haystack.includes("character") || haystack.includes("png")) {
-    return "Image";
-  }
-  if (haystack.includes("data") || haystack.includes("ledger")) return "Data";
-  if (haystack.includes("research")) return "Research";
-  return "Code";
-}
+const sampleReplies: Record<string, string> = {
+  "dokpami-create-agent":
+    "작업 주문서의 감정과 사용 맥락을 기준으로 캐릭터의 얼굴 비율과 실루엣은 유지하고, 고개를 살짝 숙인 자세와 흐린 창가 조명으로 슬픔을 표현했어요. 디자이너가 설정한 금지 규칙과 품질 기준을 적용한 결과를 캔버스에서 확인해 주세요.",
+  "proposal-writer":
+    "제안서 초안\n\n프로젝트 목표\n의뢰 범위와 우선순위를 먼저 합의하고, 각 단계의 산출물과 검토 시점을 명확히 합니다.\n\n다음 확인 항목\n1. 최종 의사결정자는 누구인가요?\n2. 수정 횟수와 피드백 기한은 어떻게 정하나요?\n3. 일정 변경 시 어떤 기준으로 범위를 조정하나요?",
+  "morrow-visual-review-service":
+    "디자인 피드백 초안\n\n우선순위 1 · 정보 위계\n제목 대비와 CTA 위치를 먼저 조정해 사용자가 다음 행동을 즉시 이해하게 만드세요.\n\n우선순위 2 · 가독성\n본문 줄 길이와 여백을 정리한 뒤, 장식 요소는 마지막에 다듬는 편이 좋습니다.",
+  "scope-risk-checker":
+    "범위 리스크 체크\n\n확정이 필요한 항목\n- 수정 횟수\n- 원본 파일 전달 범위\n- 일정 지연 시 처리 기준\n\n계약 전에 위 항목을 숫자와 날짜로 명시하세요.",
+};
 
-function defaultAgentDraft(): AgentDraft {
-  return {
-    category: "",
-    agentName: "",
-    headline: "",
-    description: "",
-    creatorInfoUrl: "",
-    howToUse: "",
-    sampleInput: "",
-    creatorFeeUsd: "",
-  };
-}
+const quickPrompts: Record<AgentCategory, string[]> = {
+  디자인: ["이 이미지를 같은 스타일로 변형해줘", "시안의 개선점을 정리해줘", "새 캐릭터 콘셉트를 만들어줘"],
+  글쓰기: ["소개문을 더 자연스럽게 다듬어줘", "고객에게 보낼 문장을 써줘", "브랜드 말투를 정리해줘"],
+  비즈니스: ["외주 제안서 초안을 만들어줘", "프로젝트 범위를 정리해줘", "출시 체크리스트를 만들어줘"],
+  리서치: ["이 주제를 조사해 요약해줘", "비교표를 만들어줘", "근거와 함께 정리해줘"],
+  생산성: ["계약서의 빠진 항목을 찾아줘", "할 일을 우선순위로 정리해줘", "리스크 체크리스트를 만들어줘"],
+};
 
-function agentDraftFromAgent(agent: Agent): AgentDraft {
-  const basePrice = categoryPricing[agent.category]?.basePriceUsd ?? 0;
-  const tokenPrice = agent.pricePer1MTokensSui ?? agent.pricePerCallUsd;
-  const creatorFee = Math.max(0, tokenPrice - basePrice);
-  return {
-    category: agent.category,
-    agentName: agent.name,
-    headline: agent.headline,
-    description: agent.publicSummary || agent.headline,
-    creatorInfoUrl: agent.creatorInfoUrl || "",
-    howToUse: agent.howToUse || "",
-    sampleInput: agent.resultPreview.sample || "",
-    creatorFeeUsd: creatorFee ? formatDraftNumber(creatorFee) : "",
-  };
-}
+const categoryIcons: Record<AgentCategory, typeof Palette> = {
+  디자인: Palette,
+  글쓰기: PenLine,
+  비즈니스: BriefcaseBusiness,
+  리서치: Search,
+  생산성: CheckCircle2,
+};
 
-function agentFromDraft({
-  baseAgent,
-  draft,
-  media,
-  pricePerCallUsd,
-}: {
-  baseAgent: Agent;
-  draft: AgentDraft;
-  media?: {
-    type?: "image" | "video";
-    url?: string;
-  } | null;
-  pricePerCallUsd: number;
-}): Agent {
-  return {
-    ...baseAgent,
-    name: draft.agentName.trim() || baseAgent.name,
-    creatorInfoUrl: normalizeCreatorInfoUrl(draft.creatorInfoUrl) || undefined,
-    category: draft.category || baseAgent.category,
-    categories: [draft.category || baseAgent.category],
-    headline: draft.headline.trim() || baseAgent.headline,
-    publicSummary:
-      draft.description.trim() || draft.headline.trim() || baseAgent.publicSummary,
-    howToUse: draft.howToUse.trim() || undefined,
-    pricePerCallUsd,
-    pricePer1MTokensSui: pricePerCallUsd,
-    resultPreview: {
-      ...baseAgent.resultPreview,
-      sample: draft.sampleInput.trim() || baseAgent.resultPreview.sample,
-      mediaUrl: media?.url || baseAgent.resultPreview.mediaUrl,
-      mediaType: media?.type || baseAgent.resultPreview.mediaType,
-    },
-    updatedAt: new Date().toISOString(),
-  };
-}
-
-function formatDraftNumber(value: number) {
-  return value.toFixed(6).replace(/0+$/, "").replace(/\.$/, "");
-}
-
-function mergeAgentCatalog(current: Agent[], incoming: Agent[]) {
-  const byId = new Map(current.map((agent) => [agent.id, agent]));
-  for (const agent of incoming) {
-    byId.set(agent.id, { ...byId.get(agent.id), ...agent });
-  }
-  return sortAgentsNewestFirst([...byId.values()]);
-}
-
-function createLocalAccessRecord({
-  accessType,
-  agent,
-  gatewayError,
-  hirerId,
-}: {
-  accessType: AgentAccessType;
-  agent: Agent;
-  gatewayError?: string;
-  hirerId: string;
-}): AgentAccessRecord {
-  const now = new Date();
-  return {
-    id: `local_${accessType}_${agent.id}_${now.getTime().toString(36)}`,
-    agentId: agent.id,
-    hirerId,
-    status: "active",
-    accessType,
-    receiptObjectId: `hire_receipt_${accessType}_${agent.id}_${hirerId}`,
-    trialCallsRemaining: accessType === "trial" ? trialCallAllowance : null,
-    pricePerCallUsd: agent.pricePerCallUsd,
-    ownerSuiAddress: null,
-    createdAt: now.toISOString(),
-    updatedAt: now.toISOString(),
-    expiresAt:
-      accessType === "trial"
-        ? new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString()
-        : null,
-    source: "local",
-    gatewayError,
-  };
-}
-
-function TopNav({
-  onHomeClick,
-  onLogout,
-  user,
-  onLoginClick,
-}: {
-  onHomeClick: () => void;
-  onLogout: () => void;
-  user: AuthUser | null;
-  onLoginClick: () => void;
-}) {
-  const location = useLocation();
-  const isLanding = location.pathname === "/";
-  const isAgents = location.pathname === "/agents";
-
-  return (
-    <header className={`sticky top-0 z-40 border-b px-4 backdrop-blur-xl md:px-8 ${isLanding ? "border-[#bfdbfe]/50 bg-white/88" : "border-border bg-white/92"}`}>
-      <div className="mx-auto flex min-h-16 max-w-7xl flex-wrap items-center justify-between gap-3 py-2">
-        {isLanding ? (
-          <button
-            aria-label="맨 위로 이동"
-            className="flex items-center text-left transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(49,130,246,0.35)] focus-visible:ring-offset-2"
-            onClick={onHomeClick}
-            type="button"
-          >
-            <img
-              alt="HireMe"
-              className="h-11 w-auto sm:h-12"
-              src="/assets/Logo.png"
-            />
-          </button>
-        ) : (
-          <Link className="flex items-center transition hover:opacity-90" to="/">
-            <img
-              alt="HireMe"
-              className="h-11 w-auto sm:h-12"
-              src="/assets/Logo.png"
-            />
-          </Link>
-        )}
-
-        {isLanding ? (
-          <Link
-            className="text-xs font-medium text-[#42658f] transition hover:text-[#0753d6]"
-            to="/docs"
-          >
-            Docs
-          </Link>
-        ) : null}
-
-        {isAgents ? (
-          user ? (
-            <div className="flex items-center gap-2">
-              <Link
-                className="flex min-w-0 items-center gap-2 rounded-xl border border-border bg-secondary px-3 py-2 text-xs text-[#273951] transition hover:border-[#533afd]/45 hover:bg-white"
-                to="/my"
-              >
-                <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-white text-primary">
-                  <UserRound className="size-3.5" />
-                </span>
-                <span className="min-w-0">
-                  <span className="block max-w-44 truncate font-medium text-[#1c1e54]">
-                    {user.email}
-                  </span>
-                  {user.wallet ? (
-                    <span className="hidden truncate text-muted-foreground sm:block">
-                      {shortAddress(user.wallet)}
-                    </span>
-                  ) : null}
-                </span>
-              </Link>
-              <Button onClick={onLogout} size="sm" type="button" variant="secondary">
-                <LogOut /> Logout
-              </Button>
-            </div>
-          ) : (
-            <Button onClick={onLoginClick} size="sm" type="button">
-              <LogIn /> Login
-            </Button>
-          )
-        ) : null}
-      </div>
-    </header>
-  );
-}
-
-function ConnectSuiButton({
-  user,
-  onWalletLinked,
-  variant = "default",
-}: {
-  user: AuthUser | null;
-  onWalletLinked: (wallet: string) => void;
-  variant?: "default" | "secondary";
-}) {
-  const wallets = useWallets();
-  const currentAccount = useCurrentAccount();
-  const currentWallet = useCurrentWallet();
-  const connectWallet = useConnectWallet();
-  const signTransaction = useSignTransaction();
-  const [error, setError] = useState<string | null>(null);
-  const connectedWithGoogle =
-    currentWallet.isConnected && isGoogleWallet(currentWallet.currentWallet);
-  const linkedAddress =
-    user?.wallet || (connectedWithGoogle ? currentAccount?.address : "");
-  const isBusy = connectWallet.isPending || signTransaction.isPending;
-
-  async function connectSui() {
-    if (!user) return;
-    setError(null);
-    try {
-      let address =
-        connectedWithGoogle && currentAccount?.address
-          ? currentAccount.address
-          : "";
-      if (!address) {
-        address = await connectEnokiGoogleAddress({
-          connectWallet: connectWallet.mutateAsync,
-          wallets,
-        });
-      }
-      await syncGatewaySuiWallet(address, user.displayName);
-      await ensureSponsoredGatewaySuiWalletObject({
-        displayName: user.displayName,
-        signTransaction: signTransaction.mutateAsync,
-        suiAddress: address,
-      });
-      onWalletLinked(address);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Sui wallet connection failed.");
-    }
-  }
-
-  return (
-    <div className="relative">
-      <Button
-        disabled={!isEnokiConfigured || isBusy}
-        onClick={() => {
-          void connectSui();
-        }}
-        size="sm"
-        title={error || undefined}
-        type="button"
-        variant={variant}
-      >
-        <WalletCards />
-        {linkedAddress ? shortAddress(linkedAddress) : "Connect Sui"}
-      </Button>
-    </div>
-  );
-}
-
-function ProfileNameDialog({
-  user,
-  onSaved,
-}: {
-  user: AuthUser | null;
-  onSaved: (displayName: string) => void;
-}) {
-  const [displayName, setDisplayName] = useState(user?.displayName || "");
-  const [error, setError] = useState<string | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const open = Boolean(user && !user.displayName);
-
-  if (!open) return null;
-
-  async function submitName() {
-    setIsSubmitting(true);
-    setError(null);
-    try {
-      const savedName = await saveProfileDisplayName(displayName, user?.wallet);
-      onSaved(savedName);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not save name.");
-      setIsSubmitting(false);
-    }
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#0d253d]/38 px-4 py-6">
-      <div className="w-full max-w-md rounded-xl border border-border bg-white p-5 app-shadow">
-        <div className="flex items-start gap-3">
-          <span className="flex size-11 shrink-0 items-center justify-center rounded-full bg-secondary text-primary">
-            <UserRound className="size-5" />
-          </span>
-          <div>
-            <div className="text-sm font-medium text-[#1c1e54]">
-              Set your HireMe name
-            </div>
-            <p className="mt-2 text-sm leading-6 text-muted-foreground">
-              This is the name shown in HireMe and Codex account views.
-            </p>
-          </div>
-        </div>
-
-        <div className="mt-5">
-          <label className="text-xs font-medium text-muted-foreground" htmlFor="display-name">
-            Name
-          </label>
-          <Input
-            autoFocus
-            className="mt-2"
-            id="display-name"
-            maxLength={40}
-            onChange={(event) => setDisplayName(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                void submitName();
-              }
-            }}
-            placeholder="Han Labs"
-            value={displayName}
-          />
-        </div>
-
-        {error ? (
-          <div className="mt-4 rounded-lg border border-[#ea2261]/20 bg-[#fff8fb] px-3 py-2 text-sm text-[#9f1239]">
-            {error}
-          </div>
-        ) : null}
-
-        <Button
-          className="mt-5 w-full"
-          disabled={isSubmitting || displayName.trim().length < 2}
-          onClick={() => {
-            void submitName();
-          }}
-          type="button"
-        >
-          Save name
-        </Button>
-      </div>
-    </div>
-  );
-}
-
-function LoginDialog({
-  open,
-  onClose,
-}: {
-  open: boolean;
-  onClose: () => void;
-}) {
-  const [error, setError] = useState<string | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-
-  if (!open) return null;
-
-  async function submitGoogleLogin() {
-    setIsSubmitting(true);
-    setError(null);
-    try {
-      await signInWithGoogle();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Google login failed.");
-      setIsSubmitting(false);
-    }
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#0d253d]/38 px-4 py-6">
-      <div className="w-full max-w-md rounded-xl border border-border bg-white p-5 app-shadow">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2 text-sm font-medium text-[#1c1e54]">
-              <UserRound className="size-4 text-primary" />
-              Login
-            </div>
-            <p className="mt-2 text-sm leading-6 text-muted-foreground">
-              Sign in with Google. You can connect your Enoki zkLogin Sui
-              address from My Agents after login.
-            </p>
-          </div>
-          <Button onClick={onClose} size="icon" type="button" variant="ghost">
-            <X />
-          </Button>
-        </div>
-
-        {error ? (
-          <div className="mt-5 rounded-lg border border-[#ea2261]/20 bg-[#fff8fb] px-3 py-2 text-sm text-[#9f1239]">
-            {error}
-          </div>
-        ) : null}
-        <div className="mt-5 flex items-center justify-end gap-2">
-          <Button onClick={onClose} type="button" variant="secondary">
-            Cancel
-          </Button>
-          <Button
-            disabled={isSubmitting || !isSupabaseConfigured}
-            onClick={() => {
-              void submitGoogleLogin();
-            }}
-            type="button"
-          >
-            <LogIn /> Continue with Google
-          </Button>
-        </div>
-        {!isSupabaseConfigured ? (
-          <p className="mt-3 text-xs leading-5 text-muted-foreground">
-            Supabase Auth is not configured in this environment.
-          </p>
-        ) : null}
-      </div>
-    </div>
-  );
-}
-
-function LoginPage({ onLogin }: { onLogin: (user: AuthUser | null) => void }) {
-  const location = useLocation();
-  const returnTo = safeReturnTo(new URLSearchParams(location.search).get("return_to"));
-  const [error, setError] = useState<string | null>(null);
-  const [isCheckingSession, setIsCheckingSession] = useState(
-    Boolean(returnTo && supabase),
-  );
-  const [isSubmitting, setIsSubmitting] = useState(false);
+export default function App() {
+  const bridge = window.hiremeDesktop;
+  const [bootstrap, setBootstrap] = useState<HireMeDesktopBootstrap | null>(null);
+  const [auth, setAuth] = useState<HireMeDesktopAuthState | null>(null);
+  const [loginBusy, setLoginBusy] = useState(false);
+  const [loginError, setLoginError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!returnTo || !supabase) {
-      return;
-    }
-
-    const targetReturnTo = returnTo;
-    let cancelled = false;
-    async function resumeExistingSession() {
-      const { data } = await supabase!.auth.getSession();
-      if (!data.session) {
-        if (!cancelled) setIsCheckingSession(false);
-        return;
-      }
-      await syncGatewayWebSession(data.session.access_token);
-      const user = authUserFromSupabaseSession(data.session);
-      onLogin(user);
-      writeStoredAuthUser(user);
-      window.location.assign(targetReturnTo);
-    }
-
-    void resumeExistingSession().catch((err) => {
-      if (!cancelled) {
-        setError(err instanceof Error ? err.message : "Could not resume login.");
-        setIsCheckingSession(false);
-      }
+    if (!bridge) return;
+    let disposed = false;
+    const removeListener = bridge.onAuthStateChanged((next) => {
+      if (disposed) return;
+      setAuth(next);
+      if (next.status !== "error") setLoginError(null);
+      if (next.status !== "authenticating") setLoginBusy(false);
     });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [onLogin, returnTo]);
-
-  async function submitGoogleLogin() {
-    setIsSubmitting(true);
-    setError(null);
-    try {
-      await signInWithGoogle(returnTo);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Google login failed.");
-      setIsSubmitting(false);
-    }
-  }
-
-  return (
-    <main className="flex min-h-[calc(100svh-5rem)] items-center justify-center bg-secondary px-4 py-10">
-      <section className="w-full max-w-md rounded-xl border border-border bg-white p-6 app-shadow">
-        <div className="flex items-center gap-2 text-sm font-medium text-[#1c1e54]">
-          <UserRound className="size-4 text-primary" />
-          Login
-        </div>
-        <h1 className="mt-4 text-3xl font-light leading-tight text-[#0d253d]">
-          Sign in to HireMe
-        </h1>
-        <p className="mt-3 text-sm leading-6 text-muted-foreground">
-          Codex uses this same web session. After Google login, connect your
-          Enoki zkLogin Sui address from My Agents.
-        </p>
-        {error ? (
-          <div className="mt-5 rounded-lg border border-[#ea2261]/20 bg-[#fff8fb] px-3 py-2 text-sm text-[#9f1239]">
-            {error}
-          </div>
-        ) : null}
-        <Button
-          className="mt-6 w-full"
-          disabled={isSubmitting || isCheckingSession || !isSupabaseConfigured}
-          onClick={() => {
-            void submitGoogleLogin();
-          }}
-          type="button"
-        >
-          <LogIn /> Continue with Google
-        </Button>
-        {!isSupabaseConfigured ? (
-          <p className="mt-3 text-xs leading-5 text-muted-foreground">
-            Supabase Auth is not configured in this environment.
-          </p>
-        ) : null}
-      </section>
-    </main>
-  );
-}
-
-function AuthCallbackPage({
-  onLogin,
-}: {
-  onLogin: (user: AuthUser | null) => void;
-}) {
-  const location = useLocation();
-  const navigate = useNavigate();
-  const locationHash = location.hash;
-  const locationSearch = location.search;
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function completeLogin() {
-      const callbackError = readAuthCallbackError({
-        hash: locationHash,
-        search: locationSearch,
-      });
-      if (callbackError) throw callbackError;
-
-      if (!supabase) {
-        throw new Error("Supabase Auth is not configured.");
-      }
-      const { data, error: sessionError } = await supabase.auth.getSession();
-      if (sessionError) throw sessionError;
-      if (!data.session) {
-        throw new Error("No Supabase session was returned.");
-      }
-
-      if (cancelled) return;
-      const user = authUserFromSupabaseSession(data.session);
-      await syncGatewayWebSession(
-        data.session.access_token,
-        user.wallet,
-        user.displayName,
-      );
-
-      if (cancelled) return;
-      onLogin(user);
-      writeStoredAuthUser(user);
-
-      const params = new URLSearchParams(locationSearch);
-      const returnTo = safeReturnTo(params.get("return_to"));
-      if (cancelled) return;
-      if (returnTo) {
-        window.location.assign(returnTo);
-        return;
-      }
-      if (!cancelled) navigate("/my", { replace: true });
-    }
-
-    void completeLogin().catch((err) => {
-      if (!cancelled) {
-        setError(formatAuthCallbackError(err));
-      }
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [locationHash, locationSearch, navigate, onLogin]);
-
-  return (
-    <main className="flex min-h-[calc(100svh-5rem)] items-center justify-center bg-secondary px-4 py-10">
-      <section className="w-full max-w-md rounded-xl border border-border bg-white p-6 app-shadow">
-        <div className="flex items-center gap-2 text-sm font-medium text-[#1c1e54]">
-          <UserRound className="size-4 text-primary" />
-          Login
-        </div>
-        <h1 className="mt-4 text-3xl font-light leading-tight text-[#0d253d]">
-          Signing you in
-        </h1>
-        <p className="mt-3 text-sm leading-6 text-muted-foreground">
-          Securing your HireMe session. This can take a few seconds.
-        </p>
-        <div className="mt-6" aria-live="polite">
-          <div
-            aria-label="Sign-in progress"
-            className="h-2 overflow-hidden rounded-full bg-[#e8ebf3]"
-            role={error ? "presentation" : "progressbar"}
-          >
-            <div
-              className={`h-full rounded-full ${
-                error
-                  ? "w-1/3 bg-[#ea2261]"
-                  : "auth-callback-progress bg-[#635bff] shadow-[0_0_18px_rgba(99,91,255,0.28)]"
-              }`}
-            />
-          </div>
-        </div>
-        {error ? (
-          <div className="mt-5 rounded-lg border border-[#ea2261]/20 bg-[#fff8fb] px-3 py-2 text-sm text-[#9f1239]">
-            {error}
-          </div>
-        ) : null}
-      </section>
-    </main>
-  );
-}
-
-function EnokiCallbackPage() {
-  return (
-    <main className="flex min-h-[calc(100svh-5rem)] items-center justify-center bg-secondary px-4 py-10">
-      <section className="w-full max-w-md rounded-xl border border-border bg-white p-6 app-shadow">
-        <div className="flex items-center gap-2 text-sm font-medium text-[#1c1e54]">
-          <WalletCards className="size-4 text-primary" />
-          Enoki zkLogin
-        </div>
-        <h1 className="mt-4 text-3xl font-light leading-tight text-[#0d253d]">
-          Connecting Sui address
-        </h1>
-        <p className="mt-3 text-sm leading-6 text-muted-foreground">
-          This popup will close after Enoki finishes the Google zkLogin flow.
-        </p>
-      </section>
-    </main>
-  );
-}
-
-function HeroAgentPreview() {
-  const [afterImageIndex, setAfterImageIndex] = useState(0);
-  const activeAfterImage = heroAfterHarnessImages[afterImageIndex] ?? heroAfterHarnessImages[0];
-
-  useEffect(() => {
-    if (heroAfterHarnessImages.length < 2) return undefined;
-    const intervalId = window.setInterval(() => {
-      setAfterImageIndex((current) => (current + 1) % heroAfterHarnessImages.length);
-    }, 3000);
-    return () => window.clearInterval(intervalId);
-  }, []);
-
-  return (
-    <div
-      aria-label="Before and after results from a protected design Agent"
-      className="hero-demo-visual relative mx-auto min-h-[390px] w-full max-w-[540px] select-none sm:min-h-[430px] lg:min-h-[480px]"
-    >
-      <div className="hero-demo-glow absolute inset-x-[10%] top-[14%] h-[66%] rounded-full bg-[rgba(124,92,255,0.15)] blur-[100px]" />
-
-      <div className="hero-result-showcase absolute inset-x-0 top-[8%] mx-auto max-w-[520px] sm:top-[7%]">
-        <div className="hero-result-card hero-result-card--before">
-          <div className="hero-result-card-header">
-            <span>Normal Output</span>
-          </div>
-          <div className="hero-result-image-frame">
-            <img
-              alt="Visual result without a specialized Agent"
-              className="hero-result-image"
-              draggable="false"
-              src={heroBeforeHarnessImage}
-            />
-          </div>
-        </div>
-
-        <div className="hero-result-card hero-result-card--after">
-          <div className="hero-result-card-header">
-            <span>With Specialized Agent</span>
-          </div>
-          <div className="hero-result-image-frame">
-            <img
-              key={activeAfterImage}
-              alt="Visual result generated with a specialized Agent"
-              className="hero-result-image hero-result-image--active"
-              draggable="false"
-              src={activeAfterImage}
-            />
-          </div>
-          <div className="mt-4 flex items-center justify-between gap-4">
-            <div className="inline-flex items-center gap-1.5 rounded-full border border-[rgba(124,92,255,0.14)] bg-[rgba(124,92,255,0.06)] px-3 py-1.5 text-[10px] font-semibold uppercase text-[#74668f]">
-              <ShieldCheck className="size-3.5" />
-              Protected Harness applied
-            </div>
-            <div className="flex items-center gap-1.5">
-              {heroAfterHarnessImages.map((image, index) => (
-                <span
-                  aria-hidden="true"
-                  className={`hero-result-dot ${index === afterImageIndex ? "hero-result-dot--active" : ""}`}
-                  key={image}
-                />
-              ))}
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function LandingPage() {
-  const revealScopeRef = useRef<HTMLElement | null>(null);
-
-  useScrollReveal(revealScopeRef);
-
-  return (
-    <main
-      ref={revealScopeRef}
-      className="overflow-hidden bg-gradient-to-b from-[#f9fafb] via-[#f6faff] to-[#e8f3ff]"
-    >
-      <div
-        aria-hidden="true"
-        className="pointer-events-none h-0"
-      />
-      <section className="hero-visual relative overflow-hidden px-4 pb-16 pt-8 md:px-8 md:pb-20 md:pt-10 lg:py-12">
-        <div className="mx-auto grid min-h-[calc(100svh-5rem)] page-shell w-full items-center gap-12 lg:grid-cols-[minmax(0,1.16fr)_minmax(280px,0.84fr)] lg:gap-10 xl:gap-14">
-          <div className="landing-hero-copy max-w-[780px] py-0">
-            <div className="reveal stagger-item" data-reveal>
-              <h1 className="hero-title balanced-text text-[#191f28]">
-                <span className="hero-title-line">Hire expert Agents</span>
-                <span className="hero-title-line">without exposing private work.</span>
-              </h1>
-            </div>
-            <div
-              className="reveal stagger-item"
-              data-reveal
-              style={revealDelayStyle(140)}
-            >
-              <p className="body-copy pretty-text mt-6 max-w-[660px]">
-                Clients get specialized results from protected Agents. Creators earn from their expertise without sharing the raw Harness behind it.
-              </p>
-            </div>
-            <div
-              className="reveal stagger-item"
-              data-reveal
-              style={revealDelayStyle(240)}
-            >
-              <div className="mt-8 flex flex-wrap gap-3">
-                <Button
-                  asChild
-                  className="border-transparent bg-gradient-to-r from-[#7c5cff] via-[#6346f5] to-[#4f35d8] text-white shadow-[0_18px_40px_rgba(99,70,245,0.24)] hover:shadow-[0_24px_52px_rgba(99,70,245,0.32)] active:shadow-[0_12px_24px_rgba(79,53,216,0.2)] focus-visible:ring-[rgba(124,92,255,0.38)]"
-                  size="lg"
-                >
-                  <Link to="/agents">
-                    <Bot /> Hire an Agent
-                  </Link>
-                </Button>
-                <Button
-                  asChild
-                  className="border-[rgba(124,92,255,0.26)] bg-white/[0.78] text-[#6346f5] shadow-[0_16px_32px_rgba(79,53,216,0.08)] hover:border-[rgba(124,92,255,0.36)] hover:bg-[#f7f5ff] hover:shadow-[0_20px_40px_rgba(79,53,216,0.13)] focus-visible:ring-[rgba(124,92,255,0.32)]"
-                  size="lg"
-                  variant="secondary"
-                >
-                  <Link to="/agents/create">
-                    <UploadCloud /> Publish an Agent
-                  </Link>
-                </Button>
-              </div>
-            </div>
-          </div>
-
-          <div className="reveal stagger-item" data-reveal style={revealDelayStyle(180)}>
-            <div className="lg:translate-x-0 xl:translate-x-2">
-              <HeroAgentPreview />
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <ProtectedExecutionSection />
-      <ClientUseSection />
-      <CreatorIpSection />
-      <MakeAgentSection />
-      <LandingFooter />
-    </main>
-  );
-}
-
-function ProtectedExecutionSection() {
-  const steps = [
-    { label: "Client task", note: "Private input" },
-    { label: "Secure runner", note: "HireMe gateway" },
-    { label: "Private Harness", note: "Gateway-only run" },
-    { label: "Client gets result", note: "Output + receipt" },
-  ];
-
-  return (
-    <section className="relative overflow-hidden bg-[#1d1f5d] px-4 py-14 text-white md:px-8 md:py-20 lg:flex lg:min-h-[72svh] lg:items-center">
-      <div className="relative z-10 mx-auto page-shell w-full">
-        <div className="reveal max-w-2xl" data-reveal>
-          <h2 className="max-w-none whitespace-nowrap text-[0.72rem] font-bold leading-[1.08] text-white sm:text-[1.35rem] md:text-[1.9rem] lg:text-[2.4rem] xl:text-[2.9rem]">
-            Use expert Agents without exposing your task.
-          </h2>
-          <p className="mt-4 max-w-[42rem] text-[1rem] leading-[1.65] text-white/80 md:text-[1.05rem]">
-            Your context goes through HireMe. The Agent works, but your raw input stays protected.
-          </p>
-        </div>
-
-        <div className="relative mt-8 grid grid-cols-2 items-stretch gap-3 md:mt-10 md:grid-cols-4 md:gap-4 lg:gap-5">
-          {steps.map((step, index) => (
-            <div
-              className="reveal stagger-item relative z-10 flex min-h-32 min-w-0 flex-col items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.06] p-4 text-center md:min-h-36 md:gap-4 md:rounded-[24px] md:p-5"
-              data-reveal
-              key={step.label}
-              style={revealDelayStyle(120 * index)}
-            >
-              <span className="flex size-10 shrink-0 items-center justify-center rounded-full border border-white/12 bg-white/10 text-xs font-semibold text-white/90 shadow-[0_10px_24px_rgba(2,6,23,0.14)] md:size-12 md:text-[0.9rem]">
-                {String(index + 1).padStart(2, "0")}
-              </span>
-              <div className="min-w-0">
-                <div className="text-sm font-semibold leading-snug text-white/95 md:text-[0.95rem]">{step.label}</div>
-                <div className="mt-1.5 text-xs leading-snug text-white/62 md:text-[0.8rem]">{step.note}</div>
-              </div>
-            </div>
-          ))}
-        </div>
-
-      </div>
-    </section>
-  );
-}
-
-function ClientUseSection() {
-  const steps = [
-    {
-      title: "Pick an expert Agent",
-      copy: "Find the Agent with the right skill, sample result, and price.",
-      icon: Search,
-    },
-    {
-      title: "Run it from Codex or Claude",
-      copy: "Send the task from the tools you already use while HireMe handles access.",
-      icon: Terminal,
-    },
-    {
-      title: "Receive the finished result",
-      copy: "Get the output and receipt without touching the raw Harness.",
-      icon: CheckCircle2,
-    },
-  ];
-
-  return (
-    <section className="relative isolate -mt-px overflow-hidden bg-[#f7fbff] px-4 py-16 text-[#0d253d] md:px-8 md:py-20 lg:flex lg:min-h-[70svh] lg:items-center">
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute inset-0 -z-10"
-        style={{
-          background:
-            "radial-gradient(circle at 12% 18%, rgba(49, 130, 246, 0.09), transparent 34%), radial-gradient(circle at 88% 72%, rgba(16, 185, 129, 0.07), transparent 38%), linear-gradient(180deg, #f7fbff 0%, #f3f9ff 100%)",
-        }}
-      />
-      <div className="relative z-10 mx-auto grid page-shell w-full gap-8 lg:grid-cols-[0.9fr_1.1fr] lg:items-center lg:gap-12">
-        <div className="reveal" data-reveal>
-          <h2 className="section-title max-w-[680px] text-[#191f28]">
-            How can you hire expert Agents?
-          </h2>
-          <p className="body-copy mt-5 max-w-[660px]">
-            Pick the expert, run it from your workflow, and receive the finished result.
-          </p>
-        </div>
-
-        <div className="grid gap-4">
-          {steps.map((step, index) => {
-            const Icon = step.icon;
-            return (
-              <div
-                className="reveal stagger-item rounded-[22px] border border-[rgba(49,130,246,0.12)] bg-white/[0.78] p-5 shadow-[0_14px_34px_rgba(30,64,175,0.055)] backdrop-blur-sm"
-                data-reveal
-                key={step.title}
-                style={revealDelayStyle(index * 90)}
-              >
-                <div className="flex gap-4">
-                  <div className="flex size-11 shrink-0 items-center justify-center rounded-2xl border border-[rgba(49,130,246,0.12)] bg-[#eaf5ff] text-[#0877ec]">
-                    <Icon className="size-5" />
-                  </div>
-                  <div className="min-w-0">
-                    <div className="docs-card-title text-[#191f28]">
-                      {step.title}
-                    </div>
-                    <p className="mt-2 docs-card-copy">
-                      {step.copy}
-                    </p>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function MakeAgentSection() {
-  return (
-    <section id="make-agent" className="relative isolate -mt-px overflow-hidden bg-[#f4fbf7] px-4 py-20 md:px-8 md:py-28 lg:flex lg:min-h-[100svh] lg:items-center lg:py-32">
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute inset-0 -z-10"
-        style={{
-          background:
-            "radial-gradient(circle at 14% 24%, rgba(16, 185, 129, 0.11), transparent 34%), radial-gradient(circle at 88% 78%, rgba(49, 130, 246, 0.07), transparent 38%), linear-gradient(180deg, #fbfffd 0%, #f4fbf7 48%, #ecf9f2 100%)",
-        }}
-      />
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute -inset-x-8 -top-[180px] z-0 h-[320px] bg-gradient-to-b from-white via-[#fbfffd]/95 to-transparent blur-2xl"
-      />
-      <div className="relative z-10 mx-auto page-shell w-full">
-        <div className="reveal" data-reveal>
-          <h2 className="section-title text-[#191f28]">
-            Create your first protected Agent in three steps.
-          </h2>
-          <p className="body-copy mt-5 max-w-[1120px] lg:whitespace-nowrap">
-            Scaffold the template, add your private Harness, and publish it to HireMe.
-          </p>
-        </div>
-
-        <ol className="mt-10 grid gap-4 md:grid-cols-3">
-          {makeAgentSteps.map((step, index) => (
-            <li
-              className="reveal stagger-item rounded-[22px] border border-[rgba(16,185,129,0.12)] bg-white/[0.74] p-5 shadow-[0_12px_32px_rgba(16,107,76,0.045)] backdrop-blur-sm"
-              data-reveal
-              key={step.title}
-              style={revealDelayStyle(120 + index * 80)}
-            >
-              <div className="mb-4 flex items-center gap-3">
-                <div className="flex size-8 shrink-0 items-center justify-center rounded-full border border-[rgba(16,185,129,0.18)] bg-[rgba(236,253,245,0.82)] text-[11px] font-semibold text-[#047857] shadow-[0_8px_22px_rgba(16,107,76,0.06)]">
-                  {String(index + 1).padStart(2, "0")}
-                </div>
-                <h3 className="docs-card-title text-[#191f28]">
-                  {step.title}
-                </h3>
-              </div>
-              <p className="mt-2 docs-card-copy">
-                {step.copy}
-              </p>
-            </li>
-          ))}
-        </ol>
-
-        <div className="reveal mt-8 w-full" data-reveal style={revealDelayStyle(420)}>
-          <details className="group overflow-hidden rounded-[22px] border border-[rgba(16,185,129,0.13)] bg-white/[0.74] shadow-[0_12px_32px_rgba(16,107,76,0.045)] backdrop-blur-sm">
-            <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-5 py-4 text-left marker:hidden">
-              <span>
-                <span className="block text-sm font-semibold text-[#191f28]">One-time Codex setup</span>
-                <span className="mt-1 block text-xs leading-5 text-[#6b7684]">
-                  Open this only when you want the creator template and MCP command.
-                </span>
-              </span>
-              <ChevronDown className="size-5 shrink-0 text-[#047857] transition-transform group-open:rotate-180" />
-            </summary>
-            <div className="border-t border-[rgba(16,185,129,0.1)] p-4">
-              <CopyableCodeBlock
-                code={codexCreatorSetupCommand}
-                description="Installs the creator template plugin and connects Codex to the HireMe Render MCP server."
-                label="Creator setup command"
-              />
-            </div>
-          </details>
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function CreatorIpSection() {
-  return (
-    <section id="creator-ip" className="creator-ip-section relative isolate -mt-px flex items-center overflow-hidden px-4 py-24 text-[#0d253d] md:px-8 md:py-28 lg:min-h-[calc(100svh-72px)] lg:py-32">
-      <div
-        aria-hidden="true"
-        className="creator-ip-transition-top pointer-events-none absolute -inset-x-8 -top-4 z-0 h-64 md:h-72"
-      />
-      <div
-        aria-hidden="true"
-        className="creator-ip-transition-bottom pointer-events-none absolute -inset-x-8 -bottom-4 z-0 h-56 md:h-64"
-      />
-      <div className="relative z-10 mx-auto grid page-shell w-full gap-10 lg:grid-cols-[0.92fr_1.08fr] lg:items-center">
-        <div className="reveal" data-reveal>
-          <h2 className="section-title max-w-[760px] text-[#191f28]">
-            Sell the Agent, not the Harness.
-          </h2>
-          <p className="body-copy mt-5 max-w-[680px]">
-            <span className="block">Clients see the output.</span>
-            <span className="block">They never see your prompts, examples, rubrics, or private workflow.</span>
-          </p>
-        </div>
-
-        <div className="reveal stagger-item" data-reveal style={revealDelayStyle(140)}>
-          <div className="grid gap-4 md:grid-cols-[1fr_auto_1fr] md:items-stretch">
-            <div className="rounded-[28px] border border-[rgba(49,130,246,0.12)] bg-white/[0.82] p-5 shadow-[0_18px_44px_rgba(30,64,175,0.065)] md:p-6">
-              <div className="docs-card-title text-[#191f28]">
-                Clients see
-              </div>
-              <div className="mt-4 grid">
-                {creatorIpLayers[0].items.map((item, index) => (
-                  <div className="reveal stagger-item flex items-center gap-3 border-b border-[rgba(49,130,246,0.09)] px-1 py-2.5 docs-card-copy last:border-b-0" data-reveal style={revealDelayStyle(index * 70)} key={item}>
-                    <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-[rgba(49,130,246,0.42)]" />
-                    <span>{item}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div className="flex items-center justify-center">
-              <div className="flex h-full min-h-24 items-center justify-center md:flex-col">
-                <div className="hidden h-24 w-px bg-gradient-to-b from-transparent via-[rgba(49,130,246,0.18)] to-transparent md:block" />
-                <div className="rounded-full border border-[rgba(49,130,246,0.16)] bg-[rgba(232,243,255,0.72)] px-4 py-2 text-xs font-semibold text-[#4e5968] md:my-3">
-                  boundary
-                </div>
-                <div className="hidden h-24 w-px bg-gradient-to-b from-transparent via-[rgba(49,130,246,0.18)] to-transparent md:block" />
-              </div>
-            </div>
-            <div className="rounded-[28px] border border-[rgba(49,130,246,0.12)] bg-white/[0.82] p-5 shadow-[0_18px_44px_rgba(30,64,175,0.065)] md:p-6">
-              <div className="docs-card-title text-[#191f28]">
-                Clients can't see
-              </div>
-              <div className="mt-4 grid">
-                {creatorIpLayers[1].items.map((item, index) => (
-                  <div className="reveal stagger-item flex items-center gap-3 border-b border-[rgba(49,130,246,0.09)] px-1 py-2.5 docs-card-copy last:border-b-0" data-reveal style={revealDelayStyle(index * 70)} key={item}>
-                    <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-[rgba(49,130,246,0.42)]" />
-                    <span>{item}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function LandingFooter() {
-  const scrollToTop = () => {
-    window.scrollTo({
-      top: 0,
-      behavior: prefersReducedMotion() ? "auto" : "smooth",
-    });
-  };
-
-  return (
-    <footer className="landing-footer-wave bg-gradient-to-b from-[#061b3d] via-[#06192f] to-[#03101f] px-4 py-14 text-white md:px-8 md:py-16">
-      <div className="mx-auto grid page-shell gap-10 lg:grid-cols-[1.2fr_0.8fr_0.8fr]">
-        <div className="max-w-xl">
-          <button
-            aria-label="맨 위로 이동"
-            className="flex items-center gap-2 text-sm font-medium transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(147,197,253,0.4)] focus-visible:ring-offset-2 focus-visible:ring-offset-[#06192f]"
-            onClick={scrollToTop}
-            type="button"
-          >
-            <Bot className="size-4 text-[#93c5fd]" />
-            HireMe
-          </button>
-          <p className="mt-3 text-sm leading-7 text-white/72">
-            Build protected Agent Harnesses, publish them as paid tools, and let
-            Codex users hire them without copying your private IP.
-          </p>
-        </div>
-        <div>
-          <div className="text-xs font-semibold uppercase tracking-[0.08em] text-white/50">
-            Navigate
-          </div>
-          <div className="mt-4 grid gap-3 text-sm text-white/78">
-            <Link className="hover:text-white" to="/agents">
-              Explore agents
-            </Link>
-            <a className="hover:text-white" href="#make-agent">
-              Make an Agent
-            </a>
-            <Link className="hover:text-white" to="/agents/create">
-              Publish an Agent
-            </Link>
-          </div>
-        </div>
-        <div>
-          <div className="text-xs font-semibold uppercase tracking-[0.08em] text-white/50">
-            Platform
-          </div>
-          <div className="mt-4 grid gap-3 text-sm text-white/78">
-            <span>Sui + Walrus MVP</span>
-            <span>Protected Harness execution</span>
-            <span>Creator receipts and payouts</span>
-          </div>
-          <div className="mt-8 text-xs leading-5 text-white/42">
-            © HireMe. Protected AI work marketplace.
-          </div>
-        </div>
-      </div>
-    </footer>
-  );
-}
-
-function marketplaceSourceLabel(source: AgentDataSource) {
-  if (source === "supabase") return "Supabase live";
-  return "Local demo data";
-}
-
-function ExploreAgentsPage({
-  user,
-  onRequireLogin,
-}: {
-  user: AuthUser | null;
-  onRequireLogin: () => void;
-}) {
-  const signAndExecuteTransaction = useSignAndExecuteTransaction();
-  const [query, setQuery] = useState("");
-  const [catalogView, setCatalogView] = useState<CatalogView | null>(null);
-  const [selectedTopics, setSelectedTopics] = useState<Agent["category"][]>([]);
-  const [marketplaceAgents, setMarketplaceAgents] =
-    useState<Agent[]>([]);
-  const [accessSnapshot, setAccessSnapshot] =
-    useState<AgentAccessRecord[]>(readAllAgentAccess);
-  const [dataSource, setDataSource] = useState<{
-    source: AgentDataSource;
-    message?: string;
-  }>({ source: "mock", message: "Loading marketplace..." });
-  const [accessActionError, setAccessActionError] = useState<string | null>(null);
-  const [accessActionKey, setAccessActionKey] = useState<string | null>(null);
-  const [tryChat, setTryChat] = useState<{
-    agent: Agent;
-    access: AgentAccessRecord;
-  } | null>(null);
-
-  useEffect(() => {
-    let isCurrent = true;
-
-    void loadMarketplaceAgents().then((result) => {
-      if (!isCurrent) return;
-      setMarketplaceAgents(result.agents);
-      setDataSource({ source: result.source, message: result.message });
-    });
-
-    return () => {
-      isCurrent = false;
-    };
-  }, []);
-
-  const catalogAgents = marketplaceAgents;
-
-  const filteredAgents = useMemo(() => {
-    return catalogAgents.filter((agent) => {
-      if (!isMarketplaceAgentVisible(agent)) return false;
-      if (!isPaidAgent(agent)) return false;
-      const categories = agentCategories(agent);
-      const matchesTopic =
-        selectedTopics.length === 0 ||
-        categories.some((category) => selectedTopics.includes(category));
-      const text = `${categories.join(" ")} ${agent.team.name} ${agent.team.handle} ${agent.team.owner} ${agent.team.publicSummary} ${agent.name} ${agent.handle} ${agent.headline} ${agent.publicSummary} ${agent.skills.join(" ")}`.toLowerCase();
-      const matchesQuery = text.includes(query.toLowerCase());
-      return matchesTopic && matchesQuery;
-    });
-  }, [catalogAgents, query, selectedTopics]);
-  const accessRecords = useMemo(
-    () =>
-      user
-        ? accessSnapshot.filter((record) => record.hirerId === hirerIdFor(user))
-        : [],
-    [accessSnapshot, user],
-  );
-
-  const agentResults = filteredAgents;
-  const teamResults = useMemo(() => {
-    const byTeam = new Map<string, { team: AgentTeam; agents: Agent[] }>();
-
-    for (const agent of filteredAgents) {
-      const current = byTeam.get(agent.team.id);
-      if (current) {
-        current.agents.push(agent);
-      } else {
-        byTeam.set(agent.team.id, { team: agent.team, agents: [agent] });
-      }
-    }
-
-    return Array.from(byTeam.values());
-  }, [filteredAgents]);
-  const resultCount =
-    catalogView === "teams" ? teamResults.length : agentResults.length;
-
-  function resetFilters() {
-    setSelectedTopics([]);
-    setCatalogView(null);
-    setQuery("");
-  }
-
-  async function updateAgentAccess(
-    agent: Agent,
-    accessType: AgentAccessType,
-  ): Promise<AgentAccessRecord | null> {
-    if (!user) {
-      onRequireLogin();
-      return null;
-    }
-
-    setAccessActionError(null);
-    setAccessActionKey(`${agent.id}:${accessType}`);
-    try {
-      const record =
-        accessType === "hired"
-          ? await createPaidAgentAccessRecord({
-              agent,
-              user,
-              signAndExecuteTransaction: signAndExecuteTransaction.mutateAsync,
-            })
-          : await createAgentAccessRecord({
-              agent,
-              user,
-              accessType,
-            });
-      const nextRecords = upsertAccessRecord(readUserAgentAccess(user), record);
-      writeUserAgentAccess(user, nextRecords);
-      setAccessSnapshot(readAllAgentAccess());
-      return record;
-    } catch (error) {
-      setAccessActionError(
-        error instanceof Error ? error.message : "Agent access request failed.",
-      );
-      return null;
-    } finally {
-      setAccessActionKey(null);
-    }
-  }
-
-  function accessFor(agent: Agent) {
-    return accessRecords.find(
-      (record) => record.agentId === agent.id && record.status === "active",
-    );
-  }
-
-  async function handleTryAgent(agent: Agent) {
-    if (!user) {
-      onRequireLogin();
-      return;
-    }
-
-    const existingAccess = accessFor(agent);
-    if (existingAccess) {
-      setTryChat({ agent, access: existingAccess });
-      return;
-    }
-
-    const record = await updateAgentAccess(agent, "trial");
-    if (record) {
-      setTryChat({ agent, access: record });
-    }
-  }
-
-  function handleTryChatAccessUpdated(record: AgentAccessRecord) {
-    if (!user) return;
-
-    const nextRecords = upsertAccessRecord(readUserAgentAccess(user), record);
-    writeUserAgentAccess(user, nextRecords);
-    setAccessSnapshot(readAllAgentAccess());
-    setTryChat((current) =>
-      current && current.agent.id === record.agentId
-        ? { ...current, access: record }
-        : current,
-    );
-  }
-
-  return (
-    <main className="min-h-screen bg-[#f6f9fc]">
-      <section className="px-4 py-6 md:px-8">
-        <div className="mx-auto max-w-7xl space-y-6">
-          <div className="rounded-xl border border-border bg-white p-4 app-shadow">
-            <div className="grid gap-3 md:grid-cols-[1fr_auto] md:items-center">
-              <div className="relative">
-                <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  className="h-11 rounded-full bg-white pl-10"
-                  onChange={(event) => setQuery(event.target.value)}
-                  placeholder="Search agents, skills, contracts, memory scopes"
-                  value={query}
-                />
-              </div>
-              <Button asChild type="button">
-                <Link to="/agents/create">
-                  <PackageOpen /> Create Agent
-                </Link>
-              </Button>
-            </div>
-
-            <div className="mt-4 flex flex-col gap-3 border-t border-border pt-4 lg:flex-row lg:items-start lg:justify-between">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="mr-1 text-[11px] font-medium uppercase text-muted-foreground">
-                  Type
-                </span>
-                {catalogViews.map((view) => {
-                  const isSelected = catalogView === view.id;
-                  return (
-                    <button
-                      aria-pressed={isSelected}
-                      className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] font-semibold leading-none transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6b7280]/40 focus-visible:ring-offset-2 ${
-                        isSelected
-                          ? "border-[#d8d4e2] bg-[#f3f1f8] text-[#494556] shadow-[inset_0_0_0_1px_rgba(73,69,86,0.03)] hover:bg-[#eeebf4] active:bg-[#e9e5f0]"
-                          : "border-[#d1d5db] bg-white text-[#374151] hover:border-[#c4c9d0] hover:bg-[#f3f4f6] active:bg-[#e5e7eb]"
-                      }`}
-                      key={view.id}
-                      onClick={() =>
-                        setCatalogView((current) =>
-                          current === view.id ? null : view.id,
-                        )
-                      }
-                      type="button"
-                    >
-                      <span
-                        className={`size-1.5 rounded-full ${
-                          isSelected ? "bg-[#777184]" : "bg-[#c9d3e2]"
-                        }`}
-                      />
-                      {view.label}
-                    </button>
-                  );
-                })}
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2 lg:justify-end">
-                <span className="mr-1 text-[11px] font-medium uppercase text-muted-foreground">
-                  Category
-                </span>
-                {topicFilters.map((topic) => {
-                  const isSelected = selectedTopics.includes(topic);
-                  return (
-                    <button
-                      aria-pressed={isSelected}
-                      className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] font-semibold leading-none transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6b7280]/40 focus-visible:ring-offset-2 ${
-                        isSelected
-                          ? "border-[#d8d4e2] bg-[#f3f1f8] text-[#494556] shadow-[inset_0_0_0_1px_rgba(73,69,86,0.03)] hover:bg-[#eeebf4] active:bg-[#e9e5f0]"
-                          : "border-[#d1d5db] bg-white text-[#374151] hover:border-[#c4c9d0] hover:bg-[#f3f4f6] active:bg-[#e5e7eb]"
-                      }`}
-                      key={topic}
-                      onClick={() =>
-                        setSelectedTopics(toggleFilter(selectedTopics, topic))
-                      }
-                      type="button"
-                    >
-                      <span
-                        className={`size-1.5 rounded-full ${
-                          isSelected ? "bg-[#777184]" : "bg-[#c9d3e2]"
-                        }`}
-                      />
-                      {topic}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-3 text-xs">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="font-medium text-[#1c1e54]">
-                  {resultCount} {catalogView === "teams" ? "teams" : "agents"}
-                </span>
-                <span className="text-muted-foreground">·</span>
-                <span className="font-medium text-[#1c1e54]">
-                  {marketplaceSourceLabel(dataSource.source)}
-                </span>
-                {dataSource.message ? <span className="leading-5 text-muted-foreground">{dataSource.message}</span> : null}
-              </div>
-              <button className="rounded-md px-2 py-1 font-medium text-[#6b7280] underline-offset-4 transition hover:bg-[#f3f4f6] hover:text-[#111827] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6b7280]/40 focus-visible:ring-offset-2 active:bg-[#e5e7eb]" onClick={resetFilters} type="button">
-                Reset filters
-              </button>
-            </div>
-          </div>
-
-          {accessActionError ? (
-            <div className="rounded-xl border border-[#ea2261]/25 bg-[#fff8fb] px-4 py-3 text-sm leading-6 text-[#9f1239]">
-              {accessActionError}
-            </div>
-          ) : null}
-
-          {catalogView === "teams" ? (
-            teamResults.length ? (
-              <div className="grid items-start gap-4 md:grid-cols-2 xl:grid-cols-3">
-                {teamResults.map((result) => (
-                  <TeamMarketCard
-                    agents={result.agents}
-                    key={result.team.id}
-                    team={result.team}
-                  />
-                ))}
-              </div>
-            ) : (
-              <EmptyResult label="No teams match the current filters." />
-            )
-          ) : agentResults.length ? (
-            <div className="grid items-start gap-4 md:grid-cols-2 xl:grid-cols-3">
-              {agentResults.map((agent) => (
-                <AgentMarketCard
-                  access={accessFor(agent)}
-                  agent={agent}
-                  isBusy={accessActionKey?.startsWith(`${agent.id}:`) || false}
-                  key={agent.id}
-                  onHire={() => void updateAgentAccess(agent, "hired")}
-                  onTry={() => void handleTryAgent(agent)}
-                />
-              ))}
-            </div>
-          ) : (
-            <EmptyResult label="No agents match the current filters." />
-          )}
-        </div>
-      </section>
-
-      {tryChat && user ? (
-        <TryAgentChatPanel
-          access={tryChat.access}
-          agent={tryChat.agent}
-          key={`${tryChat.agent.id}:${tryChat.access.receiptObjectId}`}
-          onAccessUpdated={handleTryChatAccessUpdated}
-          onClose={() => setTryChat(null)}
-          user={user}
-        />
-      ) : null}
-    </main>
-  );
-}
-
-function AgentDetailPage({
-  user,
-  onRequireLogin,
-}: {
-  user: AuthUser | null;
-  onRequireLogin: () => void;
-}) {
-  const signAndExecuteTransaction = useSignAndExecuteTransaction();
-  const { agentId = "" } = useParams();
-  const [marketplaceAgents, setMarketplaceAgents] =
-    useState<Agent[]>([]);
-  const [accessSnapshot, setAccessSnapshot] =
-    useState<AgentAccessRecord[]>(readAllAgentAccess);
-  const [createdAgentRecords, setCreatedAgentRecords] = useState<
-    CreatedAgentRecord[]
-  >(() => readAllCreatedAgents());
-  const [accessActionError, setAccessActionError] = useState<string | null>(null);
-  const [accessActionType, setAccessActionType] = useState<AgentAccessType | null>(
-    null,
-  );
-  const [updateHarnessFile, setUpdateHarnessFile] = useState<File | null>(null);
-  const [updateReleaseNotes, setUpdateReleaseNotes] = useState("");
-  const [isUpdatingAgent, setIsUpdatingAgent] = useState(false);
-  const [updateAgentError, setUpdateAgentError] = useState<string | null>(null);
-  const [updateAgentResult, setUpdateAgentResult] =
-    useState<GatewayAgentRegistrationResult | null>(null);
-  const [tryChatAccess, setTryChatAccess] =
-    useState<AgentAccessRecord | null>(null);
-
-  useEffect(() => {
-    let isCurrent = true;
-
-    void loadMarketplaceAgents().then((result) => {
-      if (!isCurrent) return;
-      setMarketplaceAgents(result.agents);
-    });
-
-    return () => {
-      isCurrent = false;
-    };
-  }, []);
-
-  useEffect(() => {
-    const refreshCreatedRecords = () => {
-      setCreatedAgentRecords(readAllCreatedAgents());
-    };
-
-    window.addEventListener(
-      "hireme-created-agents-updated",
-      refreshCreatedRecords,
-    );
-    window.addEventListener("storage", refreshCreatedRecords);
-
-    return () => {
-      window.removeEventListener(
-        "hireme-created-agents-updated",
-        refreshCreatedRecords,
-      );
-      window.removeEventListener("storage", refreshCreatedRecords);
-    };
-  }, []);
-
-  const catalogAgents = marketplaceAgents;
-
-  const marketplaceAgent = catalogAgents.find(
-    (item) =>
-      isMarketplaceAgentVisible(item) &&
-      (item.id === agentId ||
-        item.handle.replace(/^@[^/]+\//, "") === agentId ||
-        item.handle === agentId),
-  );
-  const localCreatedRecord = createdAgentRecords.find(
-    (record) =>
-      record.agentSlug === marketplaceAgent?.id ||
-      record.id === marketplaceAgent?.id ||
-      record.agentSlug === agentId ||
-      record.id === agentId,
-  );
-  const localAgent = localCreatedRecord
-    ? createdAgentRecordToAgent(localCreatedRecord, user)
-    : null;
-  const agent =
-    marketplaceAgent && localAgent
-      ? {
-          ...marketplaceAgent,
-          ...localAgent,
-          calls: marketplaceAgent.calls,
-          rating: marketplaceAgent.rating,
-          latencyMs: marketplaceAgent.latencyMs,
-          avgInputTokens: marketplaceAgent.avgInputTokens,
-          avgOutputTokens: marketplaceAgent.avgOutputTokens,
-          activeUsers: marketplaceAgent.activeUsers,
-        }
-      : localAgent || marketplaceAgent;
-  const agentOwnerKeys = agent
-    ? [agent.creator, agent.team.owner, agent.handle, agent.id]
-        .map((value) => value.trim().toLowerCase())
-    : [];
-  const userOwnerKeys = user
-    ? [user.email, user.displayName, user.wallet]
-        .map((value) => value?.trim().toLowerCase())
-        .filter((value): value is string => Boolean(value))
-    : [];
-  const canUpdateAgent = Boolean(
-    user &&
-      agent &&
-      (localCreatedRecord?.creatorId === creatorIdFor(user) ||
-        localCreatedRecord?.creatorEmail === user.email ||
-        userOwnerKeys.some((key) => agentOwnerKeys.includes(key))),
-  );
-  const access = user
-    ? accessSnapshot.find(
-        (record) =>
-          record.agentId === agent?.id &&
-          record.hirerId === hirerIdFor(user) &&
-          record.status === "active",
-      )
-    : undefined;
-
-  async function updateAgentAccess(
-    accessType: AgentAccessType,
-  ): Promise<AgentAccessRecord | null> {
-    if (!agent) return null;
-    if (!user) {
-      onRequireLogin();
-      return null;
-    }
-
-    setAccessActionError(null);
-    setAccessActionType(accessType);
-    try {
-      const record =
-        accessType === "hired"
-          ? await createPaidAgentAccessRecord({
-              agent,
-              user,
-              signAndExecuteTransaction: signAndExecuteTransaction.mutateAsync,
-            })
-          : await createAgentAccessRecord({
-              agent,
-              user,
-              accessType,
-            });
-      const nextRecords = upsertAccessRecord(readUserAgentAccess(user), record);
-      writeUserAgentAccess(user, nextRecords);
-      setAccessSnapshot(readAllAgentAccess());
-      return record;
-    } catch (error) {
-      setAccessActionError(
-        error instanceof Error ? error.message : "Agent access request failed.",
-      );
-      return null;
-    } finally {
-      setAccessActionType(null);
-    }
-  }
-
-  async function openTryChat() {
-    if (!agent) return;
-    if (!user) {
-      onRequireLogin();
-      return;
-    }
-
-    if (access) {
-      setTryChatAccess(access);
-      return;
-    }
-
-    const record = await updateAgentAccess("trial");
-    if (record) {
-      setTryChatAccess(record);
-    }
-  }
-
-  function handleTryChatAccessUpdated(record: AgentAccessRecord) {
-    if (!user) return;
-
-    const nextRecords = upsertAccessRecord(readUserAgentAccess(user), record);
-    writeUserAgentAccess(user, nextRecords);
-    setAccessSnapshot(readAllAgentAccess());
-    setTryChatAccess(record);
-  }
-
-  async function updateAgentHarness() {
-    if (!agent) return;
-    if (!user) {
-      onRequireLogin();
-      return;
-    }
-    if (!updateHarnessFile) {
-      setUpdateAgentError("Upload a new Harness archive first.");
-      return;
-    }
-
-    setIsUpdatingAgent(true);
-    setUpdateAgentError(null);
-    setUpdateAgentResult(null);
-    try {
-      const result = await updateAgentWithGatewayUpload({
-        agent,
-        harnessFile: updateHarnessFile,
-        releaseNotes: updateReleaseNotes,
-        user,
-      });
-      if (localCreatedRecord) {
-        writeCreatedAgentRecord({
-          ...localCreatedRecord,
-          walrusBlobId:
-            result.protectedArtifact?.walrusBlobId ||
-            localCreatedRecord.walrusBlobId,
-          suiObjectId:
-            result.protectedArtifact?.suiObjectId ||
-            localCreatedRecord.suiObjectId,
-          ciphertextDigest:
-            result.protectedArtifact?.ciphertextDigest ||
-            localCreatedRecord.ciphertextDigest,
-          fileCount: result.upload?.entryCount || localCreatedRecord.fileCount,
-          createdAt: localCreatedRecord.createdAt,
-          updatedAt: result.registeredAt || new Date().toISOString(),
-          currentVersionNumber:
-            result.version?.versionNumber ||
-            localCreatedRecord.currentVersionNumber ||
-            agent.currentVersionNumber ||
-            1,
-          status: "Published",
-          source: "gateway",
-          gatewayError: result.supabase?.error,
-        });
-        setCreatedAgentRecords(readAllCreatedAgents());
-      }
-      const refreshedAgents = await loadMarketplaceAgents();
-      setMarketplaceAgents(refreshedAgents.agents);
-      setUpdateHarnessFile(null);
-      setUpdateReleaseNotes("");
-      setUpdateAgentResult(result);
-    } catch (error) {
-      setUpdateAgentError(
-        error instanceof Error ? error.message : "Agent update failed.",
-      );
-    } finally {
-      setIsUpdatingAgent(false);
-    }
-  }
-
-  if (!agent) {
-    return (
-      <main className="min-h-screen bg-[#f6f9fc] px-4 py-12 md:px-8">
-        <section className="mx-auto max-w-2xl rounded-xl border border-border bg-white p-6 app-shadow">
-          <h1 className="text-3xl font-light text-[#1c1e54]">
-            Agent not found
-          </h1>
-          <p className="mt-3 text-sm leading-6 text-muted-foreground">
-            This Agent may be unavailable or hidden from the public marketplace.
-          </p>
-          <Link className="mt-5 inline-flex items-center gap-2 text-sm font-medium text-[#6b7684] transition hover:text-[#191f28]" to="/agents">
-            <ArrowLeft className="size-4" />
-            Marketplace
-          </Link>
-        </section>
-      </main>
-    );
-  }
-
-  const isHired = access?.accessType === "hired";
-  const hasGatewayAccess = access?.source === "gateway";
-  const tokenPrice = agent.pricePer1MTokensSui ?? agent.pricePerCallUsd;
-  const averageTokens = totalAverageTokens(agent);
-  const estimatedRunCost = (tokenPrice * averageTokens) / 1_000_000;
-  const estimatedRunPrice = estimatedRunCost
-    ? `${estimatedRunCost.toFixed(estimatedRunCost >= 0.1 ? 2 : 3)} SUI`
-    : "Calculated at run time";
-  const creatorInfoUrl = normalizeCreatorInfoUrl(agent.creatorInfoUrl);
-  const howToUseCopy =
-    agent.howToUse ||
-    agent.resultPreview.summary ||
-    "Send a clear task, include the desired output format, and add any constraints the Agent should follow.";
-  const resultArtifacts = getResultArtifactExplorers(agent);
-
-  return (
-    <main className="min-h-screen bg-[#f6f9fc]">
-      <section className="border-b border-[#dedbea] bg-white px-4 py-8 md:px-8 md:py-10">
-        <div className="mx-auto max-w-7xl">
-          <Link className="inline-flex items-center gap-2 text-sm font-medium text-[#6b7684] transition hover:text-[#191f28]" to="/agents">
-            <ArrowLeft className="size-4" />
-            Marketplace
-          </Link>
-
-          <div className="mt-7 grid gap-7 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start">
-            <div>
-              <div className="flex items-start gap-4">
-                <Avatar className="size-16 shrink-0 md:size-20">
-                  <AvatarFallback className="bg-gradient-to-br from-[#533afd] to-[#7c6cf6] text-lg text-white md:text-xl">
-                    {agent.name.split(" ").map((word) => word[0]).join("")}
-                  </AvatarFallback>
-                </Avatar>
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="rounded-full border border-[#d8d4e2] bg-[#f3f1f8] px-2.5 py-1 text-[11px] font-semibold uppercase text-[#494556]">{agent.category}</span>
-                  </div>
-                  <h1 className="mt-3 balanced-text text-4xl font-light leading-tight text-[#171452] md:text-5xl">{agent.name}</h1>
-                  <p className="mt-2 text-sm text-muted-foreground">{agent.handle} · by {agent.creator}</p>
-                </div>
-              </div>
-              <p className="pretty-text mt-7 max-w-3xl text-xl font-light leading-8 text-[#1c1e54] md:text-2xl">{agent.headline}</p>
-              <p className="pretty-text mt-3 max-w-3xl text-sm leading-6 text-[#4e5d77] md:text-base">{agent.publicSummary}</p>
-              {creatorInfoUrl ? (
-                <a
-                  className="mt-3 inline-flex text-sm font-semibold text-[#533afd] underline-offset-4 transition hover:underline"
-                  href={creatorInfoUrl}
-                  rel="noreferrer"
-                  target="_blank"
-                >
-                  Creator information
-                </a>
-              ) : null}
-              <div className="mt-5 flex flex-wrap gap-x-6 gap-y-2 text-sm text-[#494556]">
-                <span><strong className="number-cell text-[#171452]">{agent.rating ? agent.rating.toFixed(1) : "New"}</strong> rating</span>
-                <span><strong className="number-cell text-[#171452]">{formatRuns(agent.calls)}</strong> completed runs</span>
-              </div>
-            </div>
-
-            <Card className="border-[#d8d4e2] bg-[#fbfaff] shadow-[rgba(28,30,84,0.06)_0_10px_30px]">
-              <CardHeader className="pb-3">
-                <CardDescription>Estimated cost per run</CardDescription>
-                <CardTitle className="number-cell text-3xl text-[#171452]">From {estimatedRunPrice}</CardTitle>
-                <p className="text-xs leading-5 text-muted-foreground">Based on {formatTokens(averageTokens)} average tokens at {formatAgentPrice(tokenPrice)}.</p>
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-2 gap-3">
-                  <Button className="w-full" disabled={Boolean(accessActionType)} onClick={() => void openTryChat()} type="button" variant="secondary"><MessageCircle /> Try Agent</Button>
-                  <Button className="w-full" disabled={Boolean(accessActionType) || (hasGatewayAccess && isHired)} onClick={() => void updateAgentAccess("hired")} type="button"><PackageOpen /> Hire Agent</Button>
-                </div>
-                {access ? <div className="mt-4 rounded-lg border border-[#d8d4e2] bg-white px-3 py-2 text-xs leading-5 text-muted-foreground">{access.source === "gateway" ? "Authorized for protected Codex execution." : "Saved locally. Connect the gateway to authorize Codex access."}</div> : null}
-                {accessActionError ? <div className="mt-4 rounded-lg border border-[#d8d4e2] bg-[#f3f1f8] px-3 py-2 text-xs leading-5 text-[#494556]">{accessActionError}</div> : null}
-              </CardContent>
-            </Card>
-          </div>
-        </div>
-      </section>
-
-      <section className="px-4 py-8 md:px-8 md:py-10">
-        <div className="mx-auto grid max-w-7xl gap-6 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start">
-          <div className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>How to use</CardTitle>
-              </CardHeader>
-              <CardContent className="grid gap-4">
-                <div className="rounded-xl border border-[#dedbea] bg-[#f8f7fb] p-4">
-                  <div className="text-xs font-semibold uppercase text-[#6b6580]">
-                    Usage guide
-                  </div>
-                  <p className="mt-3 text-sm leading-6 text-[#273951]">
-                    {howToUseCopy}
-                  </p>
-                </div>
-                <div className="grid gap-4">
-                  <div className="rounded-xl border border-[#dedbea] bg-white p-4">
-                    <div className="text-xs font-semibold uppercase text-[#6b6580]">
-                      Sample Input
-                    </div>
-                    <p className="mt-3 text-sm leading-6 text-[#273951]">
-                      {agent.resultPreview.sample}
-                    </p>
-                  </div>
-                  <div className="rounded-xl border border-[#d8d4e2] bg-[#f3f1f8] p-4">
-                    <div className="text-xs font-semibold uppercase text-[#6b6580]">
-                      Result Image
-                    </div>
-                    {agent.resultPreview.mediaUrl ? (
-                      <div className="mt-3 overflow-hidden rounded-lg border border-[#d8d4e2] bg-white">
-                        {agent.resultPreview.mediaType === "video" ? (
-                          <video
-                            className="aspect-video w-full bg-[#171452] object-contain"
-                            controls
-                            src={agent.resultPreview.mediaUrl}
-                          />
-                        ) : (
-                          <img
-                            alt={`${agent.name} result preview`}
-                            className="aspect-video w-full object-cover"
-                            src={agent.resultPreview.mediaUrl}
-                          />
-                        )}
-                      </div>
-                    ) : (
-                      <p className="mt-3 text-sm leading-6 text-[#273951]">
-                        {agent.resultPreview.summary}
-                      </p>
-                    )}
-                  </div>
-                  {resultArtifacts.length ? (
-                    <div className="rounded-xl border border-[#d8d4e2] bg-white p-4">
-                      <div className="text-xs font-semibold uppercase text-[#6b6580]">
-                        Additional Information
-                      </div>
-                      <div className="mt-3 grid gap-2">
-                        {resultArtifacts.map((artifact) => (
-                          <div
-                            className="flex min-w-0 items-center gap-3 rounded-lg border border-[#d8d4e2] bg-[#f8f7fb] px-3 py-2.5"
-                            key={artifact.label}
-                          >
-                            <div className="min-w-0 flex-1">
-                              <div className="text-[11px] font-semibold uppercase text-[#6b6580]">
-                                {artifact.label}
-                              </div>
-                              <div
-                                className="mt-1 truncate font-mono text-xs text-[#1c1e54]"
-                                title={artifact.value}
-                              >
-                                {artifact.value}
-                              </div>
-                            </div>
-                            <a
-                              className="inline-flex shrink-0 items-center gap-1 rounded-full border border-[#d8d4e2] bg-white px-3 py-1.5 text-xs font-semibold text-[#533afd] transition hover:border-[#bcb2ff] hover:bg-[#f2efff]"
-                              href={artifact.href}
-                              rel="noreferrer"
-                              target="_blank"
-                            >
-                              viewMore
-                              <ExternalLink className="size-3.5" />
-                            </a>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  ) : null}
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-
-          <aside className="space-y-5 lg:sticky lg:top-24">
-            {canUpdateAgent ? (
-              <Card className="border-[#cfe0ff] bg-[#f7fbff]">
-                <CardHeader>
-                  <CardTitle>Update Agent</CardTitle>
-                  <CardDescription>
-                    Publish a new protected version with a replacement Harness archive.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <label className="flex min-h-28 cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-[#89a8e8] bg-white p-4 text-center transition hover:bg-[#f8fbff]">
-                    <UploadCloud className="size-6 text-[#274690]" />
-                    <span className="mt-2 text-sm font-semibold text-[#1c1e54]">
-                      Upload new Harness
-                    </span>
-                    <span className="mt-1 text-xs text-muted-foreground">
-                      ZIP, TAR.GZ, or GZ
-                    </span>
-                    <input
-                      accept=".zip,.gz,.tgz,.tar.gz,application/zip,application/gzip"
-                      className="sr-only"
-                      onChange={(event) =>
-                        setUpdateHarnessFile(event.target.files?.[0] || null)
-                      }
-                      type="file"
-                    />
-                    {updateHarnessFile ? (
-                      <span className="mt-3 max-w-full truncate rounded-full bg-[#edfff4] px-3 py-1 text-xs font-semibold text-[#166534]">
-                        {updateHarnessFile.name}
-                      </span>
-                    ) : null}
-                  </label>
-                  <textarea
-                    className="mt-3 min-h-20 w-full rounded-md border border-input bg-white px-3 py-2 text-sm text-foreground shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    onChange={(event) => setUpdateReleaseNotes(event.target.value)}
-                    placeholder="Release notes"
-                    value={updateReleaseNotes}
-                  />
-                  <Button
-                    className="mt-3 w-full"
-                    disabled={isUpdatingAgent || !updateHarnessFile}
-                    onClick={() => void updateAgentHarness()}
-                    type="button"
-                  >
-                    <UploadCloud />
-                    {isUpdatingAgent ? "Updating..." : "Publish update"}
-                  </Button>
-                  {updateAgentError ? (
-                    <div className="mt-3 rounded-lg border border-[#ead2df] bg-white px-3 py-2 text-xs leading-5 text-[#9f1239]">
-                      {updateAgentError}
-                    </div>
-                  ) : null}
-                  {updateAgentResult ? (
-                    <div className="mt-3 rounded-lg border border-[#cfe0ff] bg-white px-3 py-2 text-xs leading-5 text-[#274690]">
-                      Version{" "}
-                      {updateAgentResult.version?.versionNumber || "updated"} is
-                      current. Walrus blob:{" "}
-                      {updateAgentResult.protectedArtifact?.walrusBlobId ||
-                        "registered"}
-                    </div>
-                  ) : null}
-                </CardContent>
-              </Card>
-            ) : null}
-            <Card className="border-[#d8d4e2] bg-[#fbfaff]">
-              <CardHeader>
-                <CardTitle>Pricing</CardTitle>
-                <CardDescription>
-                  Estimated from this Agent’s average usage.
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="number-cell text-2xl font-semibold text-[#171452]">
-                  From {estimatedRunPrice} / run
-                </div>
-                <p className="mt-2 text-xs leading-5 text-muted-foreground">
-                  Actual cost varies with input and output length. Token rate:{" "}
-                  {formatAgentPrice(tokenPrice)}.
-                </p>
-                <div className="mt-5 grid gap-2">
-                  <Button
-                    className="w-full"
-                    disabled={Boolean(accessActionType) || (hasGatewayAccess && isHired)}
-                    onClick={() => void updateAgentAccess("hired")}
-                    type="button"
-                  >
-                    <PackageOpen /> Hire Agent
-                  </Button>
-                  <Button
-                    className="w-full"
-                    disabled={Boolean(accessActionType)}
-                    onClick={() => void openTryChat()}
-                    type="button"
-                    variant="secondary"
-                  >
-                    <MessageCircle /> Try Agent
-                  </Button>
-                </div>
-                <div className="mt-6 border-t border-[#dedbea] pt-5">
-                  <div className="text-sm font-semibold text-[#171452]">
-                    Performance & usage
-                  </div>
-                  <dl className="mt-3 grid gap-3 text-sm">
-                    {[
-                      ["Average time", formatDuration(agent.latencyMs)],
-                      ["Average token usage", formatTokens(averageTokens)],
-                      ["Last updated", formatAgentUpdatedDate(agent.updatedAt)],
-                      ["Version", formatAgentVersion(agent)],
-                      ["Completed runs", formatRuns(agent.calls)],
-                      ["Rating", agent.rating ? `${agent.rating.toFixed(1)} / 5` : "New"],
-                    ].map(([label, value]) => (
-                      <div
-                        className="flex items-center justify-between gap-4 border-b border-border pb-3 last:border-0 last:pb-0"
-                        key={label}
-                      >
-                        <dt className="text-muted-foreground">{label}</dt>
-                        <dd className="number-cell font-medium text-[#171452]">
-                          {value}
-                        </dd>
-                      </div>
-                    ))}
-                  </dl>
-                </div>
-              </CardContent>
-            </Card>
-          </aside>
-        </div>
-      </section>
-      {tryChatAccess && user ? (
-        <TryAgentChatPanel
-          access={tryChatAccess}
-          agent={agent}
-          key={`${agent.id}:${tryChatAccess.receiptObjectId}`}
-          onAccessUpdated={handleTryChatAccessUpdated}
-          onClose={() => setTryChatAccess(null)}
-          user={user}
-        />
-      ) : null}
-    </main>
-  );
-}
-
-function EditAgentPage({ user }: { user: AuthUser | null }) {
-  const { agentId = "" } = useParams();
-  const [marketplaceAgents, setMarketplaceAgents] = useState<Agent[]>([]);
-  const [catalogLoaded, setCatalogLoaded] = useState(false);
-  const createdRecords = useMemo(
-    () => (user ? readUserCreatedAgents(user) : []),
-    [user],
-  );
-
-  useEffect(() => {
-    let isCurrent = true;
-    void loadMarketplaceAgents()
-      .then((result) => {
-        if (!isCurrent) return;
-        setMarketplaceAgents(result.agents);
+    bridge
+      .bootstrap()
+      .then((next) => {
+        if (disposed) return;
+        setBootstrap(next);
+        setAuth(next.auth);
       })
-      .finally(() => {
-        if (isCurrent) setCatalogLoaded(true);
+      .catch((error) => {
+        if (!disposed) setLoginError(publicLoginError(error));
       });
     return () => {
-      isCurrent = false;
+      disposed = true;
+      removeListener();
     };
-  }, []);
+  }, [bridge]);
 
-  if (!user) {
-    return (
-      <main className="min-h-screen bg-[#f6f9fc] px-4 py-16 md:px-8">
-        <section className="mx-auto max-w-2xl rounded-xl border border-border bg-white p-6 app-shadow">
-          <h1 className="text-3xl font-light text-[#1c1e54]">Edit Agent</h1>
-          <p className="mt-3 text-sm leading-6 text-muted-foreground">
-            Login to edit your registered Agents.
-          </p>
-          <Button asChild className="mt-5" type="button">
-            <Link to="/login">
-              <LogIn /> Login
-            </Link>
-          </Button>
-        </section>
-      </main>
-    );
+  const loginWithGoogle = async () => {
+    if (!bridge || loginBusy) return;
+    setLoginBusy(true);
+    setLoginError(null);
+    try {
+      const next = await bridge.loginWithGoogle();
+      setAuth(next);
+      setLoginBusy(false);
+    } catch (error) {
+      setLoginBusy(false);
+      setLoginError(publicLoginError(error));
+    }
+  };
+
+  const logout = async () => {
+    if (!bridge) return;
+    const next = await bridge.logout();
+    if (next) setAuth(next);
+  };
+
+  if (bridge && !bootstrap) {
+    return <AuthGate state={auth} busy error={loginError} onLogin={loginWithGoogle} />;
   }
 
-  const localRecord = createdRecords.find(
-    (record) => record.agentSlug === agentId || record.id === agentId,
-  );
-  const localAgent = localRecord
-    ? createdAgentRecordToAgent(localRecord, user)
-    : null;
-  const marketplaceAgent = marketplaceAgents.find(
-    (agent) => agent.id === agentId && isAgentEditableByUser(agent, user),
-  );
-  const agent = localAgent || marketplaceAgent || null;
-
-  if (!agent && !catalogLoaded) {
-    return <EmptyResult label="Loading Agent..." />;
-  }
-
-  if (!agent) {
+  if (bridge && auth?.status !== "authenticated") {
     return (
-      <main className="min-h-screen bg-[#f6f9fc] px-4 py-16 md:px-8">
-        <section className="mx-auto max-w-2xl rounded-xl border border-border bg-white p-6 app-shadow">
-          <h1 className="text-3xl font-light text-[#1c1e54]">Agent not found</h1>
-          <p className="mt-3 text-sm leading-6 text-muted-foreground">
-            This Agent is not in your registered Agents list.
-          </p>
-          <Button asChild className="mt-5" type="button" variant="secondary">
-            <Link to="/my">
-              <ArrowLeft /> Back to My Agents
-            </Link>
-          </Button>
-        </section>
-      </main>
+      <AuthGate
+        state={auth || bootstrap?.auth || null}
+        busy={loginBusy || auth?.status === "authenticating"}
+        error={loginError || auth?.error || null}
+        onLogin={loginWithGoogle}
+      />
     );
   }
 
   return (
-    <CreateAgentPage
-      editingAgent={agent}
-      editingRecord={localRecord}
-      initialDraft={agentDraftFromAgent(agent)}
-      key={agent.id}
-      mode="edit"
-      user={user}
+    <HireMeWorkspace
+      key={auth?.user?.id || "browser-preview"}
+      bootstrap={bootstrap}
+      auth={auth}
+      onLogout={logout}
     />
   );
 }
 
-function isAgentEditableByUser(agent: Agent, user: AuthUser) {
-  const keys = creatorKeysForUser(user);
-  return [agent.creator, agent.team.owner, agent.handle, agent.id].some((value) =>
-    keys.has(value.trim().toLowerCase()),
-  );
-}
-
-function creatorKeysForUser(user: AuthUser) {
-  return new Set(
-    [
-      user.email,
-      user.email.split("@")[0],
-      user.displayName,
-      user.wallet,
-    ]
-      .map((value) => value?.trim().toLowerCase())
-      .filter(
-        (value): value is string =>
-          Boolean(value) && value !== "set display name",
-      ),
-  );
-}
-
-function MyAgentsPage({
-  user,
+function HireMeWorkspace({
+  bootstrap,
+  auth,
   onLogout,
-  onRequireLogin,
-  onWalletLinked,
 }: {
-  user: AuthUser | null;
-  onLogout: () => void;
-  onRequireLogin: () => void;
-  onWalletLinked: (wallet: string) => void;
+  bootstrap: HireMeDesktopBootstrap | null;
+  auth: HireMeDesktopAuthState | null;
+  onLogout: () => Promise<void>;
 }) {
-  const [marketplaceAgents, setMarketplaceAgents] =
-    useState<Agent[]>([]);
-  const [accessRecords, setAccessRecords] = useState<AgentAccessRecord[]>([]);
-  const [memWalResults, setMemWalResults] = useState<GatewayMemWalResultPayload[]>([]);
-  const [paymentActivities, setPaymentActivities] = useState<
-    GatewaySuiPaymentActivityPayload[]
-  >([]);
-  const [walletSummary, setWalletSummary] =
-    useState<GatewayWalletSummaryPayload | null>(null);
-  const [accessError, setAccessError] = useState<string | null>(null);
-  const [memWalError, setMemWalError] = useState<string | null>(null);
-  const [paymentActivityError, setPaymentActivityError] = useState<string | null>(
-    null,
+  const storageNamespace = auth?.user?.id || "browser-preview";
+  const [view, setView] = useState<ViewId>("studio");
+  const [reviewInbox, setReviewInbox] = useState<HireMeReviewInbox | null>(null);
+  const [reviewLoading, setReviewLoading] = useState(false);
+  const [reviewingVersionId, setReviewingVersionId] = useState<string | null>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [agents, setAgents] = usePersistentState<Agent[]>(
+    `hireme-agents-v3:${storageNamespace}`,
+    bundledDemoContentEnabled ? seedAgents : [],
   );
-  const [walletError, setWalletError] = useState<string | null>(null);
-  const [walletAction, setWalletAction] = useState<"top-up" | "claim" | null>(null);
-  const [createdRecordsVersion, setCreatedRecordsVersion] = useState(0);
-  const [activeTab, setActiveTab] = useState<MyPageTab>("registered");
-  const createdRecords = useMemo(
-    () =>
-      createdRecordsVersion >= 0 && user ? readUserCreatedAgents(user) : [],
-    [createdRecordsVersion, user],
+  const [conversations, setConversations] = usePersistentState<Conversation[]>(
+    `hireme-conversations-v3:${storageNamespace}`,
+    bundledDemoContentEnabled ? seedConversations : [],
   );
+  const [workScope, setWorkScope] = usePersistentState<WorkScope>(
+    `hireme-work-scope-v1:${storageNamespace}`,
+    "created",
+  );
+  const [activeConversationId, setActiveConversationId] = useState(() => (
+    conversations.find((conversation) => (
+      !conversation.archived && workScopeForConversation(conversation, agents) === workScope
+    ))?.id || conversations.find((conversation) => !conversation.archived)?.id || ""
+  ));
+  const [selectedAgentId, setSelectedAgentId] = useState(
+    bundledDemoContentEnabled ? seedAgents[0]?.id || "" : "",
+  );
+  const [selectedOwnedAgentId, setSelectedOwnedAgentId] = useState(
+    bundledDemoContentEnabled ? seedAgents[0]?.id || "" : "",
+  );
+  const [modal, setModal] = useState<ModalState>(null);
+  const [conversationSearchOpen, setConversationSearchOpen] = useState(false);
+  const [conversationQuery, setConversationQuery] = useState("");
+  const [conversationMenu, setConversationMenu] = useState<{ conversationId: string; x: number; y: number } | null>(null);
+  const [aiSettingsOpen, setAiSettingsOpen] = useState(false);
+  const [toast, setToast] = useState<ToastState | null>(null);
+  const [workspace, setWorkspace] = useState(
+    bootstrap?.workspace || "작업 폴더를 선택하세요",
+  );
+  const nativeRuntime = Boolean(bootstrap?.native);
+  const [runs, setRuns] = useState<Record<string, RunState>>({});
+  const [publishingAgentIds, setPublishingAgentIds] = useState<Record<string, boolean>>({});
+  const [managementSessions, setManagementSessions] = useState<Record<string, HireMeAgentManagementSession>>({});
+  const [queueCounts, setQueueCounts] = useState<Record<string, number>>({});
+  const runQueueRef = useRef<Record<string, QueuedRequest[]>>({});
+  const runningChatsRef = useRef(new Set<string>());
+  const runTimersRef = useRef<Record<string, number[]>>({});
+  const visualStreamSkipRef = useRef(new Set<string>());
+  const cancelledRunIdsRef = useRef(new Set<string>());
+  const databaseSyncRef = useRef(new Map<string, Promise<unknown>>());
+  const databaseSyncErrorRef = useRef(new Set<string>());
+  const dirtyManagementDraftsRef = useRef(new Set<string>());
+  const warnedManagementSessionsRef = useRef(new Set<string>());
+
+  const ownedAgents = agents.filter((agent) => agent.ownership === "mine");
+  const recentConversations = conversations
+    .filter((conversation) => !conversation.archived)
+    .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+  const scopedConversations = recentConversations.filter((conversation) => (
+    workScopeForConversation(conversation, agents) === workScope
+  ));
+  const normalizedConversationQuery = conversationQuery.trim().toLowerCase();
+  const visibleConversations = scopedConversations.filter((conversation) => {
+    if (!normalizedConversationQuery) return true;
+    const agent = agents.find((item) => item.id === conversation.agentId);
+    return `${conversation.title} ${agent?.name || ""}`
+      .toLowerCase()
+      .includes(normalizedConversationQuery);
+  });
+  const selectedConversation = conversations.find((conversation) => (
+    conversation.id === activeConversationId &&
+    !conversation.archived &&
+    workScopeForConversation(conversation, agents) === workScope
+  ));
+  const activeConversation = selectedConversation ?? (activeConversationId ? scopedConversations[0] : undefined);
+  const activeAgent =
+    agents.find((agent) => agent.id === activeConversation?.agentId) ?? agents[0];
+  const activeManagementSession = activeConversation
+    ? managementSessions[activeConversation.id]
+    : undefined;
+  const activeAuthoring = Boolean(
+    activeConversation?.mode === "agent_authoring" &&
+    isManagementSessionActive(activeManagementSession),
+  );
+  const activeManagementLocked = Boolean(
+    activeConversation?.mode === "agent_authoring" && !activeAuthoring,
+  );
+
+  const setManagementDraftDirty = useCallback((conversationId: string, dirty: boolean) => {
+    if (dirty) {
+      dirtyManagementDraftsRef.current.add(conversationId);
+      const session = managementSessions[conversationId];
+      if (
+        isManagementSessionActive(session) &&
+        Date.parse(session.expiresAt) - Date.now() <= 60_000 &&
+        !warnedManagementSessionsRef.current.has(session.id)
+      ) {
+        warnedManagementSessionsRef.current.add(session.id);
+        setToast({
+          id: eventTimeMs(),
+          title: "관리 세션이 곧 만료돼요",
+          detail: "저장하지 않은 Private Harness 변경이 있습니다. 1분 안에 저장해 주세요.",
+        });
+      }
+    } else {
+      dirtyManagementDraftsRef.current.delete(conversationId);
+    }
+  }, [managementSessions]);
+
+  const confirmDiscardManagementDraft = useCallback((conversationId?: string) => {
+    if (!conversationId || !dirtyManagementDraftsRef.current.has(conversationId)) return true;
+    return window.confirm("Private Harness에 저장하지 않은 변경이 있습니다. 변경을 버리고 이동할까요?");
+  }, []);
 
   useEffect(() => {
-    let isCurrent = true;
-
-    void loadMarketplaceAgents().then((result) => {
-      if (!isCurrent) return;
-      setMarketplaceAgents(result.agents);
+    const entries = Object.entries(managementSessions);
+    if (entries.length === 0) return;
+    const nextExpiry = Math.min(...entries.map(([, session]) => {
+      const expiresAt = Date.parse(session.expiresAt);
+      return Number.isFinite(expiresAt) ? expiresAt : Date.now();
+    }));
+    const warningTimers = entries.map(([conversationId, session]) => {
+      const warningAt = Date.parse(session.expiresAt) - 60_000;
+      return window.setTimeout(() => {
+        if (
+          !isManagementSessionActive(session) ||
+          !dirtyManagementDraftsRef.current.has(conversationId) ||
+          warnedManagementSessionsRef.current.has(session.id)
+        ) return;
+        warnedManagementSessionsRef.current.add(session.id);
+        setToast({
+          id: eventTimeMs(),
+          title: "관리 세션이 곧 만료돼요",
+          detail: "저장하지 않은 Private Harness 변경이 있습니다. 1분 안에 저장해 주세요.",
+        });
+      }, Math.max(0, warningAt - Date.now()));
     });
-
+    const timer = window.setTimeout(() => {
+      const expiredConversationIds = Object.entries(managementSessions)
+        .filter(([, session]) => !isManagementSessionActive(session))
+        .map(([conversationId]) => conversationId);
+      if (expiredConversationIds.length === 0) return;
+      const discardedDirtyDraft = expiredConversationIds.some((conversationId) => (
+        dirtyManagementDraftsRef.current.has(conversationId)
+      ));
+      expiredConversationIds.forEach((conversationId) => {
+        dirtyManagementDraftsRef.current.delete(conversationId);
+      });
+      setManagementSessions((current) => {
+        const next = { ...current };
+        expiredConversationIds.forEach((conversationId) => {
+          const session = next[conversationId];
+          if (session && !isManagementSessionActive(session)) delete next[conversationId];
+        });
+        return next;
+      });
+      setToast({
+        id: eventTimeMs(),
+        title: "관리 세션이 만료됐어요",
+        detail: discardedDirtyDraft
+          ? "저장하지 않은 Private Harness 변경은 보안을 위해 지웠습니다. 관리 모드를 다시 열어 주세요."
+          : "Private Harness를 보려면 관리 모드를 다시 열어 주세요.",
+      });
+    }, Math.max(0, nextExpiry - Date.now()) + 25);
     return () => {
-      isCurrent = false;
+      window.clearTimeout(timer);
+      warningTimers.forEach((warningTimer) => window.clearTimeout(warningTimer));
     };
+  }, [managementSessions]);
+
+  useEffect(() => {
+    const preventDirtyDraftUnload = (event: BeforeUnloadEvent) => {
+      if (dirtyManagementDraftsRef.current.size === 0) return;
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", preventDirtyDraftUnload);
+    return () => window.removeEventListener("beforeunload", preventDirtyDraftUnload);
   }, []);
 
   useEffect(() => {
-    let isCurrent = true;
-    if (!user) return () => {
-      isCurrent = false;
-    };
-
-    void loadGatewayMyAgentAccess(user)
-      .then((result) => {
-        if (!isCurrent) return;
-        const localRecords = readUserAgentAccess(user);
-        const gatewayAgentIds = new Set(
-          result.records.map((record) => record.agentId),
-        );
-        const mergedRecords = [
-          ...result.records,
-          ...localRecords.filter(
-            (record) => !gatewayAgentIds.has(record.agentId),
-          ),
-        ].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-        setAccessError(null);
-        setAccessRecords(mergedRecords);
-        setMarketplaceAgents((current) =>
-          mergeAgentCatalog(current, result.agents),
-        );
-      })
-      .catch((error) => {
-        if (!isCurrent) return;
-        setAccessError(
-          error instanceof Error ? error.message : "Gateway request failed",
-        );
-        setAccessRecords(readUserAgentAccess(user));
-      });
-
-    return () => {
-      isCurrent = false;
-    };
-  }, [user]);
+    if (bootstrap?.agents?.length) {
+      setAgents((current) => mergeNativeAgents(current, bootstrap.agents));
+    }
+  }, [bootstrap, setAgents]);
 
   useEffect(() => {
-    let isCurrent = true;
-    if (!user) return () => {
-      isCurrent = false;
-    };
-
-    void loadGatewayMyMemWalResults(user)
-      .then((records) => {
-        if (!isCurrent) return;
-        setMemWalError(null);
-        setMemWalResults(records);
-      })
-      .catch((error) => {
-        if (!isCurrent) return;
-        setMemWalError(
-          error instanceof Error ? error.message : "Gateway memWal request failed",
-        );
-        setMemWalResults([]);
+    setAgents((current) => {
+      let changed = false;
+      const next = current.map((agent) => {
+        const legacy = agent as unknown as { billingMode: string; usagePrice?: number };
+        if (legacy.billingMode !== "usage" && legacy.usagePrice === undefined) return agent;
+        changed = true;
+        return {
+          ...agent,
+          billingMode: legacy.billingMode === "usage" ? "run" as const : agent.billingMode,
+          runPrice: agent.runPrice ?? Math.round(Number(legacy.usagePrice || 0) * 100),
+        };
       });
-
-    return () => {
-      isCurrent = false;
-    };
-  }, [user]);
+      return changed ? next : current;
+    });
+  }, [setAgents]);
 
   useEffect(() => {
-    let isCurrent = true;
-    if (!user) return () => {
-      isCurrent = false;
-    };
-
-    void loadGatewayMyPaymentActivity(user)
-      .then((records) => {
-        if (!isCurrent) return;
-        setPaymentActivityError(null);
-        setPaymentActivities(records);
-      })
-      .catch((error) => {
-        if (!isCurrent) return;
-        setPaymentActivityError(
-          error instanceof Error
-            ? error.message
-            : "Gateway payment activity request failed",
-        );
-        setPaymentActivities([]);
-      });
-
-    return () => {
-      isCurrent = false;
-    };
-  }, [user]);
+    setAgents((current) => {
+      const next = current.filter((agent) => !isRetiredMockAgent(agent));
+      return next.length === current.length ? current : next;
+    });
+    setConversations((current) => {
+      const next = current.filter((conversation) => !isRetiredMockAgentId(conversation.agentId));
+      return next.length === current.length ? current : next;
+    });
+  }, [setAgents, setConversations]);
 
   useEffect(() => {
-    let isCurrent = true;
-    if (!user) return () => {
-      isCurrent = false;
-    };
-
-    void loadGatewayWalletSummary(user)
-      .then((summary) => {
-        if (!isCurrent) return;
-        setWalletError(null);
-        setWalletSummary(summary);
+    const desktop = window.hiremeDesktop;
+    if (!desktop || auth?.status !== "authenticated") return;
+    let disposed = false;
+    desktop.loadWorkspaceData()
+      .then((data) => {
+        if (disposed) return;
+        setAgents((current) => mergeDatabaseAgents(current, data.agents));
+        setConversations((current) => mergeDatabaseConversations(current, data.conversations));
       })
       .catch((error) => {
-        if (!isCurrent) return;
-        setWalletError(
-          error instanceof Error
-            ? error.message
-            : "Gateway wallet summary request failed",
-        );
-        setWalletSummary(null);
+        if (disposed) return;
+        setToast({
+          id: eventTimeMs(),
+          title: "온라인 작업을 불러오지 못했어요",
+          detail: publicErrorMessage(error),
+        });
       });
-
     return () => {
-      isCurrent = false;
+      disposed = true;
     };
-  }, [user]);
+  }, [auth?.status, auth?.user?.id, setAgents, setConversations]);
 
   useEffect(() => {
-    const refreshCreatedRecords = () => {
-      setCreatedRecordsVersion((version) => version + 1);
-    };
+    const desktop = window.hiremeDesktop;
+    if (!desktop || auth?.status !== "authenticated") return;
+    void desktop.loadReviewInbox().then(setReviewInbox).catch(() => setReviewInbox(null));
+  }, [auth?.status, auth?.user?.id]);
 
-    window.addEventListener(
-      "hireme-created-agents-updated",
-      refreshCreatedRecords,
-    );
-    window.addEventListener("storage", refreshCreatedRecords);
+  useEffect(() => {
+    if (!toast) return;
+    const timer = window.setTimeout(() => setToast(null), 3200);
+    return () => window.clearTimeout(timer);
+  }, [toast]);
 
-    return () => {
-      window.removeEventListener(
-        "hireme-created-agents-updated",
-        refreshCreatedRecords,
-      );
-      window.removeEventListener("storage", refreshCreatedRecords);
-    };
+  useEffect(() => {
+    const desktop = window.hiremeDesktop;
+    if (!desktop) return;
+    return desktop.onRunEvent((event) => {
+      if (event.type !== "stage") return;
+      const conversationId = typeof event.conversationId === "string" ? event.conversationId : "";
+      const runId = typeof event.runId === "string" ? event.runId : "";
+      const label = typeof event.label === "string" ? event.label.trim() : "";
+      if (!conversationId || !runId || !label) return;
+      setRuns((current) => {
+        const active = current[conversationId];
+        if (!active || active.runId !== runId || active.steps.includes(label)) return current;
+        return {
+          ...current,
+          [conversationId]: {
+            ...active,
+            steps: [...active.steps, label].slice(-5),
+          },
+        };
+      });
+    });
   }, []);
 
-  if (!user) {
-    return (
-      <main className="min-h-screen bg-[#f6f9fc] px-4 py-16 md:px-8">
-        <section className="mx-auto max-w-2xl rounded-xl border border-border bg-white p-6 app-shadow">
-          <div className="flex items-start gap-4">
-            <span className="flex size-12 shrink-0 items-center justify-center rounded-full bg-secondary text-primary">
-              <UserRound className="size-5" />
-            </span>
-            <div>
-              <h1 className="text-3xl font-light text-[#1c1e54]">
-                My Agents
-              </h1>
-              <p className="mt-3 text-sm leading-6 text-muted-foreground">
-                Login to see which paid agents are ready to call from Codex.
-              </p>
-              <Button className="mt-5" onClick={onRequireLogin} type="button">
-                <LogIn /> Login
-              </Button>
-            </div>
-          </div>
-        </section>
-      </main>
-    );
-  }
-
-  async function handleWalletTopUp() {
-    if (!user) return;
-    setWalletAction("top-up");
-    try {
-      const summary = await topUpGatewayWallet(user, "1");
-      setWalletSummary(summary);
-      setWalletError(null);
-    } catch (error) {
-      setWalletError(
-        error instanceof Error ? error.message : "Wallet top-up failed",
-      );
-    } finally {
-      setWalletAction(null);
-    }
-  }
-
-  async function handleWalletClaim() {
-    if (!user) return;
-    setWalletAction("claim");
-    try {
-      const summary = await claimGatewayWalletEarnings(user);
-      setWalletSummary(summary);
-      setWalletError(null);
-    } catch (error) {
-      setWalletError(
-        error instanceof Error ? error.message : "Wallet claim failed",
-      );
-    } finally {
-      setWalletAction(null);
-    }
-  }
-
-  const hirerId = hirerIdFor(user);
-  const activeRecords = accessRecords.filter(
-    (record) => record.status === "active",
-  );
-  const hiredRecords = activeRecords.filter(
-    (record) => record.accessType === "hired",
+  useEffect(
+    () => () => {
+      Object.values(runTimersRef.current).flat().forEach((timer) => window.clearTimeout(timer));
+    },
+    [],
   );
 
-  function resolveAgent(record: AgentAccessRecord) {
-    return marketplaceAgents.find((agent) => agent.id === record.agentId);
-  }
+  const showToast = (title: string, detail?: string) => {
+    setToast({ id: eventTimeMs(), title, detail });
+  };
 
-  const creatorKeys = new Set(
-    [
-      user.email,
-      user.email.split("@")[0],
-      user.displayName,
-      user.wallet,
-    ]
-      .map((value) => value?.trim().toLowerCase())
-      .filter(
-        (value): value is string =>
-          Boolean(value) && value !== "set display name",
+  const invalidateManagementSession = useCallback((conversationId: string, error: unknown) => {
+    if (!isManagementSessionError(error)) return false;
+    dirtyManagementDraftsRef.current.delete(conversationId);
+    setManagementSessions((current) => {
+      if (!current[conversationId]) return current;
+      const next = { ...current };
+      delete next[conversationId];
+      return next;
+    });
+    setToast({
+      id: eventTimeMs(),
+      title: "관리 모드가 잠겼어요",
+      detail: "Private Harness 내용은 지웠습니다. 내 에이전트 화면에서 관리 모드를 다시 열어 주세요.",
+    });
+    return true;
+  }, []);
+
+  const queueDatabaseSync = (
+    conversationId: string,
+    operation: () => Promise<unknown>,
+  ) => {
+    const previous = databaseSyncRef.current.get(conversationId) || Promise.resolve();
+    const next = previous.then(operation);
+    databaseSyncRef.current.set(conversationId, next);
+    void next
+      .then(() => {
+        databaseSyncErrorRef.current.delete(conversationId);
+      })
+      .catch((error) => {
+        if (databaseSyncErrorRef.current.has(conversationId)) return;
+        databaseSyncErrorRef.current.add(conversationId);
+        showToast("온라인 저장에 실패했어요", publicErrorMessage(error));
+      })
+      .finally(() => {
+        if (databaseSyncRef.current.get(conversationId) === next) {
+          databaseSyncRef.current.delete(conversationId);
+        }
+      });
+  };
+
+  const navigateToView = (nextView: ViewId) => {
+    if (nextView !== view && !confirmDiscardManagementDraft(activeConversation?.id)) return false;
+    setView(nextView);
+    return true;
+  };
+
+  const openReviewInbox = async () => {
+    if (!window.hiremeDesktop || reviewLoading) return;
+    setReviewLoading(true);
+    try {
+      const inbox = await window.hiremeDesktop.loadReviewInbox();
+      setReviewInbox(inbox);
+      if (!inbox.reviewer) {
+        showToast("검토자 권한이 없어요", "검토함은 HireMe 운영자에게만 열립니다.");
+        return;
+      }
+      navigateToView("review");
+    } catch (error) {
+      showToast("검토함을 열지 못했어요", publicErrorMessage(error));
+    } finally {
+      setReviewLoading(false);
+    }
+  };
+
+  const decideReview = async (versionId: string, decision: "approved" | "rejected") => {
+    if (!window.hiremeDesktop || reviewingVersionId) return;
+    setReviewingVersionId(versionId);
+    try {
+      await window.hiremeDesktop.decideAgentReview({ versionId, decision });
+      setReviewInbox((current) => current
+        ? { ...current, items: current.items.filter((item) => item.versionId !== versionId) }
+        : current);
+      showToast(decision === "approved" ? "에이전트를 승인했어요" : "에이전트를 반려했어요");
+    } catch (error) {
+      showToast("검토 결과를 저장하지 못했어요", publicErrorMessage(error));
+    } finally {
+      setReviewingVersionId(null);
+    }
+  };
+
+  const selectConversation = (
+    conversationId: string,
+    { skipDiscardConfirmation = false }: { skipDiscardConfirmation?: boolean } = {},
+  ) => {
+    if (
+      !skipDiscardConfirmation &&
+      conversationId !== activeConversation?.id &&
+      !confirmDiscardManagementDraft(activeConversation?.id)
+    ) return false;
+    const conversation = conversations.find((item) => item.id === conversationId);
+    if (conversation) setWorkScope(workScopeForConversation(conversation, agents));
+    setActiveConversationId(conversationId);
+    setView("chat");
+    setSidebarOpen(false);
+    setConversationMenu(null);
+    return true;
+  };
+
+  const createConversationForAgent = (
+    agent: Agent,
+    options: { id?: string; mode?: Conversation["mode"]; title?: string } = {},
+  ) => {
+    const now = new Date().toISOString();
+    const conversation: Conversation = {
+      id: options.id || createEntityUuid(),
+      title: options.title || `${agent.name} 새 작업`,
+      agentId: agent.id,
+      updatedAt: now,
+      messages: [],
+      storage: agent.databaseId && window.hiremeDesktop ? "database" : "local",
+      provider: auth?.user?.defaultProvider || null,
+      model: auth?.user?.defaultModel || null,
+      mode: options.mode || "work",
+    };
+    setConversations((current) => [conversation, ...current]);
+    if (conversation.storage === "database" && agent.databaseId && window.hiremeDesktop) {
+      queueDatabaseSync(conversation.id, () => window.hiremeDesktop!.createConversation({
+        id: conversation.id,
+        agentDatabaseId: agent.databaseId,
+        title: conversation.title,
+        provider: conversation.provider,
+        model: conversation.model,
+      }));
+    }
+    setWorkScope(workScopeForAgent(agent));
+    setActiveConversationId(conversation.id);
+    setModal(null);
+    setView("chat");
+    setSidebarOpen(false);
+    return conversation;
+  };
+
+  const createConversation = (agentId: string) => {
+    if (!confirmDiscardManagementDraft(activeConversation?.id)) return undefined;
+    const agent = agents.find((item) => item.id === agentId) ?? agents[0];
+    return createConversationForAgent(agent);
+  };
+
+  const openAgentManagement = async (agentId: string) => {
+    const agent = agents.find((item) => item.id === agentId);
+    if (!agent) return;
+    if (agent.ownership !== "mine") {
+      showToast("관리 권한이 없어요", "고용한 에이전트의 Private Harness는 제작자만 관리할 수 있습니다.");
+      return;
+    }
+    const existing = conversations.find((conversation) => (
+      conversation.agentId === agentId &&
+      conversation.mode === "agent_authoring" &&
+      !conversation.archived
+    ));
+    if (!confirmDiscardManagementDraft(activeConversation?.id)) return;
+    if (agent.runtime !== "local") {
+      showToast("원본 패키지가 필요해요", "이 기기에 에이전트 원본을 연결한 뒤 관리 모드로 들어갈 수 있습니다.");
+      return;
+    }
+    try {
+      const conversationId = existing?.id || createEntityUuid();
+      let authoring = agent.authoring || { phase: "valid", revision: 1 };
+      if (window.hiremeDesktop) {
+        const ready = await window.hiremeDesktop.prepareAgentManagement({
+          conversationId,
+          agentId: agent.id,
+          name: agent.name,
+          category: agent.category,
+          headline: agent.headline,
+          summary: agent.summary,
+          creator: auth?.user?.displayName || "나",
+          skills: agent.skills,
+          resultTypes: agent.resultTypes,
+        });
+        authoring = { phase: ready.phase, revision: ready.revision };
+        setManagementSessions((current) => ({
+          ...current,
+          [conversationId]: ready.managementSession,
+        }));
+      }
+      setAgents((current) => current.map((item) => (
+        item.id === agentId ? { ...item, authoring } : item
+      )));
+      if (existing) {
+        selectConversation(existing.id, { skipDiscardConfirmation: true });
+      } else {
+        createConversationForAgent({ ...agent, authoring }, {
+          id: conversationId,
+          mode: "agent_authoring",
+          title: `${agent.name} 관리`,
+        });
+      }
+      showToast("관리 모드를 열었어요", "검증된 관리 세션에서 Private Harness를 확인하고 수정할 수 있습니다.");
+    } catch (error) {
+      showToast("관리 모드를 열지 못했어요", publicErrorMessage(error));
+    }
+  };
+
+  const removeConversation = async (conversationId: string) => {
+    const target = conversations.find((conversation) => conversation.id === conversationId);
+    if (!target) return;
+    if (!confirmDiscardManagementDraft(conversationId)) return;
+    try {
+      if (runs[conversationId]) await window.hiremeDesktop?.cancelRun(runs[conversationId].runId).catch(() => false);
+      const managementSession = managementSessions[conversationId];
+      if (managementSession && window.hiremeDesktop) {
+        await window.hiremeDesktop.closeAgentManagement({
+          conversationId,
+          agentId: target.agentId,
+          managementSessionId: managementSession.id,
+        }).catch(() => null);
+      }
+      if (target.storage === "database" && window.hiremeDesktop) {
+        await window.hiremeDesktop.deleteConversation({ id: conversationId });
+      }
+      delete runQueueRef.current[conversationId];
+      setQueueCounts((current) => {
+        const next = { ...current };
+        delete next[conversationId];
+        return next;
+      });
+      setConversations((current) => current.filter((conversation) => conversation.id !== conversationId));
+      setManagementSessions((current) => {
+        const next = { ...current };
+        delete next[conversationId];
+        return next;
+      });
+      dirtyManagementDraftsRef.current.delete(conversationId);
+      if (activeConversationId === conversationId) {
+        const scope = workScopeForConversation(target, agents);
+        const next = recentConversations.find((conversation) => (
+          conversation.id !== conversationId &&
+          workScopeForConversation(conversation, agents) === scope
+        ));
+        setActiveConversationId(next?.id || "");
+      }
+      setModal(null);
+      setConversationMenu(null);
+      showToast("작업을 삭제했어요");
+    } catch (error) {
+      setModal(null);
+      showToast("작업을 삭제하지 못했어요", publicErrorMessage(error));
+    }
+  };
+
+  const updateConversation = (
+    conversationId: string,
+    updater: (conversation: Conversation) => Conversation,
+  ) => {
+    setConversations((current) =>
+      current.map((conversation) =>
+        conversation.id === conversationId ? updater(conversation) : conversation,
       ),
-  );
-  const registeredMarketplaceAgents = marketplaceAgents.filter((agent) =>
-    [agent.creator, agent.team.owner, agent.handle, agent.id].some((value) =>
-      creatorKeys.has(value.trim().toLowerCase()),
-    ),
-  );
-  const walletStatsByAgentId = new Map<string, GatewayWalletAgentStatPayload>();
-  for (const stat of walletSummary?.agents || []) {
-    walletStatsByAgentId.set(stat.agentId, stat);
-    if (stat.agentUuid) walletStatsByAgentId.set(stat.agentUuid, stat);
-  }
-  const activityItems: MyActivityItem[] = [
-    ...createdRecords.map((record) => ({
-      id: `created-${record.id}`,
-      label: "Registered",
-      title: record.agentName,
-      description: `${formatAgentPriceShort(record.pricePerCallUsd)} · ${record.status}`,
-      timestamp: record.createdAt,
-      tone: "registered" as const,
-    })),
-    ...activeRecords.map((record) => {
-      const agent = resolveAgent(record);
-      return {
-        id: `access-${record.id}`,
-        label: record.accessType === "hired" ? "Hired" : "Tried",
-        title: agent?.name || record.agentId,
-        description: `${
-          record.source === "gateway" ? "Gateway" : "Local"
-        } · ${formatAgentPriceShort(record.pricePerCallUsd)} · ${
-          record.receiptObjectId
-        }`,
-        timestamp: record.updatedAt || record.createdAt,
-        tone: (record.accessType === "hired"
-          ? "hired"
-          : "trial") as MyActivityItem["tone"],
-      };
-    }),
-    ...memWalResults.map((record) => ({
-      id: `memwal-${record.callId || record.id || record.ciphertextDigest}`,
-      label: "memWal",
-      title: record.agentId || "Agent result",
-      description: `${record.visibility || "hirer-only"} · ${
-        record.safeSummary?.type || "user_result"
-      } · ${record.responseDigest || record.ciphertextDigest || "digest pending"}`,
-      timestamp: record.createdAt || new Date(0).toISOString(),
-      tone: "result" as const,
-    })),
-    ...paymentActivities.map((record) => ({
-      id: `payment-${record.verificationId || record.txDigest || record.intentId}`,
-      label:
-        record.status === "verified"
-          ? "Payment verified"
-          : record.status === "failed"
-            ? "Payment failed"
-            : "Payment check",
-      title: record.agentId || "SUI payment",
-      description:
-        record.status === "verified"
-          ? `${record.expectedAmountSui || "0"} SUI · ${
-              record.network || "sui"
-            } · ${record.txDigest || "digest pending"}`
-          : `${record.verificationMode || "sui_rpc"} · ${
-              record.failureReason || record.effectStatus || "verification pending"
-            } · ${record.txDigest || "digest pending"}`,
-      timestamp: record.createdAt || new Date(0).toISOString(),
-      tone: (record.status === "verified"
-        ? "payment"
-        : "failed") as MyActivityItem["tone"],
-    })),
-  ].sort((a, b) => b.timestamp.localeCompare(a.timestamp));
-  const registeredCount =
-    createdRecords.length + registeredMarketplaceAgents.length;
-  const tabs: { id: MyPageTab; label: string; count: number }[] = [
-    { id: "registered", label: "Registered Agents", count: registeredCount },
-    { id: "hired", label: "Hired Agents", count: activeRecords.length },
-    { id: "activity", label: "Activity", count: activityItems.length },
-  ];
+    );
+  };
+
+  const appendMessage = (
+    conversationId: string,
+    message: ChatMessage,
+    { persist = true }: { persist?: boolean } = {},
+  ) => {
+    const existing = conversations.find((conversation) => conversation.id === conversationId);
+    const nextTitle = existing?.messages.length === 0 && message.role === "user"
+      ? summarizeTitle(message.text)
+      : existing?.title;
+    updateConversation(conversationId, (conversation) => ({
+      ...conversation,
+      title: nextTitle || conversation.title,
+      updatedAt: new Date().toISOString(),
+      messages: [...conversation.messages, message],
+    }));
+    if (persist && existing?.storage === "database" && window.hiremeDesktop) {
+      queueDatabaseSync(conversationId, () => window.hiremeDesktop!.saveMessage({
+        id: message.id,
+        conversationId,
+        role: message.role,
+        text: message.text,
+        at: message.at,
+        status: message.status,
+        elapsedMs: message.elapsedMs,
+        attachments: message.attachments,
+        artifacts: message.artifacts,
+      }));
+      if (nextTitle && nextTitle !== existing.title) {
+        queueDatabaseSync(conversationId, () => window.hiremeDesktop!.updateConversation({
+          id: conversationId,
+          title: nextTitle,
+        }));
+      }
+    }
+  };
+
+  const streamAssistantResult = async ({
+    conversationId,
+    conversation,
+    runId,
+    output,
+    responseElapsedMs,
+    startedAt,
+    artifacts,
+  }: {
+    conversationId: string;
+    conversation?: Conversation;
+    runId: string;
+    output: string;
+    responseElapsedMs: number;
+    startedAt: number;
+    artifacts: Attachment[];
+  }) => {
+    const message: ChatMessage = {
+      id: createEntityUuid(),
+      role: "assistant",
+      text: "",
+      at: new Date().toISOString(),
+      streaming: true,
+    };
+    appendMessage(conversationId, message, { persist: false });
+    const frames = createStreamFrames(output);
+    visualStreamSkipRef.current.delete(runId);
+    for (const frame of frames) {
+      const visibleText = visualStreamSkipRef.current.has(runId) ? output : frame;
+      updateConversation(conversationId, (current) => ({
+        ...current,
+        messages: current.messages.map((item) => (
+          item.id === message.id
+            ? { ...item, text: visibleText, streaming: true }
+            : item
+        )),
+      }));
+      if (visibleText === output) break;
+      await waitForStreamFrame(streamFrameDelayMs(frames.length));
+    }
+    const completedAt = new Date().toISOString();
+    const elapsedMs = Math.max(
+      responseElapsedMs,
+      eventTimeMs() - startedAt,
+    );
+    const finalMessage: ChatMessage = {
+      ...message,
+      text: output,
+      at: completedAt,
+      elapsedMs,
+      artifacts,
+      streaming: false,
+    };
+    updateConversation(conversationId, (current) => ({
+      ...current,
+      updatedAt: completedAt,
+      messages: current.messages.map((item) => (
+        item.id === message.id ? finalMessage : item
+      )),
+    }));
+    visualStreamSkipRef.current.delete(runId);
+    if (conversation?.storage === "database" && window.hiremeDesktop) {
+      queueDatabaseSync(conversationId, () => window.hiremeDesktop!.saveMessage({
+        id: finalMessage.id,
+        conversationId,
+        role: finalMessage.role,
+        text: finalMessage.text,
+        at: finalMessage.at,
+        elapsedMs: finalMessage.elapsedMs,
+        artifacts: finalMessage.artifacts,
+      }));
+    }
+  };
+
+  const updateMessageStatus = (
+    conversationId: string,
+    messageId: string,
+    status: ChatMessage["status"],
+    fallback?: QueuedRequest,
+  ) => {
+    const conversation = conversations.find((item) => item.id === conversationId);
+    const message = conversation?.messages.find((item) => item.id === messageId) || (fallback
+      ? {
+          id: fallback.messageId,
+          role: "user" as const,
+          text: fallback.text,
+          at: fallback.at,
+          attachments: fallback.attachments,
+        }
+      : undefined);
+    updateConversation(conversationId, (current) => ({
+      ...current,
+      messages: current.messages.map((item) =>
+        item.id === messageId ? { ...item, status } : item,
+      ),
+    }));
+    if (conversation?.storage === "database" && message && window.hiremeDesktop) {
+      queueDatabaseSync(conversationId, () => window.hiremeDesktop!.saveMessage({
+        id: message.id,
+        conversationId,
+        role: message.role,
+        text: message.text,
+        at: message.at,
+        status,
+        elapsedMs: message.elapsedMs,
+        attachments: message.attachments,
+        artifacts: message.artifacts,
+      }));
+    }
+  };
+
+  const executeRequest = async (
+    conversationId: string,
+    agent: Agent,
+    request: QueuedRequest,
+  ) => {
+    const requestConversation = conversations.find((item) => item.id === conversationId);
+    const managementSession = managementSessions[conversationId];
+    const isManagementConversation = requestConversation?.mode === "agent_authoring";
+    const isDraftOutput = request.kind === "draft_output";
+    const managementSessionReady = isManagementSessionActive(managementSession);
+    const isAuthoringRequest = Boolean(
+      isManagementConversation &&
+      managementSessionReady &&
+      !isDraftOutput,
+    );
+    if (isManagementConversation && !managementSessionReady) {
+      dirtyManagementDraftsRef.current.delete(conversationId);
+      setManagementSessions((current) => {
+        if (!current[conversationId]) return current;
+        const next = { ...current };
+        delete next[conversationId];
+        return next;
+      });
+      appendMessage(conversationId, {
+        id: createEntityUuid(),
+        role: "assistant",
+        text: "관리 세션이 만료되어 요청을 실행하지 않았어요. 내 에이전트 화면에서 관리 모드를 다시 열어 주세요.",
+        at: new Date().toISOString(),
+      });
+      updateMessageStatus(conversationId, request.messageId, "failed", request);
+      showToast("관리 모드가 잠겼어요", "Private Harness를 보거나 수정하려면 관리 모드를 다시 열어 주세요.");
+      const next = runQueueRef.current[conversationId]?.shift();
+      setQueueCounts((current) => ({
+        ...current,
+        [conversationId]: runQueueRef.current[conversationId]?.length || 0,
+      }));
+      if (next) {
+        runningChatsRef.current.add(conversationId);
+        setRuns((current) => {
+          const active = current[conversationId];
+          if (!active) return current;
+          return {
+            ...current,
+            [conversationId]: {
+              ...active,
+              steps: [...active.steps, "다음 요청을 시작하고 있어요"].slice(-5),
+            },
+          };
+        });
+        window.setTimeout(() => executeRequest(conversationId, agent, next), 120);
+      } else {
+        setRuns((current) => {
+          if (!current[conversationId]) return current;
+          const remaining = { ...current };
+          delete remaining[conversationId];
+          return remaining;
+        });
+        runningChatsRef.current.delete(conversationId);
+      }
+      return;
+    }
+    runningChatsRef.current.add(conversationId);
+    updateMessageStatus(conversationId, request.messageId, "sent", request);
+
+    const runId = `run-${eventTimeMs().toString(36)}-${conversationId}`;
+    const startedAt = eventTimeMs();
+    const previewRun = agent.runtime === "preview";
+    setRuns((current) => ({
+      ...current,
+      [conversationId]: {
+        runId,
+        startedAt,
+        image: agent.category === "디자인" || agent.resultTypes.includes("PNG"),
+        steps: [
+          isAuthoringRequest
+            ? "설계 내용을 이해하고 있어요"
+            : isDraftOutput
+              ? `${agent.name}가 현재 설정으로 결과를 만들고 있어요`
+            : previewRun
+              ? `${agent.name}가 결과 초안을 준비하고 있어요`
+              : "요청을 안전하게 전달하고 있어요",
+        ],
+      },
+    }));
+
+    const stageTimers = [
+      ...(agent.category === "디자인" || agent.resultTypes.includes("PNG") ? [
+        window.setTimeout(() => {
+          setRuns((current) => ({
+            ...current,
+            [conversationId]: current[conversationId]?.runId === runId
+              ? {
+                  ...current[conversationId],
+                  steps: [...current[conversationId].steps, "이미지 생성 결과를 기다리고 있어요"].slice(-5),
+                }
+              : current[conversationId],
+          }));
+        }, 2_500),
+      ] : []),
+      ...(previewRun ? [
+      window.setTimeout(() => {
+        setRuns((current) => ({
+          ...current,
+          [conversationId]: current[conversationId]?.runId === runId
+            ? {
+                ...current[conversationId],
+                steps: [
+                  ...current[conversationId].steps,
+                  isAuthoringRequest ? "작업 방식과 기억을 정리하고 있어요" : "핵심 메시지와 문장 구조를 다듬고 있어요",
+                ],
+              }
+            : current[conversationId],
+        }));
+      }, 360),
+      window.setTimeout(() => {
+        setRuns((current) => ({
+          ...current,
+          [conversationId]: current[conversationId]?.runId === runId
+            ? {
+                ...current[conversationId],
+                steps: [
+                  ...current[conversationId].steps,
+                  isAuthoringRequest ? "초안 변경을 확인하고 있어요" : "전달할 결과를 구성하고 있어요",
+                ],
+              }
+            : current[conversationId],
+        }));
+      }, 700),
+      ] : []),
+    ];
+    runTimersRef.current[runId] = stageTimers;
+
+    try {
+      const response = await runAgentRequest({
+        runId,
+        conversationId,
+        agent,
+        text: request.text,
+        attachments: request.attachments,
+        workspace,
+        conversation: requestConversation,
+        managementSession: isAuthoringRequest ? managementSession : undefined,
+      });
+      setRuns((current) => ({
+        ...current,
+        [conversationId]: current[conversationId]?.runId === runId
+          ? {
+              ...current[conversationId],
+              steps: [...current[conversationId].steps, "검증된 결과를 표시하고 있어요"].slice(-5),
+            }
+          : current[conversationId],
+      }));
+      await streamAssistantResult({
+        conversationId,
+        conversation: requestConversation,
+        runId,
+        output: response.output,
+        responseElapsedMs: response.elapsedMs || eventTimeMs() - startedAt,
+        startedAt,
+        artifacts: response.artifacts || [],
+      });
+    } catch (error) {
+      const cancelled = cancelledRunIdsRef.current.has(runId) || isRunCancelledError(error);
+      const managementSessionInvalid = Boolean(
+        isManagementConversation && invalidateManagementSession(conversationId, error)
+      );
+      const failureMessage = cancelled
+        ? isManagementConversation
+          ? "관리 작업을 중지했어요. 중지 전에 적용된 변경이 있을 수 있으니 오른쪽 Private Harness와 검증 상태를 확인해 주세요."
+          : "작업을 중지했어요. 요청은 전달됐지만 결과 생성이 완료되기 전에 중단됐습니다."
+        : managementSessionInvalid
+          ? "관리 모드가 잠겼어요. Private Harness를 보거나 수정하려면 관리 모드를 다시 열어 주세요."
+          : isManagementConversation
+            ? `${publicErrorMessage(error)} 관리 작업은 일부 변경이 먼저 저장됐을 수 있으니 오른쪽 Private Harness를 확인해 주세요.`
+            : publicErrorMessage(error);
+      appendMessage(conversationId, {
+        id: createEntityUuid(),
+        role: "assistant",
+        text: failureMessage,
+        at: new Date().toISOString(),
+        elapsedMs: eventTimeMs() - startedAt,
+        retry: !cancelled && !managementSessionInvalid
+          ? { text: request.text, attachments: request.attachments }
+          : undefined,
+      });
+      updateMessageStatus(
+        conversationId,
+        request.messageId,
+        cancelled ? "cancelled" : "failed",
+        request,
+      );
+      if (!cancelled && !managementSessionInvalid) {
+        showToast(
+          isManagementConversation ? "관리 작업을 완료하지 못했어요" : "작업을 완료하지 못했어요",
+          publicErrorMessage(error),
+        );
+      }
+    } finally {
+      cancelledRunIdsRef.current.delete(runId);
+      (runTimersRef.current[runId] || []).forEach((timer) => window.clearTimeout(timer));
+      delete runTimersRef.current[runId];
+      const nextRequest = runQueueRef.current[conversationId]?.shift();
+      setQueueCounts((current) => ({
+        ...current,
+        [conversationId]: runQueueRef.current[conversationId]?.length || 0,
+      }));
+      if (nextRequest) {
+        setRuns((current) => {
+          const active = current[conversationId];
+          if (!active || active.runId !== runId) return current;
+          return {
+            ...current,
+            [conversationId]: {
+              ...active,
+              steps: [...active.steps, "다음 요청을 시작하고 있어요"].slice(-5),
+            },
+          };
+        });
+        window.setTimeout(() => executeRequest(conversationId, agent, nextRequest), 120);
+      } else {
+        setRuns((current) => {
+          const active = current[conversationId];
+          if (!active || active.runId !== runId) return current;
+          const remaining = { ...current };
+          delete remaining[conversationId];
+          return remaining;
+        });
+        runningChatsRef.current.delete(conversationId);
+      }
+    }
+  };
+
+  const sendMessage = (text: string, attachments: Attachment[]) => {
+    if (!activeConversation || !activeAgent || (!text.trim() && attachments.length === 0)) return;
+    if (activeConversation.mode === "agent_authoring" && !activeAuthoring) {
+      showToast("관리 모드가 잠겨 있어요", "내 에이전트 화면의 관리 모드 버튼으로 다시 열어 주세요.");
+      return;
+    }
+    const request: QueuedRequest = {
+      messageId: createEntityUuid(),
+      text: text.trim() || "첨부한 파일을 확인해줘.",
+      attachments,
+      at: new Date().toISOString(),
+    };
+    if (activeConversation.mode === "agent_authoring" && isDraftOutputRequest(request.text, attachments)) {
+      request.kind = "draft_output";
+      request.text = request.text.replace(/^시험\s*[:：]\s*/, "").trim() || "현재 설정으로 대표 결과를 만들어줘.";
+    }
+    const queued = runningChatsRef.current.has(activeConversation.id);
+    appendMessage(activeConversation.id, {
+      id: request.messageId,
+      role: "user",
+      text: request.text,
+      at: request.at,
+      status: queued ? "queued" : "sent",
+      attachments,
+    });
+    if (queued) {
+      runQueueRef.current[activeConversation.id] ||= [];
+      runQueueRef.current[activeConversation.id].push(request);
+      setQueueCounts((current) => ({
+        ...current,
+        [activeConversation.id]: runQueueRef.current[activeConversation.id].length,
+      }));
+      showToast("요청을 대기열에 추가했어요", "현재 작업이 끝나면 바로 시작합니다.");
+      return;
+    }
+    void executeRequest(activeConversation.id, activeAgent, request);
+  };
+
+  const cancelRun = async (conversationId: string) => {
+    const run = runs[conversationId];
+    if (!run) return;
+    const conversation = conversations.find((item) => item.id === conversationId);
+    if (
+      conversation?.mode === "agent_authoring" &&
+      !window.confirm("관리 작업을 중지하면 이미 적용된 변경은 남을 수 있습니다. 그래도 중지할까요?")
+    ) return;
+    visualStreamSkipRef.current.add(run.runId);
+    cancelledRunIdsRef.current.add(run.runId);
+    const cancelled = await window.hiremeDesktop?.cancelRun(run.runId).catch(() => false);
+    showToast(
+      cancelled ? "작업 중지를 요청했어요" : "완료된 결과를 마무리하고 있어요",
+      cancelled
+        ? conversation?.mode === "agent_authoring"
+          ? "이미 저장된 관리 변경은 유지됩니다."
+          : "대기 중인 요청은 다음에 이어집니다."
+        : "실행은 이미 끝났으며 결과 표시만 마무리합니다.",
+    );
+  };
+
+  const chooseWorkspace = async () => {
+    const selected = await window.hiremeDesktop?.chooseWorkspace();
+    if (selected) {
+      setWorkspace(selected);
+      showToast("작업 폴더를 연결했어요", selected);
+    } else if (!window.hiremeDesktop) {
+      showToast("데스크톱 앱에서 폴더를 연결할 수 있어요");
+    }
+  };
+
+  const startAgentWork = async (agentId: string) => {
+    const agent = agents.find((item) => item.id === agentId);
+    if (!agent) return;
+    if (agent.ownership === "market" && !agent.hired) {
+      try {
+        if (window.hiremeDesktop) {
+          await window.hiremeDesktop.hireDemoAgent({ agentId: agent.id });
+        }
+        setAgents((current) => current.map((item) => (
+          item.id === agent.id ? { ...item, hired: true } : item
+        )));
+        showToast("디자인 서비스를 이용할 수 있어요", "데모 기간에는 무료로 바로 작업을 맡길 수 있어요.");
+      } catch (error) {
+        showToast("디자인 서비스를 시작하지 못했어요", publicErrorMessage(error));
+        return;
+      }
+    }
+    createConversation(agentId);
+  };
+
+  const publishVersion = async (agentId: string) => {
+    if (publishingAgentIds[agentId]) return;
+    const agent = agents.find((item) => item.id === agentId);
+    if (!agent) return;
+    const nextVersion = agent.status === "초안" ? agent.version : incrementPatch(agent.version);
+    const authoringConversation = conversations
+      .filter((conversation) => conversation.agentId === agentId && conversation.mode === "agent_authoring")
+      .sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt))[0];
+    const managementSession = authoringConversation
+      ? managementSessions[authoringConversation.id]
+      : undefined;
+    if (
+      window.hiremeDesktop &&
+      (
+        !authoringConversation ||
+        !isManagementSessionActive(managementSession)
+      )
+    ) {
+      showToast("관리 모드에서 배포해 주세요", "먼저 관리 모드를 열어 Private Harness와 검증 상태를 확인해 주세요.");
+      await openAgentManagement(agentId);
+      return;
+    }
+    if (
+      authoringConversation &&
+      !confirmDiscardManagementDraft(authoringConversation.id)
+    ) return;
+    setPublishingAgentIds((current) => ({ ...current, [agentId]: true }));
+    try {
+      let published: HireMeAgentPublishResult | null = null;
+      if (window.hiremeDesktop) {
+        published = await window.hiremeDesktop.publishAgentDraft({
+          conversationId: authoringConversation!.id,
+          agentId,
+          managementSessionId: managementSession!.id,
+          version: nextVersion,
+        });
+      }
+      setAgents((current) => current.map((item) => (
+        item.id === agentId
+          ? {
+              ...item,
+              version: published?.databaseVersion || nextVersion,
+              status: "공개",
+              authoring: {
+                phase: "packaged",
+                revision: published?.revision || item.authoring?.revision || 1,
+                packagePath: published?.packagePath,
+                packageDigest: published?.packageDigest,
+              },
+            }
+          : item
+      )));
+      if (authoringConversation) {
+        if (authoringConversation.storage === "database" && window.hiremeDesktop) {
+          await window.hiremeDesktop.deleteConversation({ id: authoringConversation.id });
+        }
+        setConversations((current) => current.filter((conversation) => (
+          conversation.id !== authoringConversation.id
+        )));
+        setManagementSessions((current) => {
+          const next = { ...current };
+          delete next[authoringConversation.id];
+          return next;
+        });
+        dirtyManagementDraftsRef.current.delete(authoringConversation.id);
+        if (activeConversationId === authoringConversation.id) setActiveConversationId("");
+        setSelectedOwnedAgentId(agentId);
+        setView("agents");
+      }
+      showToast(
+        "에이전트를 배포했어요",
+        published?.packageRelativePath
+          ? `하네스와 기본 기억을 ${published.packageRelativePath}에 함께 담았습니다.`
+          : "하네스와 기본 기억을 함께 묶었습니다.",
+      );
+    } catch (error) {
+      const managementSessionInvalid = Boolean(
+        authoringConversation && invalidateManagementSession(authoringConversation.id, error)
+      );
+      if (!managementSessionInvalid) {
+        showToast("배포하지 못했어요", publicErrorMessage(error));
+      }
+    } finally {
+      setPublishingAgentIds((current) => {
+        const next = { ...current };
+        delete next[agentId];
+        return next;
+      });
+    }
+  };
+
+  const managementInspectorOpen = view === "chat" && activeAuthoring;
+  const inspectorClosed =
+    view === "studio" ||
+    view === "discover" ||
+    view === "agents" ||
+    (view === "chat" && !managementInspectorOpen);
 
   return (
-    <main className="min-h-screen bg-[#f6f9fc]">
-      <section className="border-b border-border bg-white px-4 py-10 md:px-8">
-        <div className="mx-auto flex max-w-7xl flex-col gap-5 md:flex-row md:items-end md:justify-between">
-          <div>
-            <h1 className="text-4xl font-light leading-tight text-[#1c1e54] md:text-5xl">
-              My Agents
-            </h1>
-            <p className="mt-4 max-w-2xl text-base font-light leading-7 text-muted-foreground">
-              Manage the agents you registered, the agents you can call from
-              Codex, and recent marketplace activity.
-            </p>
-          </div>
-          <div className="w-full max-w-xl rounded-xl border border-border bg-secondary p-4 text-sm">
-            <div className="flex items-start gap-3">
-              <span className="flex size-12 shrink-0 items-center justify-center rounded-full bg-white text-primary">
-                <UserRound className="size-5" />
-              </span>
-              <div className="min-w-0 flex-1">
-                <h2 className="truncate text-2xl font-light leading-tight text-[#1c1e54]">
-                  {displayNameFor(user)}
-                </h2>
-                <div className="mt-3 space-y-2 text-xs leading-5 text-muted-foreground">
-                  <div className="grid gap-2 sm:grid-cols-[88px_1fr]">
-                    <span>Email</span>
-                    <span className="truncate font-medium text-[#273951]">
-                      {user.email}
-                    </span>
-                  </div>
-                  <div className="grid gap-2 sm:grid-cols-[88px_1fr]">
-                    <span>Sui Address</span>
-                    {user.wallet ? (
-                      <code className="truncate rounded-md bg-white px-2 py-1 text-[11px] text-[#1c1e54]">
-                        {user.wallet}
-                      </code>
-                    ) : (
-                      <ConnectSuiButton
-                        onWalletLinked={onWalletLinked}
-                        user={user}
-                        variant="default"
-                      />
-                    )}
-                  </div>
-                </div>
-                <div className="mt-4 flex justify-end">
-                  <Button onClick={onLogout} size="sm" type="button" variant="secondary">
-                    <LogOut /> Logout
-                  </Button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section className="px-4 py-8 md:px-8">
-        <div className="mx-auto max-w-7xl">
-          {accessError ? (
-            <div className="mb-4 rounded-xl border border-[#ea2261]/20 bg-[#fff8fb] p-4 text-sm leading-6 text-[#9f1239]">
-              Gateway my-agents read failed. Showing local fallback only.
-              <div className="mt-1 font-mono text-xs">{accessError}</div>
-            </div>
-          ) : null}
-          {memWalError ? (
-            <div className="mb-4 rounded-xl border border-[#f59e0b]/20 bg-[#fffaf0] p-4 text-sm leading-6 text-[#92400e]">
-              Gateway memWal activity read failed. Activity may omit recent
-              protected result records.
-              <div className="mt-1 font-mono text-xs">{memWalError}</div>
-            </div>
-          ) : null}
-          {paymentActivityError ? (
-            <div className="mb-4 rounded-xl border border-[#f59e0b]/20 bg-[#fffaf0] p-4 text-sm leading-6 text-[#92400e]">
-              Gateway payment activity read failed. Activity may omit recent SUI
-              verification logs.
-              <div className="mt-1 font-mono text-xs">{paymentActivityError}</div>
-            </div>
-          ) : null}
-          {walletError ? (
-            <div className="mb-4 rounded-xl border border-[#f59e0b]/20 bg-[#fffaf0] p-4 text-sm leading-6 text-[#92400e]">
-              Gateway wallet summary failed. Balance may omit recent spend or
-              creator earnings.
-              <div className="mt-1 font-mono text-xs">{walletError}</div>
-            </div>
-          ) : null}
-
-          <WalletOverviewPanel
-            action={walletAction}
-            onClaim={() => void handleWalletClaim()}
-            onTopUp={() => void handleWalletTopUp()}
-            summary={walletSummary}
-          />
-
-          <div className="mt-4 grid gap-4 md:grid-cols-3">
-            <DashboardSummaryCard
-              icon={PackageOpen}
-              label="Registered"
-              value={registeredCount.toString()}
-              description="Agents you created or published."
-            />
-            <DashboardSummaryCard
-              icon={WalletCards}
-              label="Hired"
-              value={hiredRecords.length.toString()}
-              description="Paid agents authorized for Codex calls."
-            />
-            <DashboardSummaryCard
-              icon={Clock3}
-              label="Activity"
-              value={activityItems.length.toString()}
-              description="Recent registrations, payments, trials, and hires."
-            />
-          </div>
-
-          <div className="mt-6 flex flex-wrap gap-2 rounded-xl border border-border bg-white p-2 app-shadow">
-            {tabs.map((tab) => (
-              <button
-                className={`rounded-full border px-3 py-2 text-xs font-medium transition ${
-                  activeTab === tab.id
-                    ? "border-[#533afd] bg-white text-[#1c1e54] shadow-[inset_0_0_0_1px_rgba(83,58,253,0.22)]"
-                    : "border-transparent text-muted-foreground hover:border-[#533afd]/30 hover:text-[#1c1e54]"
-                }`}
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                type="button"
-              >
-                {tab.label}{" "}
-                <span className="number-cell ml-1 text-[11px]">
-                  {tab.count}
-                </span>
-              </button>
-            ))}
-          </div>
-
-          {activeTab === "registered" ? (
-            registeredCount ? (
-              <div className="mt-5 grid gap-4 lg:grid-cols-2">
-                {createdRecords.map((record) => (
-                  <RegisteredAgentCard
-                    agent={createdAgentRecordToAgent(record, user)}
-                    key={record.id}
-                    walletStat={
-                      walletStatsByAgentId.get(record.agentSlug) ||
-                      walletStatsByAgentId.get(record.id)
-                    }
-                  />
-                ))}
-                {registeredMarketplaceAgents.map((agent) => (
-                  <RegisteredAgentCard
-                    agent={agent}
-                    key={agent.id}
-                    walletStat={walletStatsByAgentId.get(agent.id)}
-                  />
-                ))}
-              </div>
-            ) : (
-              <div className="mt-5 rounded-xl border border-border bg-white p-6 app-shadow">
-                <div className="flex flex-col gap-5 md:flex-row md:items-center md:justify-between">
-                  <div>
-                    <h2 className="text-2xl font-light text-[#1c1e54]">
-                      No registered agents yet
-                    </h2>
-                    <p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground">
-                      Create an agent from the marketplace page. Once its
-                      protected record is generated, it will appear here.
-                    </p>
-                  </div>
-                  <Button asChild type="button">
-                    <Link to="/agents">
-                      <PackageOpen /> Create Agent
-                    </Link>
-                  </Button>
-                </div>
-              </div>
-            )
-          ) : null}
-
-          {activeTab === "hired" ? (
-            activeRecords.length ? (
-              <div className="mt-5 grid gap-4 lg:grid-cols-2">
-                {activeRecords.map((record) => {
-                  const agent = resolveAgent(record);
-                  if (!agent) return null;
-                  return (
-                    <MyAgentAccessCard
-                      agent={agent}
-                      hirerId={hirerId}
-                      key={record.id}
-                      record={record}
-                      walletStat={walletStatsByAgentId.get(agent.id)}
-                    />
-                  );
-                })}
-              </div>
-            ) : (
-              <div className="mt-5 rounded-xl border border-border bg-white p-6 app-shadow">
-                <div className="flex flex-col gap-5 md:flex-row md:items-center md:justify-between">
-                  <div>
-                    <h2 className="text-2xl font-light text-[#1c1e54]">
-                      No active agents yet
-                    </h2>
-                    <p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground">
-                      Try or hire an agent from the marketplace. It will appear
-                      here with the receipt and hirer_id Codex needs.
-                    </p>
-                  </div>
-                  <Button asChild type="button">
-                    <Link to="/agents">
-                      <Bot /> Browse agents
-                    </Link>
-                  </Button>
-                </div>
-              </div>
-            )
-          ) : null}
-
-          {activeTab === "activity" ? (
-            activityItems.length ? (
-              <div className="mt-5 overflow-hidden rounded-xl border border-border bg-white app-shadow">
-                {activityItems.map((item) => (
-                  <ActivityRow item={item} key={item.id} />
-                ))}
-              </div>
-            ) : (
-              <EmptyResult label="No activity yet." />
-            )
-          ) : null}
-        </div>
-      </section>
-    </main>
-  );
-}
-
-function WalletOverviewPanel({
-  action,
-  onClaim,
-  onTopUp,
-  summary,
-}: {
-  action: "top-up" | "claim" | null;
-  onClaim: () => void;
-  onTopUp: () => void;
-  summary: GatewayWalletSummaryPayload | null;
-}) {
-  const balance = summary?.balance;
-  const claimable = readSuiNumber(balance?.claimableEarningsSui);
-  const sourceLabel =
-    summary?.source === "ledger_only"
-      ? "Ledger only"
-      : summary?.source === "account_wallet_events"
-        ? "Wallet ledger"
-        : "Syncing";
-
-  return (
-    <section className="rounded-xl border border-border bg-white p-5 app-shadow">
-      <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
-        <div>
-          <div className="flex items-center gap-2 text-sm font-medium text-[#1c1e54]">
-            <WalletCards className="size-4 text-primary" />
-            Available balance
-          </div>
-          <div className="number-cell mt-2 text-4xl font-light leading-tight text-[#1c1e54] md:text-5xl">
-            {formatSuiBalance(balance?.availableSui)}
-          </div>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
-            Hired Agent calls spend from this balance. Creator earnings add to it
-            as your Agents complete work.
-          </p>
-        </div>
-
-        <div className="grid gap-3 sm:grid-cols-3 lg:w-[520px]">
-          <WalletMiniMetric
-            label="Earned"
-            value={formatSuiBalance(balance?.earnedSui)}
-          />
-          <WalletMiniMetric
-            label="Spent"
-            value={formatSuiBalance(balance?.spentSui)}
-          />
-          <WalletMiniMetric
-            label="Claimable"
-            value={formatSuiBalance(balance?.claimableEarningsSui)}
-          />
+    <div className={`desktop-app ${managementInspectorOpen ? "agent-authoring-mode" : ""} ${inspectorClosed ? "inspector-closed" : ""} ${view === "earnings" ? "earnings-coming-soon-mode" : ""}`} data-native={nativeRuntime ? "true" : "false"}>
+      <div className="titlebar">
+        <button
+          className="icon-button mobile-menu"
+          type="button"
+          aria-label="메뉴 열기"
+          title="메뉴"
+          onClick={() => setSidebarOpen(true)}
+        >
+          <Menu size={18} />
+        </button>
+        <span className="titlebar-name">HireMe</span>
+        <div className="titlebar-runtime">
+          <span className={nativeRuntime ? "status-dot online" : "status-dot"} />
+          {nativeRuntime ? "로컬 런타임 연결됨" : "앱 미리보기"}
         </div>
       </div>
 
-      <div className="mt-5 flex flex-col gap-3 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="text-xs leading-5 text-muted-foreground">
-          {sourceLabel} · Top-ups {formatSuiBalance(balance?.topUpSui)} ·
-          Claimed {formatSuiBalance(balance?.claimedSui)}
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Button
-            disabled={Boolean(action)}
-            onClick={onTopUp}
-            size="sm"
+      <aside className={`sidebar ${sidebarOpen ? "open" : ""}`}>
+        <div className="sidebar-brand">
+          <img src={appAssetUrl("/assets/Logo.png")} alt="HireMe" />
+          <button
+            className="icon-button sidebar-close"
             type="button"
-            variant="secondary"
+            aria-label="메뉴 닫기"
+            title="닫기"
+            onClick={() => setSidebarOpen(false)}
           >
-            <ArrowUp /> {action === "top-up" ? "Charging..." : "Charge 1 SUI"}
-          </Button>
-          <Button
-            disabled={Boolean(action) || claimable <= 0}
-            onClick={onClaim}
-            size="sm"
-            type="button"
-          >
-            <CircleDollarSign /> {action === "claim" ? "Claiming..." : "Claim"}
-          </Button>
+            <X size={18} />
+          </button>
         </div>
+
+        <nav className="primary-nav" aria-label="주요 메뉴">
+          <span className="sidebar-nav-label">디자이너 스튜디오</span>
+          <button
+            type="button"
+            className={view === "studio" ? "nav-item nav-item-rich active" : "nav-item nav-item-rich"}
+            onClick={() => {
+              if (navigateToView("studio")) setSidebarOpen(false);
+            }}
+          >
+            <LayoutGrid size={17} />
+            <span><strong>스튜디오 홈</strong><small>만들기 · 관리 · 개선</small></span>
+          </button>
+          <button
+            type="button"
+            className={view === "agents" || view === "earnings" ? "nav-item nav-item-rich active" : "nav-item nav-item-rich"}
+            onClick={() => {
+              if (navigateToView("agents")) setSidebarOpen(false);
+            }}
+          >
+            <Target size={17} />
+            <span><strong>내 에이전트</strong><small>질문 · 기준 · 결과물</small></span>
+            <small className="sidebar-count">{ownedAgents.length}</small>
+          </button>
+        </nav>
+
+        {view === "chat" ? (
+          <>
+            <div className={`conversation-list-heading ${conversationSearchOpen ? "searching" : ""}`}>
+              {conversationSearchOpen ? (
+                <label className="conversation-search">
+                  <Search size={14} />
+                  <input autoFocus value={conversationQuery} onChange={(event) => setConversationQuery(event.target.value)} placeholder="대화 검색" aria-label="대화 검색" />
+                  <button type="button" aria-label="검색 닫기" title="검색 닫기" onClick={() => { setConversationQuery(""); setConversationSearchOpen(false); }}><X size={13} /></button>
+                </label>
+              ) : (
+                <>
+                  <span>{workScope === "created" ? "내 서비스 테스트" : "진행 중인 주문"}</span>
+                  <span className="conversation-heading-actions">
+                    <button className="icon-button" type="button" aria-label="새 작업" title="새 작업" onClick={() => setModal({ type: "new-chat", scope: workScope })}><Plus size={15} /></button>
+                    <button className="icon-button" type="button" aria-label="대화 검색" title="대화 검색" onClick={() => setConversationSearchOpen(true)}><Search size={15} /></button>
+                  </span>
+                </>
+              )}
+            </div>
+            <div className="conversation-list">
+              {visibleConversations.length > 0 ? (
+                visibleConversations.map((conversation) => {
+                  const agent = agents.find((item) => item.id === conversation.agentId);
+                  const conversationRun = runs[conversation.id];
+                  const isRunning = Boolean(conversationRun);
+                  return (
+                    <button
+                      type="button"
+                      key={conversation.id}
+                      className={activeConversationId === conversation.id ? "conversation-item active" : "conversation-item"}
+                      onClick={() => selectConversation(conversation.id)}
+                      onContextMenu={(event) => {
+                        event.preventDefault();
+                        setConversationMenu({
+                          conversationId: conversation.id,
+                          x: Math.min(event.clientX, window.innerWidth - 170),
+                          y: Math.min(event.clientY, window.innerHeight - 64),
+                        });
+                      }}
+                    >
+                      <AgentAvatar agent={agent} size="small" />
+                      <span className="conversation-copy">
+                        <strong>{conversation.title}</strong>
+                        {conversationRun
+                          ? <ConversationRunStatus key={conversationRun.runId} run={conversationRun} />
+                          : <span>{agent?.name}</span>}
+                      </span>
+                      {conversation.mode === "agent_authoring" && !isRunning && (
+                        <span className="conversation-draft-badge">
+                          {isManagementSessionActive(managementSessions[conversation.id])
+                            ? agent?.status === "초안" ? "설계 중" : "관리 중"
+                            : "관리 잠김"}
+                        </span>
+                      )}
+                      {isRunning && <LoaderCircle className="spin run-activity-spinner" size={14} />}
+                    </button>
+                  );
+                })
+              ) : (
+                <div className="conversation-empty">
+                  {normalizedConversationQuery ? <Search size={17} /> : workScope === "created" ? <Bot size={17} /> : <BriefcaseBusiness size={17} />}
+                  <strong>{normalizedConversationQuery ? "검색 결과가 없어요" : "아직 시작한 작업이 없어요"}</strong>
+                  {!normalizedConversationQuery && <button className="text-button" type="button" onClick={() => setModal({ type: "new-chat", scope: workScope })}>새 작업 시작</button>}
+                </div>
+              )}
+            </div>
+          </>
+        ) : <div className="sidebar-spacer" />}
+
+        <div className="sidebar-footer">
+          <button className="workspace-button" type="button" onClick={chooseWorkspace}>
+            <FolderOpen size={16} />
+            <span>
+              <small>작업 폴더</small>
+              <strong>{shortPath(workspace)}</strong>
+            </span>
+            <ChevronRight size={15} />
+          </button>
+          <div className="profile-row">
+            <span className="profile-avatar">
+              {auth?.user?.avatarUrl ? (
+                <img src={auth.user.avatarUrl} alt="" referrerPolicy="no-referrer" />
+              ) : (
+                userInitials(auth?.user?.displayName)
+              )}
+            </span>
+            <span className="profile-copy">
+              <strong>{auth?.user?.displayName || "미리보기 사용자"}</strong>
+              <small>{auth?.user?.email || "브라우저 미리보기"}</small>
+            </span>
+            <button
+              className="icon-button"
+              type="button"
+              aria-label="설정"
+              title="설정"
+              onClick={() => setAiSettingsOpen(true)}
+              disabled={!window.hiremeDesktop}
+            >
+              <Settings size={16} />
+            </button>
+          </div>
+        </div>
+      </aside>
+
+      {sidebarOpen && <button className="sidebar-backdrop" aria-label="메뉴 닫기" onClick={() => setSidebarOpen(false)} />}
+
+      <main className="main-surface">
+        {view === "studio" && (
+          <StudioHome
+            agents={ownedAgents}
+            onCreate={() => setModal({ type: "new-agent" })}
+            onOpenAgent={(agentId) => {
+              setSelectedOwnedAgentId(agentId);
+              setView("agents");
+            }}
+          />
+        )}
+        {view === "chat" && activeConversation && activeAgent && (
+          <ChatView
+            conversation={activeConversation}
+            agent={activeAgent}
+            run={runs[activeConversation.id]}
+            queuedCount={queueCounts[activeConversation.id] || 0}
+            managementActive={activeAuthoring}
+            managementLocked={activeManagementLocked}
+            onSend={sendMessage}
+            onRetry={sendMessage}
+            onNotify={showToast}
+            onCancel={() => cancelRun(activeConversation.id)}
+            onUnlockManagement={() => void openAgentManagement(activeAgent.id)}
+            onOpenAgent={() => {
+              if (activeAgent.ownership === "mine") setSelectedOwnedAgentId(activeAgent.id);
+              else setSelectedAgentId(activeAgent.id);
+              setModal({ type: "agent-profile", agentId: activeAgent.id });
+            }}
+            onDelete={() => setModal({ type: "delete-conversation", conversationId: activeConversation.id })}
+          />
+        )}
+
+        {view === "chat" && !activeConversation && (
+          <EmptyWorkScope
+            scope={workScope}
+            onStart={() => setModal({ type: "new-chat", scope: workScope })}
+            onBrowse={() => navigateToView("discover")}
+          />
+        )}
+
+        {view === "discover" && (
+          <ProjectStartView
+            agents={agents.filter((agent) => !isRetiredMockAgent(agent))}
+            selectedAgentId={selectedAgentId}
+            onSelect={(agentId) => {
+              setSelectedAgentId(agentId);
+              setModal({ type: "agent-profile", agentId });
+            }}
+            onUse={startAgentWork}
+          />
+        )}
+
+        {view === "agents" && (
+          <MyAgentsView
+            agents={agents.filter((agent) => agent.ownership === "mine")}
+            selectedAgentId={selectedOwnedAgentId}
+            onSelect={(agentId) => {
+              setSelectedOwnedAgentId(agentId);
+              setModal({ type: "agent-profile", agentId });
+            }}
+            onCreate={() => setModal({ type: "new-agent" })}
+            onEdit={(agentId) => setModal({ type: "edit-agent", agentId })}
+            onDelete={(agentId) => setModal({ type: "delete-agent", agentId })}
+            onOpenEarnings={() => navigateToView("earnings")}
+            onOpenReview={() => void openReviewInbox()}
+            reviewer={reviewInbox?.reviewer === true}
+            onManage={(agentId) => void openAgentManagement(agentId)}
+          />
+        )}
+
+        {view === "earnings" && (
+          <EarningsView
+            agents={agents.filter((agent) => agent.ownership === "mine")}
+            onOpenAgents={() => navigateToView("agents")}
+            onOpenReview={() => void openReviewInbox()}
+            reviewer={reviewInbox?.reviewer === true}
+            onDownload={() => showToast("정산 내역을 내려받았어요", "CSV 파일은 다운로드 폴더에 저장됩니다.")}
+            onPayout={() => showToast("정산 신청을 접수했어요", "등록된 계좌로 영업일 기준 2~3일 안에 처리됩니다.")}
+          />
+        )}
+
+        {view === "review" && reviewInbox?.reviewer && (
+          <ReviewInboxView
+            inbox={reviewInbox}
+            busyVersionId={reviewingVersionId}
+            onRefresh={() => void openReviewInbox()}
+            onDecide={decideReview}
+            onOpenAgents={() => navigateToView("agents")}
+            onOpenEarnings={() => navigateToView("earnings")}
+          />
+        )}
+      </main>
+
+      <aside className={`inspector ${managementInspectorOpen ? "private-harness-inspector" : ""}`} aria-hidden={inspectorClosed || undefined}>
+        {managementInspectorOpen && activeAgent && activeConversation && activeManagementSession && (
+          <PrivateHarnessInspector
+            key={activeManagementSession.id}
+            agent={activeAgent}
+            conversation={activeConversation}
+            managementSession={activeManagementSession}
+            onNotify={showToast}
+            onDirtyChange={setManagementDraftDirty}
+            onSessionInvalid={invalidateManagementSession}
+            onPublish={() => void publishVersion(activeAgent.id)}
+            publishing={Boolean(publishingAgentIds[activeAgent.id])}
+            runActive={Boolean(runs[activeConversation.id])}
+            onRevisionChange={(phase, revision) => {
+              setAgents((current) => current.map((item) => (
+                item.id === activeAgent.id
+                  ? { ...item, authoring: { ...item.authoring, phase, revision } }
+                  : item
+              )));
+            }}
+          />
+        )}
+        {view === "earnings" && <EarningsInspector onPayout={() => showToast("정산 신청을 접수했어요")} />}
+      </aside>
+
+      {conversationMenu && (
+        <>
+          <button className="context-menu-backdrop" type="button" aria-label="작업 메뉴 닫기" onClick={() => setConversationMenu(null)} />
+          <div className="conversation-context-menu" role="menu" style={{ left: conversationMenu.x, top: conversationMenu.y }}>
+            <button type="button" role="menuitem" onClick={() => {
+              setModal({ type: "delete-conversation", conversationId: conversationMenu.conversationId });
+              setConversationMenu(null);
+            }}>
+              <Trash2 size={15} /> 작업 삭제
+            </button>
+          </div>
+        </>
+      )}
+
+      {modal?.type === "new-chat" && (
+        <NewChatDialog
+          agents={agents}
+          initialScope={modal.scope}
+          onSelect={createConversation}
+          onBrowse={() => {
+            if (!navigateToView("discover")) return;
+            setModal(null);
+          }}
+          onCreateAgent={() => setModal({ type: "new-agent" })}
+          onClose={() => setModal(null)}
+        />
+      )}
+      {modal?.type === "new-agent" && (
+        <NewAgentDialog
+          onClose={() => setModal(null)}
+          onCreate={async (agent) => {
+            if (!confirmDiscardManagementDraft(activeConversation?.id)) return;
+            let authoring: AgentAuthoringState = { phase: "draft", revision: 1 };
+            const conversationId = createEntityUuid();
+            if (window.hiremeDesktop) {
+              await window.hiremeDesktop.createAgentDraft({
+                agentId: agent.id,
+                name: agent.name,
+                category: agent.category,
+                headline: agent.headline,
+                summary: agent.summary,
+                creator: auth?.user?.displayName || "나",
+                skills: agent.skills,
+                resultTypes: agent.resultTypes,
+                designSystem: agent.designSystem,
+              });
+              const ready = await window.hiremeDesktop.prepareAgentManagement({
+                conversationId,
+                agentId: agent.id,
+                name: agent.name,
+                category: agent.category,
+                headline: agent.headline,
+                summary: agent.summary,
+                creator: auth?.user?.displayName || "나",
+                skills: agent.skills,
+                resultTypes: agent.resultTypes,
+              });
+              authoring = { phase: ready.phase, revision: ready.revision };
+              setManagementSessions((current) => ({
+                ...current,
+                [conversationId]: ready.managementSession,
+              }));
+            }
+            const nextAgent = { ...agent, authoring };
+            setAgents((current) => [nextAgent, ...current]);
+            setSelectedOwnedAgentId(agent.id);
+            createConversationForAgent(nextAgent, {
+              id: conversationId,
+              mode: "agent_authoring",
+              title: `${agent.name} 만들기`,
+            });
+            showToast("설계 대화를 시작했어요", "대화에서 일하는 방식과 기억을 함께 만들어 보세요.");
+          }}
+        />
+      )}
+      {modal?.type === "agent-profile" && (
+        <AgentProfileDialog
+          key={modal.agentId}
+          agent={agents.find((agent) => agent.id === modal.agentId) ?? agents[0]}
+          onClose={() => setModal(null)}
+          onUse={(agentId) => {
+            setModal(null);
+            startAgentWork(agentId);
+          }}
+          onEdit={(agentId) => setModal({ type: "edit-agent", agentId })}
+          onManage={(agentId) => {
+            setModal(null);
+            void openAgentManagement(agentId);
+          }}
+        />
+      )}
+      {modal?.type === "edit-agent" && (
+        <EditAgentDialog
+          agent={agents.find((agent) => agent.id === modal.agentId) ?? agents[0]}
+          onClose={() => setModal(null)}
+          onSave={async (updates) => {
+            const target = agents.find((agent) => agent.id === modal.agentId);
+            if (!target) return false;
+            try {
+              if (window.hiremeDesktop && updates.designSystem) {
+                const conversationId = createEntityUuid();
+                const ready = await window.hiremeDesktop.prepareAgentManagement({
+                  conversationId,
+                  agentId: target.id,
+                  name: String(updates.name || target.name),
+                  category: String(updates.category || target.category),
+                  headline: String(updates.headline || target.headline),
+                  summary: String(updates.summary || target.summary),
+                  creator: auth?.user?.displayName || "나",
+                  skills: updates.skills || target.skills,
+                  resultTypes: updates.resultTypes || target.resultTypes,
+                });
+                try {
+                  await window.hiremeDesktop.updateAgentDesignSystem({
+                    conversationId,
+                    agentId: target.id,
+                    managementSessionId: ready.managementSession.id,
+                    designSystem: updates.designSystem,
+                  });
+                } finally {
+                  await window.hiremeDesktop.closeAgentManagement({
+                    conversationId,
+                    agentId: target.id,
+                    managementSessionId: ready.managementSession.id,
+                  }).catch(() => null);
+                }
+              }
+              setAgents((current) => current.map((agent) => (
+                agent.id === modal.agentId ? { ...agent, ...updates } : agent
+              )));
+              setSelectedOwnedAgentId(modal.agentId);
+              setModal(null);
+              showToast("디자인 서비스 기준을 저장했어요", updates.designSystem ? "비공개 판단 시스템과 고객 질문을 함께 업데이트했습니다." : undefined);
+              return true;
+            } catch (error) {
+              showToast("디자인 서비스 기준을 저장하지 못했어요", publicErrorMessage(error));
+              return false;
+            }
+          }}
+        />
+      )}
+      {modal?.type === "delete-conversation" && (
+        <Dialog title="이 작업을 삭제할까요?" subtitle="대화와 첨부 기록이 작업 목록에서 영구적으로 삭제됩니다." onClose={() => setModal(null)}>
+          <div className="delete-conversation-dialog">
+            <p>{conversations.find((conversation) => conversation.id === modal.conversationId)?.title || "선택한 작업"}</p>
+            <div className="dialog-actions">
+              <button className="secondary-button" type="button" onClick={() => setModal(null)}>취소</button>
+              <button className="danger-button" type="button" onClick={() => void removeConversation(modal.conversationId)}><Trash2 size={15} /> 삭제</button>
+            </div>
+          </div>
+        </Dialog>
+      )}
+      {modal?.type === "delete-agent" && (() => {
+        const agent = agents.find((item) => item.id === modal.agentId);
+        if (!agent) return null;
+        return <Dialog title="에이전트를 삭제할까요?" subtitle="이 에이전트의 로컬 하네스와 관리 대화가 함께 삭제됩니다. 공개된 에이전트는 목록에서도 내려갑니다." onClose={() => setModal(null)}>
+          <div className="delete-conversation-dialog">
+            <p>{agent.name}</p>
+            <div className="dialog-actions">
+              <button className="secondary-button" type="button" onClick={() => setModal(null)}>취소</button>
+              <button className="danger-button" type="button" onClick={async () => {
+                try {
+                  if (window.hiremeDesktop) await window.hiremeDesktop.deleteAgent({ agentId: agent.id, databaseId: agent.databaseId });
+                  const relatedConversations = conversations.filter((conversation) => conversation.agentId === agent.id);
+                  setConversations((current) => current.filter((conversation) => conversation.agentId !== agent.id));
+                  setAgents((current) => current.filter((item) => item.id !== agent.id));
+                  setManagementSessions((current) => {
+                    const next = { ...current };
+                    relatedConversations.forEach((conversation) => delete next[conversation.id]);
+                    return next;
+                  });
+                  if (activeConversation?.agentId === agent.id) setActiveConversationId("");
+                  setModal(null);
+                  showToast("에이전트를 삭제했어요");
+                } catch (error) {
+                  showToast("에이전트를 삭제하지 못했어요", publicErrorMessage(error));
+                }
+              }}><Trash2 size={15} /> 삭제</button>
+            </div>
+          </div>
+        </Dialog>;
+      })()}
+
+      {(aiSettingsOpen || (Boolean(window.hiremeDesktop) && auth?.user?.aiSetupCompleted === false)) && auth?.user && (
+        <AiSettingsDialog
+          user={auth.user}
+          required={!auth.user.aiSetupCompleted}
+          onClose={() => setAiSettingsOpen(false)}
+          onSaved={() => {
+            setAiSettingsOpen(false);
+            showToast("작업에 사용할 AI를 저장했어요");
+          }}
+          onLogout={async () => {
+            if (!confirmDiscardManagementDraft(activeConversation?.id)) return;
+            await onLogout();
+          }}
+        />
+      )}
+
+      {toast && (
+        <div className="toast" role="status" key={toast.id}>
+          <CheckCircle2 size={18} />
+          <span>
+            <strong>{toast.title}</strong>
+            {toast.detail && <small>{toast.detail}</small>}
+          </span>
+          <button className="icon-button" type="button" aria-label="알림 닫기" onClick={() => setToast(null)}>
+            <X size={15} />
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AiSettingsDialog({
+  user,
+  required,
+  onClose,
+  onSaved,
+  onLogout,
+}: {
+  user: HireMeDesktopAuthUser;
+  required: boolean;
+  onClose: () => void;
+  onSaved: () => void;
+  onLogout: () => Promise<void>;
+}) {
+  const bridge = window.hiremeDesktop;
+  const [settings, setSettings] = useState<HireMeDesktopAiSettings | null>(null);
+  const [selected, setSelected] = useState<"codex" | "ollama">("codex");
+  const [ollamaModel, setOllamaModel] = useState("");
+  const [busy, setBusy] = useState<"connect" | "disconnect" | "refresh" | "save" | "logout" | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const initialized = useRef(false);
+
+  const applySettings = useCallback((next: HireMeDesktopAiSettings) => {
+    setSettings(next);
+    if (!initialized.current) {
+      setSelected(next.selected);
+      initialized.current = true;
+    }
+    setOllamaModel((current) => (
+      next.ollama.models.some((model) => model.id === current)
+        ? current
+        : next.ollama.selectedModel || next.ollama.models[0]?.id || ""
+    ));
+  }, []);
+
+  const refresh = useCallback(async (showBusy = true) => {
+    if (!bridge) return;
+    if (showBusy) setBusy("refresh");
+    setError(null);
+    try {
+      applySettings(await bridge.getAiSettings());
+    } catch (nextError) {
+      setError(publicAiSettingsError(nextError));
+    } finally {
+      if (showBusy) setBusy(null);
+    }
+  }, [applySettings, bridge]);
+
+  useEffect(() => {
+    if (!bridge) return;
+    let disposed = false;
+    const removeListener = bridge.onAiSettingsChanged(applySettings);
+    void bridge.getAiSettings()
+      .then((next) => {
+        if (!disposed) applySettings(next);
+      })
+      .catch((nextError) => {
+        if (!disposed) setError(publicAiSettingsError(nextError));
+      });
+    return () => {
+      disposed = true;
+      removeListener();
+    };
+  }, [applySettings, bridge]);
+
+  const connectCodex = async () => {
+    if (!bridge || busy) return;
+    setBusy("connect");
+    setError(null);
+    setSelected("codex");
+    try {
+      applySettings(await bridge.connectCodex());
+    } catch (nextError) {
+      setError(publicAiSettingsError(nextError));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const cancelConnect = async () => {
+    if (!bridge) return;
+    await bridge.cancelAiConnection().catch(() => false);
+  };
+
+  const disconnectCodex = async () => {
+    if (!bridge || busy) return;
+    setBusy("disconnect");
+    setError(null);
+    try {
+      applySettings(await bridge.disconnectCodex());
+    } catch (nextError) {
+      setError(publicAiSettingsError(nextError));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const save = async () => {
+    if (!bridge || !settings || busy) return;
+    setBusy("save");
+    setError(null);
+    try {
+      const result = await bridge.saveAiSettings({
+        provider: selected,
+        model: selected === "ollama" ? ollamaModel : null,
+      });
+      applySettings(result.settings);
+      onSaved();
+    } catch (nextError) {
+      setError(publicAiSettingsError(nextError));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const logout = async () => {
+    if (busy) return;
+    setBusy("logout");
+    setError(null);
+    try {
+      await onLogout();
+    } catch (nextError) {
+      setError(publicAiSettingsError(nextError));
+      setBusy(null);
+    }
+  };
+
+  const codexReady = settings?.codex.connected === true;
+  const ollamaReady = settings?.ollama.available === true && Boolean(ollamaModel);
+  const canSave = selected === "codex" ? codexReady : ollamaReady;
+
+  return (
+    <Dialog
+      title="작업에 사용할 AI"
+      subtitle={required
+        ? "HireMe가 일을 맡길 AI를 한 번 선택해 주세요."
+        : "연결 방식을 바꾸면 다음 작업부터 적용됩니다."}
+      onClose={onClose}
+      closeable={!required}
+      wide
+    >
+      <div className="ai-settings">
+        {!settings ? (
+          <div className="ai-settings-loading" role="status">
+            <LoaderCircle className="spin" size={19} />
+            이 컴퓨터에서 사용할 수 있는 AI를 확인하고 있어요
+          </div>
+        ) : (
+          <div className="ai-choice-list" role="radiogroup" aria-label="작업에 사용할 AI 선택">
+            <section className={`ai-choice ${selected === "codex" ? "selected" : ""}`}>
+              <button
+                className="ai-choice-select"
+                type="button"
+                role="radio"
+                aria-checked={selected === "codex"}
+                onClick={() => setSelected("codex")}
+              >
+                <span className="ai-choice-icon codex"><Sparkles size={19} /></span>
+                <span className="ai-choice-copy">
+                  <strong>ChatGPT 계정으로 사용</strong>
+                  <small>ChatGPT 계정을 연결해 문서, 이미지, 파일 작업을 처리합니다.</small>
+                </span>
+                <span className={`connection-state ${settings.codex.connected ? "ready" : ""}`}>
+                  {settings.codex.connecting
+                    ? "연결 중"
+                    : settings.codex.connected
+                      ? "연결됨"
+                      : "연결 필요"}
+                </span>
+              </button>
+              <div className="ai-choice-actions">
+                {settings.codex.connecting || busy === "connect" ? (
+                  <>
+                    <span><LoaderCircle className="spin" size={14} /> 브라우저에서 로그인을 마쳐 주세요</span>
+                    <button className="text-button danger" type="button" onClick={() => void cancelConnect()}>
+                      취소
+                    </button>
+                  </>
+                ) : settings.codex.connected ? (
+                  <>
+                    <span><CheckCircle2 size={14} /> 이 기기에 안전하게 연결되어 있어요</span>
+                    <button className="text-button" type="button" onClick={() => void disconnectCodex()} disabled={Boolean(busy)}>
+                      연결 해제
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <span>브라우저에서 ChatGPT 로그인을 한 번 진행합니다.</span>
+                    <button className="secondary-button compact" type="button" onClick={() => void connectCodex()} disabled={Boolean(busy)}>
+                      계정 연결
+                    </button>
+                  </>
+                )}
+              </div>
+            </section>
+
+            <section className={`ai-choice ${selected === "ollama" ? "selected" : ""}`}>
+              <button
+                className="ai-choice-select"
+                type="button"
+                role="radio"
+                aria-checked={selected === "ollama"}
+                onClick={() => setSelected("ollama")}
+              >
+                <span className="ai-choice-icon local"><HardDrive size={19} /></span>
+                <span className="ai-choice-copy">
+                  <strong>Ollama</strong>
+                  <small>내 컴퓨터에 설치된 모델로 작업하며 내용이 기기 밖으로 전송되지 않습니다.</small>
+                </span>
+                <span className={`connection-state ${ollamaReady ? "ready" : ""}`}>
+                  {ollamaReady ? "사용 가능" : settings.ollama.available ? "모델 필요" : "찾지 못함"}
+                </span>
+              </button>
+              <div className="ai-choice-actions local-actions">
+                {settings.ollama.models.length > 0 ? (
+                  <label>
+                    <span><Cpu size={14} /> 사용할 모델</span>
+                    <select value={ollamaModel} onChange={(event) => { setOllamaModel(event.target.value); setSelected("ollama"); }}>
+                      {settings.ollama.models.map((model) => (
+                        <option key={model.id} value={model.id}>{model.name}</option>
+                      ))}
+                    </select>
+                  </label>
+                ) : (
+                  <span>Ollama를 켜고 모델을 준비하면 여기에 표시됩니다.</span>
+                )}
+                <button
+                  className="icon-button"
+                  type="button"
+                  aria-label="Ollama 다시 확인"
+                  title="다시 확인"
+                  onClick={() => void refresh()}
+                  disabled={Boolean(busy)}
+                >
+                  <RefreshCw className={busy === "refresh" ? "spin" : ""} size={15} />
+                </button>
+              </div>
+            </section>
+          </div>
+        )}
+
+        {error && <p className="ai-settings-error" role="alert">{error}</p>}
+
+        <div className="ai-privacy-note">
+          <ShieldCheck size={17} />
+          <span>
+            <strong>AI 로그인 정보는 이 기기에만 보관됩니다</strong>
+            <small>HireMe 계정에는 선택한 방식만 저장하며 인증 정보는 업로드하지 않습니다.</small>
+          </span>
+        </div>
+
+        <div className="ai-account-row">
+          <span className="profile-avatar">
+            {user.avatarUrl
+              ? <img src={user.avatarUrl} alt="" referrerPolicy="no-referrer" />
+              : userInitials(user.displayName)}
+          </span>
+          <span>
+            <strong>{user.displayName}</strong>
+            <small>{user.email}</small>
+          </span>
+          <button className="text-button" type="button" onClick={() => void logout()} disabled={Boolean(busy)}>
+            <LogOut size={14} /> 로그아웃
+          </button>
+        </div>
+
+        <div className="dialog-actions ai-settings-actions">
+          {!required && <button className="secondary-button" type="button" onClick={onClose}>취소</button>}
+          <button className="primary-button" type="button" onClick={() => void save()} disabled={!settings || !canSave || Boolean(busy)}>
+            {busy === "save" ? <LoaderCircle className="spin" size={16} /> : <Check size={16} />}
+            이 AI 사용하기
+          </button>
+        </div>
+      </div>
+    </Dialog>
+  );
+}
+
+function AuthGate({
+  state,
+  busy,
+  error,
+  onLogin,
+}: {
+  state: HireMeDesktopAuthState | null;
+  busy: boolean;
+  error: string | null;
+  onLogin: () => Promise<void>;
+}) {
+  const loading = !state && !error;
+  const configured = state?.configured !== false;
+  return (
+    <div className="auth-app">
+      <div className="titlebar auth-titlebar">
+        <span className="titlebar-name">HireMe</span>
+      </div>
+      <main className="auth-surface">
+        <section className="auth-panel" aria-labelledby="auth-title">
+          <img className="auth-logo" src={appAssetUrl("/assets/Logo.png")} alt="HireMe" />
+          <div className="auth-heading">
+            <h1 id="auth-title">HireMe에 로그인</h1>
+            <p>내 에이전트와 작업을 한 계정에서 이어가세요.</p>
+          </div>
+
+          {loading ? (
+            <div className="auth-loading" role="status">
+              <LoaderCircle className="spin" size={19} />
+              로그인 상태 확인 중
+            </div>
+          ) : (
+            <button
+              className="google-login-button"
+              type="button"
+              onClick={() => void onLogin()}
+              disabled={!configured}
+            >
+              {busy ? <LoaderCircle className="spin" size={18} /> : <span className="google-mark">G</span>}
+              {busy ? "브라우저에서 로그인 중" : "Google로 계속하기"}
+            </button>
+          )}
+
+          {busy && configured && (
+            <button className="auth-retry" type="button" onClick={() => void onLogin()}>
+              로그인 창 다시 열기
+            </button>
+          )}
+
+          {!configured && (
+            <p className="auth-error" role="alert">
+              로그인 구성이 완료되지 않았습니다. 앱 관리자에게 문의해 주세요.
+            </p>
+          )}
+          {error && configured && <p className="auth-error" role="alert">{error}</p>}
+
+          <div className="auth-security-note">
+            <LockKeyhole size={15} />
+            <span>로그인 세션은 이 기기의 운영체제 보안 저장소에 보관됩니다.</span>
+          </div>
+        </section>
+      </main>
+    </div>
+  );
+}
+
+function EmptyWorkScope({
+  scope,
+  onStart,
+  onBrowse,
+}: {
+  scope: WorkScope;
+  onStart: () => void;
+  onBrowse: () => void;
+}) {
+  const created = scope === "created";
+  return (
+    <section className="empty-work-scope">
+      <span className={created ? "created" : "hired"}>
+        {created ? <Bot size={22} /> : <BriefcaseBusiness size={22} />}
+      </span>
+      <h1>{created ? "내 디자인 서비스의 고객 경험을 테스트하세요" : "전문가가 설계한 디자인 서비스에 맡겨보세요"}</h1>
+      <p>{created
+        ? "고객이 보게 될 질문부터 결과의 품질 검사까지 그대로 확인할 수 있어요."
+        : "빈 프롬프트 대신 디자이너가 준비한 질문에 답하면 기준에 맞는 결과를 받을 수 있어요."}</p>
+      <div>
+        <button className="primary-button" type="button" onClick={onStart}>
+          <Plus size={16} /> 새 디자인 주문
+        </button>
+        {!created && (
+          <button className="secondary-button" type="button" onClick={onBrowse}>
+            <Compass size={16} /> 서비스 찾기
+          </button>
+        )}
       </div>
     </section>
   );
 }
 
-function WalletMiniMetric({
-  label,
-  value,
-}: {
-  label: string;
-  value: string;
-}) {
+function ConversationRunStatus({ run }: { run: RunState }) {
+  const elapsed = useElapsed(run.startedAt);
+  const label = formatElapsed(elapsed);
   return (
-    <div className="rounded-lg border border-border bg-secondary px-3 py-3">
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="number-cell mt-1 text-lg font-medium text-[#1c1e54]">
-        {value}
-      </div>
-    </div>
-  );
-}
-
-function AgentMoneySummary({
-  className = "",
-  mode,
-  stat,
-}: {
-  className?: string;
-  mode: "creator" | "hirer";
-  stat?: GatewayWalletAgentStatPayload;
-}) {
-  const items =
-    mode === "creator"
-      ? [
-          ["Agent total", formatSuiBalance(stat?.totalEarnedSui)],
-          ["My earnings", formatSuiBalance(stat?.myEarnedSui)],
-          ["Claimable", formatSuiBalance(stat?.claimableSui)],
-        ]
-      : [
-          ["Spent by me", formatSuiBalance(stat?.mySpentSui)],
-          ["Paid runs", (stat?.spentCallCount || 0).toString()],
-          [
-            "Last charge",
-            stat?.lastChargedAt ? formatAccessDate(stat.lastChargedAt) : "No calls",
-          ],
-        ];
-
-  return (
-    <div className={`grid gap-3 sm:grid-cols-3 ${className}`}>
-      {items.map(([label, value]) => (
-        <div
-          className="rounded-lg border border-border bg-[#f8fafc] px-3 py-3"
-          key={label}
-        >
-          <div className="text-xs text-muted-foreground">{label}</div>
-          <div className="number-cell mt-1 text-sm font-semibold text-[#1c1e54]">
-            {value}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function EmptyResult({ label }: { label: string }) {
-  return (
-    <div className="rounded-xl border border-border bg-white p-6 text-sm text-muted-foreground app-shadow">
-      {label}
-    </div>
-  );
-}
-
-function DashboardSummaryCard({
-  description,
-  icon: Icon,
-  label,
-  value,
-}: {
-  description: string;
-  icon: typeof PackageOpen;
-  label: string;
-  value: string;
-}) {
-  return (
-    <div className="rounded-xl border border-border bg-white p-5 app-shadow">
-      <div className="flex items-center justify-between gap-3">
-        <div className="text-sm text-muted-foreground">{label}</div>
-        <span className="flex size-9 items-center justify-center rounded-full bg-secondary text-primary">
-          <Icon className="size-4" />
-        </span>
-      </div>
-      <div className="number-cell mt-3 text-3xl font-light text-[#1c1e54]">
-        {value}
-      </div>
-      <p className="mt-2 text-xs leading-5 text-muted-foreground">
-        {description}
-      </p>
-    </div>
-  );
-}
-
-function RegisteredAgentCard({
-  agent,
-  walletStat,
-}: {
-  agent: Agent;
-  walletStat?: GatewayWalletAgentStatPayload;
-}) {
-  const [isExpanded, setIsExpanded] = useState(false);
-  const navigate = useNavigate();
-  const editPath = `/agents/${agent.id}/edit`;
-
-  return (
-    <Card
-      aria-label={`Edit ${agent.name}`}
-      className="interactive-card clickable-card self-start cursor-pointer transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8f82e8]/35 focus-visible:ring-offset-2"
-      onClick={(event) => {
-        const target = event.target;
-        if (
-          target instanceof Element &&
-          target.closest("button, a, input, textarea, select, [role='button']")
-        ) {
-          return;
-        }
-        navigate(editPath);
-      }}
-      onKeyDown={(event) => {
-        if (
-          event.target === event.currentTarget &&
-          (event.key === "Enter" || event.key === " ")
-        ) {
-          event.preventDefault();
-          navigate(editPath);
-        }
-      }}
-      role="link"
-      tabIndex={0}
-    >
-      <CardHeader className="pb-2.5">
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex min-w-0 items-center gap-3">
-            <Avatar className="size-11 shrink-0">
-              <AvatarFallback className="bg-gradient-to-br from-[#533afd] to-[#7c6cf6] text-white">
-                {agent.name
-                  .split(" ")
-                  .map((word) => word[0])
-                  .join("")}
-              </AvatarFallback>
-            </Avatar>
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2">
-                <CardTitle className="truncate text-base">{agent.name}</CardTitle>
-                <span className="number-cell inline-flex items-center gap-1 text-xs font-medium text-[#494556]">
-                  <Star className="size-3 fill-[#533afd] text-[#533afd]" />
-                  {agent.rating ? agent.rating.toFixed(1) : "New"}
-                </span>
-              </div>
-              <CardDescription className="truncate">by {agent.creator}</CardDescription>
-            </div>
-          </div>
-        </div>
-      </CardHeader>
-
-      <CardContent>
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <span className="rounded-full border border-[#d8d4e2] bg-[#f3f1f8] px-2 py-0.5 text-[10px] font-semibold uppercase text-[#494556]">
-            {agent.category}
-          </span>
-          <span>{formatRuns(agent.calls)} runs</span>
-        </div>
-
-        <p className="mt-3 truncate text-sm leading-5 text-[#273951]">
-          {agent.headline}
-        </p>
-
-        <div className="mt-3 border-t border-border pt-3">
-          <div className="number-cell text-sm font-semibold text-[#0d253d]">
-            {formatAgentPriceShort(agent.pricePer1MTokensSui ?? agent.pricePerCallUsd)}
-            <span className="text-[11px] font-normal text-muted-foreground">
-              {" "}
-              / 1M tokens
-            </span>
-          </div>
-        </div>
-        <AgentMoneySummary
-          className="mt-3"
-          mode="creator"
-          stat={walletStat}
-        />
-
-        <div className="mt-3 grid grid-cols-[1fr_auto] gap-2">
-          <Button
-            className="w-full"
-            onClick={(event) => {
-              event.stopPropagation();
-              navigate(editPath);
-            }}
-            size="sm"
-            type="button"
-          >
-            <Braces /> Edit Agent
-          </Button>
-          <Button
-            aria-expanded={isExpanded}
-            className="px-3"
-            onClick={(event) => {
-              event.stopPropagation();
-              setIsExpanded((value) => !value);
-            }}
-            size="sm"
-            type="button"
-            variant="ghost"
-          >
-            <ChevronDown className={`transition ${isExpanded ? "rotate-180" : ""}`} />
-            Details
-          </Button>
-        </div>
-
-        {isExpanded ? (
-          <div
-            className="mt-3 rounded-xl border border-[#d8d4e2] bg-[#f8f7fb] p-4"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="text-sm font-semibold text-[#171452]">{agent.name}</div>
-            <p className="mt-2 text-sm leading-5 text-[#273951]">{agent.publicSummary}</p>
-            <dl className="mt-4 grid gap-2 border-t border-[#d8d4e2] pt-4 text-xs">
-              <div className="flex items-center justify-between gap-3">
-                <dt className="text-muted-foreground">Completed runs</dt>
-                <dd className="number-cell font-medium text-[#171452]">
-                  {formatRuns(agent.calls)}
-                </dd>
-              </div>
-              <div className="flex items-center justify-between gap-3">
-                <dt className="text-muted-foreground">Average time</dt>
-                <dd className="number-cell font-medium text-[#171452]">
-                  {formatDuration(agent.latencyMs)}
-                </dd>
-              </div>
-              <div className="flex items-center justify-between gap-3">
-                <dt className="text-muted-foreground">Price</dt>
-                <dd className="number-cell font-medium text-[#171452]">
-                  {formatAgentPrice(agent.pricePer1MTokensSui ?? agent.pricePerCallUsd)}
-                </dd>
-              </div>
-            </dl>
-          </div>
-        ) : null}
-      </CardContent>
-    </Card>
-  );
-}
-
-function MyAgentAccessCard({
-  agent,
-  hirerId,
-  record,
-  walletStat,
-}: {
-  agent: Agent;
-  hirerId: string;
-  record: AgentAccessRecord;
-  walletStat?: GatewayWalletAgentStatPayload;
-}) {
-  const callSnippet = `hireme_call_agent_stream({\n  "agent_id": "${agent.id}",\n  "task": "<your task>",\n  "hirer_id": "${hirerId}",\n  "hire_receipt_object_id": "${record.receiptObjectId}",\n  "wait_for_memory": false\n})`;
-
-  return (
-    <Card>
-      <CardHeader>
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <Avatar className="size-12">
-              <AvatarFallback
-                className={`bg-gradient-to-br ${agent.accent} text-white`}
-              >
-                {agent.name
-                  .split(" ")
-                  .map((word) => word[0])
-                  .join("")}
-              </AvatarFallback>
-            </Avatar>
-            <div>
-              <CardTitle className="text-xl">{agent.name}</CardTitle>
-              <CardDescription>{agent.handle}</CardDescription>
-            </div>
-          </div>
-          <div className="rounded-full border border-border bg-secondary px-3 py-1 text-xs font-medium text-[#1c1e54]">
-            {record.accessType === "hired" ? "Hired" : "Trial"}
-          </div>
-        </div>
-      </CardHeader>
-
-      <CardContent>
-        <p className="text-sm leading-6 text-[#273951]">{agent.headline}</p>
-
-        <div className="mt-5 grid gap-3 sm:grid-cols-3">
-          <Metric
-            icon={CircleDollarSign}
-            label="Token fee"
-            value={formatAgentPriceShort(record.pricePerCallUsd)}
-          />
-          <Metric
-            icon={Clock3}
-            label="Access"
-            value={
-              record.accessType === "trial"
-                ? `${record.trialCallsRemaining ?? 0} left`
-                : "Active"
-            }
-          />
-          <Metric
-            icon={ServerCog}
-            label="Expires"
-            value={formatAccessDate(record.expiresAt)}
-          />
-        </div>
-        <AgentMoneySummary
-          className="mt-3"
-          mode="hirer"
-          stat={walletStat}
-        />
-
-        <div className="mt-5 rounded-xl border border-border bg-secondary p-4">
-          <div className="mb-2 flex items-center gap-2 text-sm font-medium text-[#1c1e54]">
-            <Terminal className="size-4 text-primary" />
-            Natural language
-          </div>
-          <div className="rounded-lg bg-white px-3 py-3 text-xs leading-5 text-[#1c1e54]">
-            HireMe MCP에서 {agent.id} agent를 호출해줘. hirer_id는{" "}
-            {hirerId}로 써.
-          </div>
-          {record.source === "local" ? (
-            <div className="mb-3 mt-3 rounded-lg border border-[#ea2261]/20 bg-[#fff8fb] px-3 py-2 text-xs leading-5 text-[#9f1239]">
-              Local UI-only access. Start the gateway and press Try! or Hire!
-              again so Codex calls can be authorized.
-              {record.gatewayError ? (
-                <div className="mt-2 font-mono text-[11px] leading-4">
-                  {record.gatewayError}
-                </div>
-              ) : null}
-            </div>
-          ) : null}
-          <details className="mt-4 rounded-lg border border-border bg-white">
-            <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-sm font-medium text-[#1c1e54] [&::-webkit-details-marker]:hidden">
-              <Braces className="size-4 text-primary" />
-              Code
-            </summary>
-            <code className="block whitespace-pre-wrap break-all border-t border-border px-3 py-3 text-xs leading-5 text-[#1c1e54]">
-              {callSnippet}
-            </code>
-          </details>
-        </div>
-
-        <div className="mt-4 grid gap-3 text-xs text-muted-foreground sm:grid-cols-2">
-          <div className="rounded-lg border border-border bg-white px-3 py-2">
-            Receipt:{" "}
-            <span className="font-mono text-[#273951]">
-              {record.receiptObjectId}
-            </span>
-          </div>
-          <div className="rounded-lg border border-border bg-white px-3 py-2">
-            Source:{" "}
-            <span className="font-medium text-[#273951]">
-              {record.source === "gateway" ? "Gateway" : "Local demo"}
-            </span>
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-function TryAgentChatPanel({
-  access,
-  agent,
-  onAccessUpdated,
-  onClose,
-  user,
-}: {
-  access: AgentAccessRecord;
-  agent: Agent;
-  onAccessUpdated: (record: AgentAccessRecord) => void;
-  onClose: () => void;
-  user: AuthUser;
-}) {
-  const suiClient = useSuiClient();
-  const signAndExecuteTransaction = useSignAndExecuteTransaction({
-    execute: ({ bytes, signature }) =>
-      suiClient.executeTransactionBlock({
-        transactionBlock: bytes,
-        signature,
-        options: {
-          showEffects: true,
-          showObjectChanges: true,
-        },
-      }),
-  });
-  const [sessionId, setSessionId] = useState(() =>
-    readTryChatSessionId(access, agent, user),
-  );
-  const transcriptKey = tryChatTranscriptKey(access, agent, user, sessionId);
-  const restoredTranscriptRef = useRef<TryChatTranscriptRecord | null | undefined>(
-    undefined,
-  );
-  if (restoredTranscriptRef.current === undefined) {
-    restoredTranscriptRef.current = readTryChatTranscript(transcriptKey);
-  }
-  const restoredTranscript = restoredTranscriptRef.current;
-  const [input, setInput] = useState("");
-  const [isCommandCopied, setIsCommandCopied] = useState(false);
-  const [isSending, setIsSending] = useState(false);
-  const [confirmPendingSend, setConfirmPendingSend] = useState(false);
-  const [memWalStatusNow, setMemWalStatusNow] = useState(() => Date.now());
-  const [sendNotice, setSendNotice] = useState<string | null>(null);
-  const [conversationContext, setConversationContext] =
-    useState<TryConversationContext | null>(
-      () => restoredTranscript?.conversationContext || null,
-    );
-  const [messages, setMessages] = useState<TryChatMessage[]>(
-    () => restoredTranscript?.messages || initialTryChatMessages(agent),
-  );
-  const inputRef = useRef<HTMLTextAreaElement | null>(null);
-  const isMountedRef = useRef(true);
-  const activeMemoryPollsRef = useRef(new Set<string>());
-  const memoryPollGenerationRef = useRef(0);
-  const persistingImageKeysRef = useRef(new Set<string>());
-  const sessionVersionRef = useRef(0);
-  const transcriptRef = useRef<HTMLDivElement | null>(null);
-  const transcriptShouldAutoScrollRef = useRef(true);
-  const transcriptMessageCountRef = useRef(messages.length);
-  const fallbackConversationId = tryConversationId(
-    access,
-    agent,
-    user,
-    sessionId,
-  );
-  const callSnippet = buildTryCodexSnippet({
-    access,
-    agent,
-    conversation: conversationContext,
-    fallbackConversationId,
-    user,
-  });
-
-  useEffect(() => {
-    inputRef.current?.focus();
-  }, []);
-
-  useEffect(() => {
-    const timer = window.setInterval(() => {
-      setMemWalStatusNow(Date.now());
-    }, 15_000);
-    return () => window.clearInterval(timer);
-  }, []);
-
-  useEffect(() => {
-    setMessages((current) => {
-      const latestAssistantId = latestAssistantMessageId(current);
-      let changed = false;
-      const nextMessages = current.map((message) => {
-        const nextMessage = recoverStoredTryChatMessage({
-          conversationContext,
-          isLatestAssistant: message.id === latestAssistantId,
-          message,
-          transcriptUpdatedAt: message.createdAt,
-        });
-        if (nextMessage !== message) changed = true;
-        return nextMessage;
-      });
-      return changed ? nextMessages : current;
-    });
-  }, [conversationContext]);
-
-  useEffect(() => {
-    isMountedRef.current = true;
-    return () => {
-      isMountedRef.current = false;
-    };
-  }, []);
-
-  function updateTranscriptAutoScrollState() {
-    const transcript = transcriptRef.current;
-    if (!transcript) return;
-    const distanceFromBottom =
-      transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight;
-    transcriptShouldAutoScrollRef.current = distanceFromBottom < 80;
-  }
-
-  useEffect(() => {
-    const messageCountChanged =
-      messages.length !== transcriptMessageCountRef.current;
-    transcriptMessageCountRef.current = messages.length;
-    if (!messageCountChanged && !transcriptShouldAutoScrollRef.current) return;
-
-    const transcript = transcriptRef.current;
-    if (!transcript) return;
-    transcript.scrollTo({
-      top: transcript.scrollHeight,
-      behavior: prefersReducedMotion() ? "auto" : "smooth",
-    });
-    window.requestAnimationFrame(updateTranscriptAutoScrollState);
-  }, [messages]);
-
-  useEffect(() => {
-    writeTryChatTranscript(transcriptKey, {
-      conversationContext,
-      messages,
-      updatedAt: new Date().toISOString(),
-    });
-  }, [conversationContext, messages, transcriptKey]);
-
-  useEffect(() => {
-    let cancelled = false;
-    const targets = messages.flatMap((message) =>
-      (message.attachments || [])
-        .filter(
-          (attachment) =>
-            isTryChatDataImageUrl(attachment.url) &&
-            !attachment.localImageKey,
-        )
-        .map((attachment) => ({ attachment, messageId: message.id })),
-    );
-    if (!targets.length) return;
-
-    void Promise.all(
-      targets.map(async ({ attachment, messageId }) => {
-        const localImageKey = tryChatImageStorageKey(messageId, attachment.id);
-        if (persistingImageKeysRef.current.has(localImageKey)) return null;
-        persistingImageKeysRef.current.add(localImageKey);
-        const mimeType =
-          attachment.mimeType || tryChatDataImageMimeType(attachment.url);
-        try {
-          const stored = await writeTryChatImageRecord({
-            key: localImageKey,
-            label: attachment.label,
-            mimeType,
-            updatedAt: new Date().toISOString(),
-            url: attachment.url,
-          });
-          if (!stored) return null;
-          return {
-            attachmentId: attachment.id,
-            localImageKey,
-            messageId,
-            mimeType,
-          };
-        } finally {
-          persistingImageKeysRef.current.delete(localImageKey);
-        }
-      }),
-    ).then((updates) => {
-      if (cancelled) return;
-      const applied = updates.filter(
-        (
-          update,
-        ): update is {
-          attachmentId: string;
-          localImageKey: string;
-          messageId: string;
-          mimeType: string | null;
-        } => Boolean(update),
-      );
-      if (!applied.length) return;
-      setMessages((current) =>
-        current.map((message) => {
-          const messageUpdates = applied.filter(
-            (update) => update.messageId === message.id,
-          );
-          if (!messageUpdates.length || !message.attachments?.length) {
-            return message;
-          }
-          let changed = false;
-          const attachments = message.attachments.map((attachment) => {
-            const update = messageUpdates.find(
-              (candidate) => candidate.attachmentId === attachment.id,
-            );
-            if (!update || attachment.localImageKey) return attachment;
-            changed = true;
-            return {
-              ...attachment,
-              localImageKey: update.localImageKey,
-              mimeType: attachment.mimeType || update.mimeType,
-            };
-          });
-          return changed ? { ...message, attachments } : message;
-        }),
-      );
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [messages]);
-
-  useEffect(() => {
-    let cancelled = false;
-    const targets = messages.flatMap((message) =>
-      (message.attachments || [])
-        .filter((attachment) => attachment.localImageKey && !attachment.url)
-        .map((attachment) => ({
-          attachmentId: attachment.id,
-          localImageKey: attachment.localImageKey || "",
-          messageId: message.id,
-        })),
-    );
-    if (!targets.length) return;
-
-    void Promise.all(
-      targets.map(async (target) => {
-        const record = await readTryChatImageRecord(target.localImageKey);
-        if (!record?.url) return null;
-        return { ...target, record };
-      }),
-    ).then((updates) => {
-      if (cancelled) return;
-      const applied = updates.filter(
-        (
-          update,
-        ): update is {
-          attachmentId: string;
-          localImageKey: string;
-          messageId: string;
-          record: TryChatImageRecord;
-        } => Boolean(update),
-      );
-      if (!applied.length) return;
-      setMessages((current) =>
-        current.map((message) => {
-          const messageUpdates = applied.filter(
-            (update) => update.messageId === message.id,
-          );
-          if (!messageUpdates.length || !message.attachments?.length) {
-            return message;
-          }
-          let changed = false;
-          const attachments = message.attachments.map((attachment) => {
-            const update = messageUpdates.find(
-              (candidate) =>
-                candidate.attachmentId === attachment.id &&
-                candidate.localImageKey === attachment.localImageKey,
-            );
-            if (!update) return attachment;
-            changed = true;
-            return {
-              ...attachment,
-              label: attachment.label || update.record.label,
-              mimeType: attachment.mimeType || update.record.mimeType,
-              url: update.record.url,
-            };
-          });
-          return changed ? { ...message, attachments } : message;
-        }),
-      );
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [messages]);
-
-  useEffect(() => {
-    if (!conversationContext) return;
-    if (tryMemWalDisplayStatus(conversationContext) !== "pending") {
-      setConfirmPendingSend(false);
-      setSendNotice(null);
-    }
-  }, [conversationContext]);
-
-  async function pollTryMemWalStatus({
-    conversationId,
-    memoryJobId,
-    messageId,
-  }: {
-    conversationId: string;
-    memoryJobId: string;
-    messageId: string;
-  }) {
-    if (activeMemoryPollsRef.current.has(memoryJobId)) return;
-    if (activeMemoryPollsRef.current.size > 0) {
-      debugTryChat("memory-poll/replace-active", {
-        activeMemoryJobIds: Array.from(activeMemoryPollsRef.current),
-        nextMemoryJobId: memoryJobId,
-      });
-      activeMemoryPollsRef.current.clear();
-      memoryPollGenerationRef.current += 1;
-    }
-    const pollGeneration = memoryPollGenerationRef.current;
-    activeMemoryPollsRef.current.add(memoryJobId);
-    debugTryChat("memory-poll/start", {
-      conversationId,
-      memoryJobId,
-      messageId,
-    });
-    const pollSessionVersion = sessionVersionRef.current;
-    const isPollCurrent = () =>
-      isMountedRef.current &&
-      pollGeneration === memoryPollGenerationRef.current &&
-      pollSessionVersion === sessionVersionRef.current &&
-      activeMemoryPollsRef.current.has(memoryJobId);
-    const markMemoryPollFailed = () => {
-      if (!isPollCurrent()) return;
-      setConversationContext((current) =>
-        current?.memoryJobId === memoryJobId
-          ? {
-              ...current,
-              conversationStored: false,
-              mcpConversationStatus: "failed",
-              memWalStatus: "failed",
-            }
-          : current,
-      );
-      setMessages((current) =>
-        current.map((message) =>
-          message.id === messageId
-            ? { ...message, memWalStatus: "failed" }
-            : message,
-        ),
-      );
-    };
-
-    try {
-      for (let attempt = 0; attempt < tryMemWalPollMaxAttempts; attempt += 1) {
-        const delayMs = tryMemWalPollDelayMs(attempt);
-        debugTryChat("memory-poll/wait", {
-          attempt: attempt + 1,
-          delayMs,
-          memoryJobId,
-        });
-        await wait(delayMs);
-        if (!isPollCurrent()) return;
-
-        try {
-          const result = await loadTryMemoryStatus(memoryJobId);
-          if (!isPollCurrent()) return;
-          const nextConversationContext = buildTryConversationContext({
-            agentId: agent.id,
-            call: result,
-            conversationId,
-          });
-          const nextStatus = tryMemWalDisplayStatus(nextConversationContext);
-          debugTryChat("memory-poll/result", {
-            attempt: attempt + 1,
-            conversationId: nextConversationContext.conversationId,
-            memoryJobId,
-            status: nextStatus,
-            traceId: result.traceId,
-            userMemWalStatus: nextConversationContext.userMemWalStatus,
-          });
-          setConversationContext((current) =>
-            !current ||
-            current.memoryJobId === memoryJobId ||
-            current.conversationId === conversationId
-              ? nextConversationContext
-              : current,
-          );
-          if (nextStatus) {
-            setMessages((current) =>
-              current.map((message) => {
-                if (message.id === messageId) {
-                  return {
-                    ...message,
-                    callId: result.callId || nextConversationContext.callId || message.callId || null,
-                    conversationId: nextConversationContext.conversationId,
-                    memoryJobId: nextConversationContext.memoryJobId,
-                    memWalBlobId: nextConversationContext.memWalBlobId,
-                    memWalStatus: nextStatus,
-                    traceId:
-                      result.traceId ||
-                      nextConversationContext.traceId ||
-                      message.traceId ||
-                      null,
-                  };
-                }
-                return message;
-              }),
-            );
-          }
-          if (
-            nextStatus === "stored" ||
-            nextStatus === "failed" ||
-            result.status === "failed"
-          ) {
-            return;
-          }
-        } catch (error) {
-          warnTryChat("memory-poll/error", {
-            attempt: attempt + 1,
-            error: error instanceof Error ? error.message : String(error),
-            memoryJobId,
-          });
-          markMemoryPollFailed();
-          return;
-        }
-      }
-      warnTryChat("memory-poll/timeout", {
-        conversationId,
-        memoryJobId,
-      });
-      markMemoryPollFailed();
-    } finally {
-      if (memoryPollGenerationRef.current === pollGeneration) {
-        activeMemoryPollsRef.current.delete(memoryJobId);
-      }
-      debugTryChat("memory-poll/end", {
-        conversationId,
-        memoryJobId,
-      });
-    }
-  }
-
-  useEffect(() => {
-    const messageTargets = pendingAssistantMemoryTargets(
-      messages,
-      conversationContext?.conversationId,
-    );
-    for (const target of messageTargets) {
-      void pollTryMemWalStatus(target);
-    }
-
-    if (
-      !conversationContext?.memoryJobId ||
-      tryMemWalDisplayStatus(conversationContext) !== "pending"
-    ) {
-      return;
-    }
-
-    const hasMatchingMessageTarget = messageTargets.some(
-      (target) => target.memoryJobId === conversationContext.memoryJobId,
-    );
-    if (hasMatchingMessageTarget) return;
-
-    const messageId = latestAssistantMessageId(messages);
-    if (!messageId) return;
-
-    void pollTryMemWalStatus({
-      conversationId: conversationContext.conversationId,
-      memoryJobId: conversationContext.memoryJobId,
-      messageId,
-    });
-  }, [
-    conversationContext?.conversationId,
-    conversationContext?.conversationStored,
-    conversationContext?.memoryJobId,
-    conversationContext?.memWalStatus,
-    conversationContext?.mcpConversationStatus,
-    conversationContext?.userMemWalStatus,
-    messages,
-  ]);
-
-  async function handleCopyCallSnippet() {
-    await copyTextToClipboard(callSnippet);
-    if (!isMountedRef.current) return;
-    setIsCommandCopied(true);
-    window.setTimeout(() => {
-      if (!isMountedRef.current) return;
-      setIsCommandCopied(false);
-    }, 1500);
-  }
-
-  function handleResetChat() {
-    if (isSending) return;
-    const nextSessionId = createTryChatSessionId();
-    deleteTryChatTranscript(transcriptKey);
-    writeTryChatSessionId(access, agent, user, nextSessionId);
-    activeMemoryPollsRef.current.clear();
-    memoryPollGenerationRef.current += 1;
-    sessionVersionRef.current += 1;
-    setSessionId(nextSessionId);
-    setConversationContext(null);
-    setMessages(initialTryChatMessages(agent));
-    setInput("");
-    setConfirmPendingSend(false);
-    setSendNotice(null);
-    window.requestAnimationFrame(() => {
-      inputRef.current?.focus();
-    });
-  }
-
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const task = input.trim();
-    if (!task || isSending) return;
-
-    const currentMemWalStatus = conversationContext
-      ? tryMemWalDisplayStatus(conversationContext)
-      : null;
-    debugTryChat("chat/send-requested", {
-      accessId: access.id,
-      accessSource: access.source,
-      accessType: access.accessType,
-      agentId: agent.id,
-      conversationId: conversationContext?.conversationId || fallbackConversationId,
-      currentMemWalStatus,
-      hasConversationContext: Boolean(conversationContext),
-      messageCount: messages.length,
-      taskLength: task.length,
-      trialCallsRemaining: access.trialCallsRemaining,
-    });
-    if (currentMemWalStatus === "pending" && !confirmPendingSend) {
-      debugTryChat("chat/pending-memory-confirmation", {
-        conversationId: conversationContext?.conversationId,
-        memoryJobId: conversationContext?.memoryJobId,
-      });
-      setConfirmPendingSend(true);
-      setSendNotice(
-        "The previous chat has not been saved to memWal yet. Send anyway?",
-      );
-      return;
-    }
-
-    setConfirmPendingSend(false);
-    setSendNotice(null);
-
-    const conversationId = conversationContext?.conversationId || fallbackConversationId;
-    const clientConversationContext = buildTryClientConversationContext({
-      agent,
-      conversationId,
-      messages,
-    });
-    debugTryChat("chat/send-start", {
-      agentId: agent.id,
-      clientContextMessages: clientConversationContext?.messages.length || 0,
-      conversationId,
-      pendingMemoryJobId: conversationContext?.memoryJobId || null,
-    });
-    const userMessage: TryChatMessage = {
-      id: `user-${Date.now().toString(36)}`,
-      role: "user",
-      text: task,
-      createdAt: new Date().toISOString(),
-    };
-    const pendingId = `assistant-${Date.now().toString(36)}`;
-    const pendingMessage: TryChatMessage = {
-      id: pendingId,
-      role: "assistant",
-      text: "Running protected Agent...",
-      createdAt: new Date().toISOString(),
-      pending: true,
-    };
-
-    setMessages((current) => [...current, userMessage, pendingMessage]);
-    setInput("");
-    setIsSending(true);
-
-    try {
-      const updatePendingMessage = (patch: Partial<TryChatMessage>) => {
-        setMessages((current) =>
-          current.map((message) =>
-            message.id === pendingId ? { ...message, ...patch } : message,
-          ),
-        );
-      };
-      const applyStreamCall = (
-        call: GatewayAgentCallResponse,
-        options: { showText?: boolean } = {},
-      ) => {
-        const nextConversationContext = buildTryConversationContext({
-          agentId: agent.id,
-          call,
-          conversationId,
-        });
-        const memWalStatus = tryMemWalDisplayStatus(nextConversationContext);
-        setConversationContext(nextConversationContext);
-        updatePendingMessage({
-          callId: call.callId || nextConversationContext.callId || null,
-          conversationId: nextConversationContext.conversationId,
-          memoryJobId: nextConversationContext.memoryJobId,
-          ...(options.showText
-            ? {
-                attachments: extractTryImageAttachments(call),
-                pending: false,
-                responseMode:
-                  call.responseMode || call.jsonOutput?.responseMode || null,
-                text: extractAgentCallText(call),
-              }
-            : {}),
-          memWalBlobId: nextConversationContext.memWalBlobId,
-          memWalStatus,
-          traceId: call.traceId || nextConversationContext.traceId || call.callId || null,
-        });
-        return { memWalStatus, nextConversationContext };
-      };
-
-      if (access.accessType === "hired") {
-        updatePendingMessage({ text: "Opening Sui escrow..." });
-      }
-      const result = await callTryAgent({
-        access,
-        agent,
-        clientConversationContext,
-        conversationId,
-        onEvent: (streamEvent) => {
-          if (streamEvent.event === "authorized") {
-            updatePendingMessage({ text: "Authorizing protected Agent..." });
-            return;
-          }
-          if (streamEvent.event === "artifact_loaded") {
-            updatePendingMessage({ text: "Loading protected Harness..." });
-            return;
-          }
-          if (
-            streamEvent.event === "output_fast" ||
-            streamEvent.event === "result"
-          ) {
-            applyStreamCall(streamEvent.data, { showText: true });
-            return;
-          }
-          if (streamEvent.event === "memwal_pending") {
-            applyStreamCall(
-              {
-                callId: streamEvent.data.callId,
-                conversationId: streamEvent.data.conversationId || conversationId,
-                memory: {
-                  conversationStored: streamEvent.data.conversationId ? false : null,
-                  jobId: streamEvent.data.memoryJobId ?? undefined,
-                  status: "pending",
-                  waitForMemory: false,
-                },
-                memoryJobId: streamEvent.data.memoryJobId || null,
-                traceId: streamEvent.data.traceId || streamEvent.data.callId,
-                userMemWal: {
-                  jobId: streamEvent.data.memoryJobId ?? undefined,
-                  status: "pending",
-                  stored: false,
-                },
-              },
-              { showText: false },
-            );
-            return;
-          }
-          if (streamEvent.event === "memwal_stored") {
-            applyStreamCall(
-              {
-                callId: streamEvent.data.callId,
-                conversationId:
-                  streamEvent.data.mcpConversation?.conversationId ||
-                  streamEvent.data.conversationId ||
-                  conversationId,
-                mcpConversation: streamEvent.data.mcpConversation,
-                memory: {
-                  conversationStored:
-                    streamEvent.data.mcpConversation?.stored ?? true,
-                  status: "stored",
-                  waitForMemory: false,
-                },
-                userMemWal: streamEvent.data.userMemWal,
-                traceId: streamEvent.data.traceId || streamEvent.data.callId,
-              },
-              { showText: false },
-            );
-          }
-        },
-        signAndExecuteTransaction: signAndExecuteTransaction.mutateAsync,
-        task,
-        user,
-      });
-      const nextConversationContext = buildTryConversationContext({
-        agentId: agent.id,
-        call: result,
-        conversationId,
-      });
-      const memWalStatus = tryMemWalDisplayStatus(nextConversationContext);
-      setConversationContext(nextConversationContext);
-      let nextAccess = markAccessRecordUsed(access);
-      if (typeof result.authorization?.trialCallsRemaining === "number") {
-        nextAccess = {
-          ...nextAccess,
-          trialCallsRemaining: result.authorization.trialCallsRemaining,
-        };
-      }
-      onAccessUpdated(nextAccess);
-      setMessages((current) =>
-        current.map((message) =>
-          message.id === pendingId
-            ? {
-                ...message,
-                attachments: extractTryImageAttachments(result),
-                callId: result.callId || nextConversationContext.callId || null,
-                conversationId: nextConversationContext.conversationId,
-                memoryJobId: nextConversationContext.memoryJobId,
-                memWalBlobId: nextConversationContext.memWalBlobId,
-                memWalStatus,
-                text: extractAgentCallText(result),
-                pending: false,
-                responseMode: result.responseMode || result.jsonOutput?.responseMode || null,
-                traceId:
-                  result.traceId ||
-                  nextConversationContext.traceId ||
-                  result.callId ||
-                  null,
-              }
-            : message,
-        ),
-      );
-      if (memWalStatus === "pending" && nextConversationContext.memoryJobId) {
-        void pollTryMemWalStatus({
-          conversationId: nextConversationContext.conversationId,
-          memoryJobId: nextConversationContext.memoryJobId,
-          messageId: pendingId,
-        });
-      }
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Protected Agent call failed.";
-      warnTryChat("chat/send-failed", {
-        agentId: agent.id,
-        conversationId,
-        error: message,
-      });
-      setMessages((current) =>
-        current.map((item) =>
-          item.id === pendingId
-            ? {
-                ...item,
-                text:
-                  access.source === "local"
-                    ? `This Try access is saved locally, but the protected gateway is not reachable yet. Start the gateway or use the Codex MCP setup, then try again.\n\n${message}`
-                    : message,
-                pending: false,
-                error: true,
-              }
-            : item,
-        ),
-      );
-    } finally {
-      setIsSending(false);
-    }
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 bg-[#0f172a]/28 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label={`Try ${agent.name}`}>
-      <div className="absolute inset-x-0 bottom-0 flex max-h-[92svh] flex-col overflow-hidden rounded-t-lg border border-[#dbeafe] bg-white shadow-[0_-18px_50px_rgba(15,52,96,0.18)] md:inset-y-4 md:right-4 md:left-auto md:w-[460px] md:max-w-[calc(100vw-2rem)] md:rounded-lg">
-        <div className="flex items-start justify-between gap-4 border-b border-border px-4 py-4">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.08em] text-primary">
-              <MessageCircle className="size-3.5" />
-              Try Agent
-            </div>
-            <h2 className="mt-1 truncate text-xl font-semibold leading-tight text-[#191f28]">
-              {agent.name}
-            </h2>
-            <p className="mt-1 text-xs leading-5 text-muted-foreground">
-              {access.accessType === "trial"
-                ? `${access.trialCallsRemaining ?? 0} trial calls left`
-                : "Hired access active"}
-              {" "}· {access.source === "gateway" ? "Gateway" : "Local preview"}
-            </p>
-          </div>
-          <button
-            aria-label="Close Try chat"
-            className="inline-flex size-9 shrink-0 items-center justify-center rounded-md border border-border bg-white text-[#4e5968] transition hover:bg-secondary"
-            onClick={onClose}
-            type="button"
-          >
-            <X className="size-4" />
-          </button>
-        </div>
-
-        <TryMemorySessionBar
-          access={access}
-          conversation={conversationContext}
-          conversationId={fallbackConversationId}
-          disabled={isSending}
-          onReset={handleResetChat}
-        />
-
-        <div className="flex min-h-0 flex-1 flex-col">
-          <div
-            className="min-h-0 flex-1 overflow-y-auto px-4 py-4"
-            onScroll={updateTranscriptAutoScrollState}
-            ref={transcriptRef}
-          >
-            <div className="grid gap-3">
-              {messages.map((message) => (
-                <div
-                  className={`min-w-0 max-w-[92%] overflow-hidden break-words rounded-lg border px-3 py-2.5 text-sm leading-6 [overflow-wrap:anywhere] ${
-                    message.role === "user"
-                      ? "ml-auto border-primary/20 bg-primary text-white"
-                      : message.error
-                        ? "border-[#ea2261]/25 bg-[#fff8fb] text-[#9f1239]"
-                        : message.pending
-                          ? "try-agent-pending-bubble border-[#b8d5f6] bg-[#f8fbff] text-[#273951]"
-                          : "border-border bg-[#f8fafc] text-[#273951]"
-                  }`}
-                  key={message.id}
-                >
-                  <TryChatMessageContent message={message} />
-                  {message.attachments?.length ? (
-                    <div className="mt-3 grid gap-2">
-                      {message.attachments.map((attachment) =>
-                        attachment.url ? (
-                          <a
-                            className="block overflow-hidden rounded-lg border border-border bg-white"
-                            download={
-                              isTryChatDataImageUrl(attachment.url)
-                                ? tryChatImageDownloadName(attachment)
-                                : undefined
-                            }
-                            href={attachment.url}
-                            key={attachment.id}
-                            rel="noreferrer"
-                            target="_blank"
-                          >
-                            <img
-                              alt={attachment.label}
-                              className="max-h-72 w-full object-contain"
-                              src={attachment.url}
-                            />
-                          </a>
-                        ) : (
-                          <div
-                            className="flex items-center gap-2 rounded-lg border border-dashed border-border bg-white px-3 py-3 text-xs text-muted-foreground"
-                            key={attachment.id}
-                          >
-                            <ImageIcon className="size-4" />
-                            Loading saved image...
-                          </div>
-                        ),
-                      )}
-                    </div>
-                  ) : null}
-                  <TryChatMessageMeta message={message} nowMs={memWalStatusNow} />
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="border-t border-border bg-white px-4 py-4">
-            <form className="grid gap-3" onSubmit={(event) => void handleSubmit(event)}>
-              <textarea
-                className="min-h-24 resize-none rounded-lg border border-input bg-white px-3 py-2 text-sm leading-6 text-foreground shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                onChange={(event) => {
-                  setInput(event.target.value);
-                  setConfirmPendingSend(false);
-                  setSendNotice(null);
-                }}
-                onKeyDown={(event) => {
-                  if (
-                    event.key === "Enter" &&
-                    !event.shiftKey &&
-                    !event.nativeEvent.isComposing
-                  ) {
-                    event.preventDefault();
-                    event.currentTarget.form?.requestSubmit();
-                  }
-                }}
-                placeholder="Ask this Agent a small test task..."
-                ref={inputRef}
-                value={input}
-              />
-              {sendNotice ? (
-                <div className="flex flex-col gap-2 rounded-md border border-[#f4c7d5] bg-[#fff8fb] px-3 py-2 text-xs leading-5 text-[#9f1239] sm:flex-row sm:items-center sm:justify-between">
-                  <span>{sendNotice}</span>
-                  {confirmPendingSend ? (
-                    <span className="flex shrink-0 items-center gap-2">
-                      <button
-                        className="rounded-md border border-[#f4c7d5] bg-white px-2.5 py-1 font-semibold text-[#9f1239] transition hover:bg-[#fff1f6]"
-                        onClick={() => {
-                          setConfirmPendingSend(false);
-                          setSendNotice(null);
-                        }}
-                        type="button"
-                      >
-                        Wait
-                      </button>
-                      <button
-                        className="rounded-md bg-[#9f1239] px-2.5 py-1 font-semibold text-white transition hover:bg-[#881337]"
-                        type="submit"
-                      >
-                        Send anyway
-                      </button>
-                    </span>
-                  ) : null}
-                </div>
-              ) : null}
-              <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <details className="min-w-0 flex-1">
-                  <summary className="cursor-pointer list-none text-xs font-semibold text-primary [&::-webkit-details-marker]:hidden">
-                    Continue this chat in Codex
-                  </summary>
-                  <div className="relative mt-2 rounded-md border border-border bg-secondary">
-                    <code className="block whitespace-pre-wrap break-all py-2 pl-2 pr-10 text-[11px] leading-5 text-[#1c1e54]">
-                      {callSnippet}
-                    </code>
-                    <button
-                      aria-label="Copy Continue this chat in Codex prompt"
-                      className="absolute right-2 top-2 inline-flex size-7 items-center justify-center rounded-md border border-border bg-white text-[#273951] shadow-sm transition hover:bg-[#f8fafc]"
-                      onClick={() => void handleCopyCallSnippet()}
-                      title={
-                        isCommandCopied
-                          ? "Copied"
-                          : "Copy Continue this chat in Codex prompt"
-                      }
-                      type="button"
-                    >
-                      {isCommandCopied ? (
-                        <CheckCircle2 className="size-3.5 text-[#168a58]" />
-                      ) : (
-                        <Copy className="size-3.5" />
-                      )}
-                    </button>
-                  </div>
-                </details>
-                <Button
-                  className="w-full sm:w-auto"
-                  disabled={!input.trim() || isSending}
-                  type="submit"
-                >
-                  <MessageCircle />
-                  {isSending ? "Running" : "Send"}
-                </Button>
-              </div>
-            </form>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function TryMemorySessionBar({
-  access,
-  conversation,
-  conversationId,
-  disabled,
-  onReset,
-}: {
-  access: AgentAccessRecord;
-  conversation: TryConversationContext | null;
-  conversationId: string;
-  disabled: boolean;
-  onReset: () => void;
-}) {
-  const status = conversation ? tryMemWalDisplayStatus(conversation) : null;
-  const activeConversationId = conversation?.conversationId || conversationId;
-  const explorerUrl =
-    status === "stored" ? walrusExplorerBlobUrl(conversation?.memWalBlobId) : null;
-  const isLocalOnly = access.source === "local" && !conversation;
-  const label =
-    status === "stored"
-      ? "Memory saved"
-      : status === "pending"
-        ? "Saving memory"
-        : status === "failed"
-          ? "Memory failed"
-          : isLocalOnly
-            ? "Local only"
-            : "Memory ready";
-  const detail =
-    status === "stored"
-      ? "MemWal is ready for this session."
-      : status === "pending"
-        ? "Output returned. MemWal is catching up."
-        : status === "failed"
-          ? "This chat can continue locally, but memory was not saved."
-          : isLocalOnly
-            ? "Gateway memory is unavailable in local preview."
-            : "Send a message to start a remembered session.";
-  const toneClass =
-    status === "stored"
-      ? "border-[#bbf7d0] bg-[#f0fdf4] text-[#15803d]"
-      : status === "pending"
-        ? "border-[#bfdbfe] bg-[#eff6ff] text-[#1d4ed8]"
-        : status === "failed"
-          ? "border-[#fed7aa] bg-[#fff7ed] text-[#c2410c]"
-          : "border-[#dbeafe] bg-[#f8fbff] text-[#1d4ed8]";
-  const Icon =
-    status === "stored"
-      ? CheckCircle2
-      : status === "pending"
-        ? LoaderCircle
-        : status === "failed"
-          ? AlertTriangle
-          : ShieldCheck;
-
-  return (
-    <div className="border-b border-border bg-[#f8fbff] px-4 py-3">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex min-w-0 items-start gap-2.5">
-          <span
-            className={`mt-0.5 inline-flex size-8 shrink-0 items-center justify-center rounded-md border ${toneClass}`}
-          >
-            <Icon
-              className={`size-4 ${status === "pending" ? "animate-spin" : ""}`}
-            />
-          </span>
-          <div className="min-w-0">
-            <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs font-semibold text-[#1c1e54]">
-              <span>{label}</span>
-              <span
-                className="max-w-full truncate font-mono text-[11px] font-medium text-muted-foreground"
-                title={activeConversationId}
-              >
-                {shortAddress(activeConversationId)}
-              </span>
-              {explorerUrl ? (
-                <a
-                  className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#168a58] transition hover:text-[#0f6f47]"
-                  href={explorerUrl}
-                  rel="noreferrer"
-                  target="_blank"
-                >
-                  Walrus
-                  <ExternalLink className="size-3" />
-                </a>
-              ) : null}
-            </div>
-            <p className="mt-0.5 text-xs leading-5 text-muted-foreground">
-              {detail}
-            </p>
-          </div>
-        </div>
-        <button
-          className="inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-md border border-border bg-white px-2.5 text-xs font-semibold text-[#273951] transition hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-50"
-          disabled={disabled}
-          onClick={onReset}
-          title={
-            disabled
-              ? "Wait until the current run finishes before resetting."
-              : "Reset this Try chat"
-          }
-          type="button"
-        >
-          <RotateCcw className="size-3.5" />
-          Reset
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function TryMemWalMessageStatus({
-  message,
-  nowMs,
-}: {
-  message: TryChatMessage;
-  nowMs: number;
-}) {
-  const status = message.memWalStatus;
-  if (!status) return null;
-  const debugSearch = tryDebugTraceSearch(message);
-  if (shouldShowTryMemWalDebugLink(message, nowMs)) {
-    const title =
-      status === "failed"
-        ? "memWal save failed. Open debug trace."
-        : "memWal has been pending for more than 2 minutes. Open debug trace.";
-    const content = (
-      <>
-        <X className="size-3.5" />
-        memWal
-      </>
-    );
-    if (debugSearch) {
-      return (
-        <Link
-          className="inline-flex items-center gap-1 rounded-md border border-[#fecaca] bg-[#fff5f5] px-2 py-1 text-[#b91c1c] transition hover:bg-[#fee2e2]"
-          title={title}
-          to={`/debug/call${debugSearch}`}
-        >
-          {content}
-        </Link>
-      );
-    }
-    return (
-      <span
-        className="inline-flex items-center gap-1 rounded-md border border-[#fecaca] bg-[#fff5f5] px-2 py-1 text-[#b91c1c]"
-        title={title}
-      >
-        {content}
-      </span>
-    );
-  }
-
-  if (status === "stored") {
-    const blobId = message.memWalBlobId;
-    const explorerUrl = walrusExplorerBlobUrl(blobId);
-    if (explorerUrl) {
-      return (
-        <a
-          className="inline-flex items-center gap-1 text-[#168a58] transition hover:text-[#0f6f47]"
-          href={explorerUrl}
-          rel="noreferrer"
-          target="_blank"
-          title={`Open Walrus blob ${blobId}`}
-        >
-          <CheckCircle2 className="size-3.5" />
-          memWal
-          <ExternalLink className="size-3" />
-        </a>
-      );
-    }
-
-    return (
-      <span className="inline-flex items-center gap-1 text-[#168a58]" title="memWal saved">
-        <CheckCircle2 className="size-3.5" />
-        memWal
-      </span>
-    );
-  }
-
-  return (
-    <span className="inline-flex items-center gap-1 text-[#6b7280]" title="memWal saving">
-      <LoaderCircle className="size-3.5 animate-spin" />
-      memWal
+    <span className="conversation-run-status" role="timer" aria-label={`작업 경과 시간 ${label}`}>
+      작업 중 · {label}
     </span>
   );
 }
 
-function ActivityRow({ item }: { item: MyActivityItem }) {
-  const toneClass =
-    item.tone === "registered"
-      ? "border-[#533afd]/25 bg-secondary text-[#1c1e54]"
-      : item.tone === "hired"
-        ? "border-[#00b7a8]/30 bg-[#f2fffd] text-[#086b61]"
-        : item.tone === "payment"
-          ? "border-[#00b7a8]/30 bg-[#f2fffd] text-[#086b61]"
-          : item.tone === "failed"
-            ? "border-[#ea2261]/25 bg-[#fff8fb] text-[#9f1239]"
-        : item.tone === "result"
-          ? "border-[#f59e0b]/30 bg-[#fffaf0] text-[#92400e]"
-          : "border-border bg-white text-[#273951]";
-
-  return (
-    <div className="flex flex-col gap-3 border-b border-border px-4 py-4 last:border-b-0 sm:flex-row sm:items-center sm:justify-between">
-      <div className="min-w-0">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className={`rounded-full border px-2.5 py-1 text-xs font-medium ${toneClass}`}>
-            {item.label}
-          </span>
-          <h3 className="truncate text-sm font-medium text-[#1c1e54]">
-            {item.title}
-          </h3>
-        </div>
-        <p className="mt-2 break-all text-xs leading-5 text-muted-foreground">
-          {item.description}
-        </p>
-      </div>
-      <div className="shrink-0 text-xs text-muted-foreground">
-        {formatAccessDate(item.timestamp)}
-      </div>
-    </div>
-  );
-}
-
-function TeamMarketCard({
-  agents,
-  team,
+function ChatView({
+  conversation,
+  agent,
+  run,
+  queuedCount,
+  managementActive,
+  managementLocked,
+  onSend,
+  onRetry,
+  onNotify,
+  onCancel,
+  onUnlockManagement,
+  onOpenAgent,
+  onDelete,
 }: {
-  agents: Agent[];
-  team: AgentTeam;
+  conversation: Conversation;
+  agent: Agent;
+  run?: RunState;
+  queuedCount: number;
+  managementActive: boolean;
+  managementLocked: boolean;
+  onSend: (text: string, attachments: Attachment[]) => void;
+  onRetry: (text: string, attachments: Attachment[]) => void;
+  onNotify: (title: string, detail?: string) => void;
+  onCancel: () => void;
+  onUnlockManagement: () => void;
+  onOpenAgent: () => void;
+  onDelete: () => void;
 }) {
-  const categories = Array.from(new Set(agents.flatMap(agentCategories)));
-  const totalRuns = agents.reduce((total, agent) => total + agent.calls, 0);
-  const startingPrice = agents.length
-    ? Math.min(...agents.map((agent) => agent.pricePerCallUsd))
-    : 0;
-  const averageRating = agents.length
-    ? agents.reduce((total, agent) => total + agent.rating, 0) / agents.length
-    : 0;
-  const [isExpanded, setIsExpanded] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const endRef = useRef<HTMLDivElement>(null);
+  const authoring = managementActive;
+  const designIntake = Boolean(
+    !authoring &&
+    conversation.messages.length === 0 &&
+    agent.designSystem?.questions.length,
+  );
+  const designWorkspace = Boolean(
+    !authoring &&
+    conversation.messages.length > 0 &&
+    agent.designSystem,
+  );
+  const latestMessageText = conversation.messages.at(-1)?.text || "";
+
+  useEffect(() => {
+    if (designIntake || designWorkspace) return;
+    endRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [conversation.messages.length, designIntake, designWorkspace, latestMessageText, run?.steps.length]);
+
+  const submit = (textOverride?: string) => {
+    const message = textOverride ?? draft;
+    if (!message.trim() && attachments.length === 0) return;
+    onSend(message, attachments);
+    setDraft("");
+    setAttachments([]);
+  };
+
+  const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+      event.preventDefault();
+      submit();
+    }
+  };
+
+  const pickFiles = async () => {
+    if (window.hiremeDesktop) {
+      try {
+        const files = await window.hiremeDesktop.pickFiles();
+        if (files?.length) setAttachments((current) => [...current, ...files].slice(0, 10));
+      } catch (error) {
+        onNotify("파일을 첨부하지 못했어요", publicErrorMessage(error));
+      }
+      return;
+    }
+    setAttachments((current) => [...current, { name: "reference-image.png" }]);
+  };
+
+  if (managementLocked) {
+    return (
+      <section className="chat-view management-locked-view">
+        <header className="chat-header">
+          <button className="agent-heading-button locked" type="button" onClick={onOpenAgent} aria-label={`${agent.name} 정보 보기`} title="에이전트 정보">
+            <AgentAvatar agent={agent} size="medium" />
+            <span><strong>{agent.name}</strong><small><LockKeyhole size={11} /> 관리 모드 잠김</small></span>
+          </button>
+          <button className="icon-button chat-delete-button" type="button" aria-label="작업 삭제" title="작업 삭제" onClick={onDelete}>
+            <Trash2 size={17} />
+          </button>
+        </header>
+        <div className="management-locked-content">
+          <span><LockKeyhole size={24} /></span>
+          <h1>Private Harness가 잠겨 있어요</h1>
+          <p>관리 권한은 대화 문장이나 저장된 화면 상태로 복원되지 않습니다. 내 에이전트에서 관리 모드를 다시 열어 주세요.</p>
+          <button className="primary-button" type="button" onClick={onUnlockManagement}>
+            <ShieldCheck size={16} /> 검증된 관리 세션 열기
+          </button>
+        </div>
+      </section>
+    );
+  }
 
   return (
-    <Card className="self-start transition">
-      <CardHeader className="pb-3">
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex min-w-0 items-center gap-3">
-          <Avatar className="size-11 shrink-0">
-            <AvatarFallback className={`bg-gradient-to-br ${team.accent} text-white`}>
-              {team.name
-                .split(" ")
-                .map((word) => word[0])
-                .slice(0, 2)
-                .join("")}
-            </AvatarFallback>
-          </Avatar>
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <CardTitle className="truncate text-base">{team.name}</CardTitle>
-              <span className="number-cell inline-flex items-center gap-1 rounded-full border border-[#533afd]/20 bg-[#f0edff] px-2 py-0.5 text-[11px] font-medium text-[#2e2b8c]" title="Average rating across this team’s Agents.">
-                <Star className="size-3 fill-[#533afd] text-[#533afd]" />
-                {averageRating.toFixed(1)}
-              </span>
-            </div>
-            <CardDescription className="truncate">{team.handle}</CardDescription>
+    <section className={`chat-view ${designWorkspace ? "design-workspace-view" : ""}`}>
+      <header className="chat-header">
+        <button
+          className={`agent-heading-button ${authoring ? "authoring" : ""}`}
+          type="button"
+          onClick={onOpenAgent}
+          aria-label={`${agent.name} 정보 보기`}
+          title="에이전트 정보"
+        >
+          <AgentAvatar agent={agent} size="medium" />
+          <span>
+            <strong>{agent.name}</strong>
+            <small>{authoring
+              ? <><span className="authoring-status-dot" /> {agent.status === "초안" ? "설계 중" : "관리 모드"}</>
+              : designWorkspace
+                ? <><span className="workspace-status-dot" /> 디자인 작업실</>
+                : <PendingPrice agent={agent} compact />}</small>
+          </span>
+        </button>
+        <div className="chat-header-actions">
+          <button className="icon-button chat-delete-button" type="button" aria-label="작업 삭제" title="작업 삭제" onClick={onDelete}>
+            <Trash2 size={17} />
+          </button>
+        </div>
+      </header>
+
+      {designWorkspace && agent.designSystem ? (
+        <DesignWorkEnvironment
+          conversation={conversation}
+          agent={agent}
+          system={agent.designSystem}
+          run={run}
+          queuedCount={queuedCount}
+          draft={draft}
+          attachments={attachments}
+          onDraftChange={setDraft}
+          onKeyDown={onKeyDown}
+          onSubmit={submit}
+          onPickFiles={() => void pickFiles()}
+          onRemoveFile={(index) => setAttachments((current) => current.filter((_, itemIndex) => itemIndex !== index))}
+          onRetry={onRetry}
+          onCancel={onCancel}
+        />
+      ) : (
+        <div className="messages-scroll">
+          <div className={`messages-column ${designIntake ? "design-intake-column" : ""}`}>
+            {conversation.messages.length === 0 ? (
+              designIntake && agent.designSystem ? (
+                <DesignServiceIntake
+                  agent={agent}
+                  system={agent.designSystem}
+                  attachments={attachments}
+                  onPickFiles={() => void pickFiles()}
+                  onRemoveFile={(index) => setAttachments((current) => current.filter((_, itemIndex) => itemIndex !== index))}
+                  onSubmit={(summary) => {
+                    onSend(summary, attachments);
+                    setAttachments([]);
+                  }}
+                />
+              ) : (
+                <EmptyConversation agent={agent} authoring={authoring} onPrompt={setDraft} />
+              )
+            ) : (
+              conversation.messages.map((message) => (
+                <MessageBubble key={message.id} message={message} agent={agent} onRetry={onRetry} />
+              ))
+            )}
+            {run && <RunProgress key={run.runId} run={run} agent={agent} queuedCount={queuedCount} onCancel={onCancel} />}
+            <div ref={endRef} />
           </div>
-          </div>
         </div>
-      </CardHeader>
+      )}
 
-      <CardContent>
-        <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-          {categories.slice(0, 2).map((category) => (
-            <span className="rounded-full border border-[#533afd]/15 bg-secondary px-2 py-0.5 text-[10px] font-semibold uppercase text-[#273951]" key={category}>{category}</span>
-          ))}
-          <span>{formatRuns(totalRuns)} runs</span>
-        </div>
-
-        <p className="mt-3 line-clamp-2 min-h-10 text-sm leading-5 text-[#273951]">
-          {team.headline}
-        </p>
-
-        <div className="mt-4 border-t border-border pt-4">
-          <div>
-            <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">From</div>
-            <div className="number-cell mt-0.5 text-base font-semibold text-[#0d253d]">{formatAgentPriceShort(startingPrice)}<span className="text-xs font-normal text-muted-foreground"> / 1M tokens</span></div>
-          </div>
-        </div>
-
-        <div className="mt-4">
-          <Button aria-expanded={isExpanded} className="w-full" onClick={() => setIsExpanded((value) => !value)} type="button" variant="secondary">
-            <BriefcaseBusiness /> View {agents.length || team.agentCount} Agents
-            <ChevronDown className={`transition ${isExpanded ? "rotate-180" : ""}`} />
-          </Button>
-        </div>
-
-        {isExpanded ? (
-          <div className="mt-4 rounded-xl border border-[#d9d5ff] bg-[#f8f5ff] p-4">
-            <p className="text-xs leading-5 text-muted-foreground">{team.publicSummary}</p>
-            <div className="mt-4 grid grid-cols-2 gap-x-4 gap-y-4 border-t border-[#d9d5ff] pt-4 text-sm">
-              <Metric icon={BriefcaseBusiness} label="Agents" value={(agents.length || team.agentCount).toString()} />
-              <Metric icon={TrendingUp} label="Total runs" value={formatRuns(totalRuns)} />
-            </div>
-            <div className="mt-4 grid gap-2 border-t border-[#d9d5ff] pt-4">
-              {agents.map((agent) => (
-                <Button asChild className="w-full justify-between" key={agent.id} size="sm" type="button" variant="secondary">
-                  <Link to={`/agents/${agent.id}`}>
-                    <span className="truncate">{agent.name}</span>
-                    <span className="number-cell text-xs text-muted-foreground">{formatAgentPriceShort(agent.pricePerCallUsd)}</span>
-                  </Link>
-                </Button>
+      {!designIntake && !designWorkspace && <div className="composer-area">
+        <div className="composer-shell">
+          {attachments.length > 0 && (
+            <div className="attachment-strip">
+              {attachments.map((attachment, index) => (
+                <span className={`attachment-chip ${isImageFile(attachment) ? "image" : ""}`} key={`${attachment.name}-${index}`}>
+                  <FileThumbnail file={attachment} />
+                  <span className="attachment-chip-name">{attachment.name}</span>
+                  <button
+                    type="button"
+                    aria-label={`${attachment.name} 제거`}
+                    onClick={() => setAttachments((current) => current.filter((_, itemIndex) => itemIndex !== index))}
+                  >
+                    <X size={13} />
+                  </button>
+                </span>
               ))}
             </div>
-            <div className="mt-4 flex items-center justify-between gap-3 border-t border-[#d9d5ff] pt-4 text-xs">
-              <span className="text-muted-foreground">Creator</span>
-              <span className="font-medium text-[#273951]">{team.owner}</span>
+          )}
+          <textarea
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={onKeyDown}
+            placeholder={authoring ? `${agent.name}가 어떻게 일해야 하는지 알려주세요` : `${agent.name}에게 일을 맡겨보세요`}
+            rows={2}
+            aria-label="메시지 입력"
+          />
+          <div className="composer-controls">
+            <div className="composer-left">
+              <button className="icon-button" type="button" aria-label="파일 첨부" title="파일 첨부" onClick={pickFiles}>
+                <Paperclip size={18} />
+              </button>
+              <span className="cost-hint">
+                <Brain size={13} />
+                {authoring ? "작업 방식을 고치거나 현재 결과를 바로 확인" : "이 대화의 기억에 반영"}
+              </span>
             </div>
-          </div>
-        ) : null}
-      </CardContent>
-    </Card>
-  );
-}
-
-function AgentMarketCard({
-  access,
-  agent,
-  isBusy,
-  onHire,
-  onTry,
-}: {
-  access?: AgentAccessRecord;
-  agent: Agent;
-  isBusy?: boolean;
-  onHire: () => void;
-  onTry: () => void;
-}) {
-  const isHired = access?.accessType === "hired";
-  const hasGatewayAccess = access?.source === "gateway";
-  const [isExpanded, setIsExpanded] = useState(false);
-  const navigate = useNavigate();
-  const detailPath = `/agents/${agent.id}`;
-
-  return (
-    <Card
-      aria-label={`View ${agent.name} details`}
-      className="interactive-card clickable-card self-start cursor-pointer transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8f82e8]/35 focus-visible:ring-offset-2"
-      onClick={(event) => {
-        const target = event.target;
-        if (
-          target instanceof Element &&
-          target.closest("button, a, input, textarea, select, [role='button']")
-        ) {
-          return;
-        }
-        navigate(detailPath);
-      }}
-      onKeyDown={(event) => {
-        if (
-          event.target === event.currentTarget &&
-          (event.key === "Enter" || event.key === " ")
-        ) {
-          event.preventDefault();
-          navigate(detailPath);
-        }
-      }}
-      role="link"
-      tabIndex={0}
-    >
-      <CardHeader className="pb-2.5">
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex min-w-0 items-center gap-3">
-            <Avatar className="size-11 shrink-0">
-              <AvatarFallback className="bg-gradient-to-br from-[#533afd] to-[#7c6cf6] text-white">
-                {agent.name
-                  .split(" ")
-                  .map((word) => word[0])
-                  .join("")}
-              </AvatarFallback>
-            </Avatar>
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2">
-                <CardTitle className="truncate text-base">{agent.name}</CardTitle>
-                <span className="number-cell inline-flex items-center gap-1 text-xs font-medium text-[#494556]" title="Based on Client feedback and completed runs.">
-                  <Star className="size-3 fill-[#533afd] text-[#533afd]" />
-                  {agent.rating ? agent.rating.toFixed(1) : "New"}
-                </span>
-              </div>
-              <CardDescription className="truncate">by {agent.creator}</CardDescription>
-            </div>
+            <button
+              className="send-button"
+              type="button"
+              aria-label={run ? "대기열에 추가" : "보내기"}
+              title={run ? "대기열에 추가" : "보내기"}
+              disabled={!draft.trim() && attachments.length === 0}
+              onClick={() => submit()}
+            >
+              <Send size={17} />
+            </button>
           </div>
         </div>
-      </CardHeader>
-
-      <CardContent>
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <span className="rounded-full border border-[#d8d4e2] bg-[#f3f1f8] px-2 py-0.5 text-[10px] font-semibold uppercase text-[#494556]">{agent.category}</span>
-          <span>{formatRuns(agent.calls)} runs</span>
-        </div>
-
-        <p className="mt-3 truncate text-sm leading-5 text-[#273951]">
-          {agent.headline}
+        <p className="composer-note">
+          Enter로 보내기 · Shift + Enter로 줄바꿈{run ? " · 지금 보내면 대기열에 추가됩니다" : ""}
         </p>
-
-        <div className="mt-3 border-t border-border pt-3">
-          <div className="number-cell text-sm font-semibold text-[#0d253d]">{formatAgentPriceShort(agent.pricePer1MTokensSui ?? agent.pricePerCallUsd)}<span className="text-[11px] font-normal text-muted-foreground"> / 1M tokens</span></div>
-        </div>
-
-        <div className="mt-3 grid grid-cols-[1fr_1fr_auto] gap-2">
-          <Button
-            className="w-full"
-            disabled={isBusy}
-            onClick={(event) => {
-              event.stopPropagation();
-              onTry();
-            }}
-            size="sm"
-            type="button"
-            variant="secondary"
-          >
-            <MessageCircle /> Try
-          </Button>
-          <Button
-            className="w-full"
-            disabled={isBusy || (hasGatewayAccess && isHired)}
-            onClick={(event) => {
-              event.stopPropagation();
-              onHire();
-            }}
-            size="sm"
-            type="button"
-          >
-            <PackageOpen /> Hire
-          </Button>
-          <Button
-            aria-expanded={isExpanded}
-            className="px-3"
-            onClick={(event) => {
-              event.stopPropagation();
-              setIsExpanded((value) => !value);
-            }}
-            size="sm"
-            type="button"
-            variant="ghost"
-          >
-            <ChevronDown className={`transition ${isExpanded ? "rotate-180" : ""}`} />
-            Details
-          </Button>
-        </div>
-
-        {isExpanded ? (
-          <div
-            className="mt-3 rounded-xl border border-[#d8d4e2] bg-[#f8f7fb] p-4"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="text-sm font-semibold text-[#171452]">{agent.name}</div>
-            <p className="mt-2 text-sm leading-5 text-[#273951]">{agent.headline}</p>
-            <dl className="mt-4 grid gap-2 border-t border-[#d8d4e2] pt-4 text-xs">
-              <div className="flex items-center justify-between gap-3">
-                <dt className="text-muted-foreground">Rating / trust</dt>
-                <dd className="number-cell font-medium text-[#171452]">{agent.rating ? `${agent.rating.toFixed(1)} / 5` : "New"}</dd>
-              </div>
-              <div className="flex items-center justify-between gap-3">
-                <dt className="text-muted-foreground">Completed runs</dt>
-                <dd className="number-cell font-medium text-[#171452]">{formatRuns(agent.calls)}</dd>
-              </div>
-              <div className="flex items-center justify-between gap-3">
-                <dt className="text-muted-foreground">Price</dt>
-                <dd className="number-cell font-medium text-[#171452]">{formatAgentPrice(agent.pricePer1MTokensSui ?? agent.pricePerCallUsd)}</dd>
-              </div>
-            </dl>
-          </div>
-        ) : null}
-
-      </CardContent>
-    </Card>
+      </div>}
+    </section>
   );
 }
 
-function Metric({
-  icon: Icon,
-  label,
-  value,
+function DesignWorkEnvironment({
+  conversation,
+  agent,
+  system,
+  run,
+  queuedCount,
+  draft,
+  attachments,
+  onDraftChange,
+  onKeyDown,
+  onSubmit,
+  onPickFiles,
+  onRemoveFile,
+  onRetry,
+  onCancel,
 }: {
-  icon: typeof CircleDollarSign;
-  label: string;
-  value: string;
+  conversation: Conversation;
+  agent: Agent;
+  system: DesignDecisionSystem;
+  run?: RunState;
+  queuedCount: number;
+  draft: string;
+  attachments: Attachment[];
+  onDraftChange: (value: string) => void;
+  onKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
+  onSubmit: (textOverride?: string) => void;
+  onPickFiles: () => void;
+  onRemoveFile: (index: number) => void;
+  onRetry: (text: string, attachments: Attachment[]) => void;
+  onCancel: () => void;
 }) {
+  const completedResults = conversation.messages.filter((message) => message.role === "assistant" && !message.streaming);
+  const latestResult = completedResults.at(-1);
+  const [selectedResultId, setSelectedResultId] = useState(latestResult?.id || "");
+  const threadEndRef = useRef<HTMLDivElement>(null);
+  const firstRequest = conversation.messages.find((message) => message.role === "user");
+  const threadMessages = conversation.messages.filter((message) => message.id !== firstRequest?.id);
+  const selectedResult = completedResults.find((message) => message.id === selectedResultId) || latestResult;
+  const selectedArtifact =
+    selectedResult?.artifacts?.find(isImageFile) ||
+    selectedResult?.artifacts?.[0];
+  const priorityCount = system.priorityCount ?? system.priorities.length;
+  const qualityCount = system.qualityBarCount ?? system.qualityBar.length;
+  const [selectedRegion, setSelectedRegion] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (latestResult?.id) setSelectedResultId(latestResult.id);
+  }, [latestResult?.id]);
+
+  useEffect(() => {
+    threadEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [conversation.messages.length, run?.steps.length]);
+
   return (
-    <div>
-      <div className="mb-1 flex items-center gap-1 text-xs text-muted-foreground">
-        <Icon className="size-3.5" />
-        {label}
-      </div>
-      <div className="number-cell font-medium text-[#0d253d]">{value}</div>
+    <div className="design-work-environment">
+      <aside className="design-work-thread">
+        <header className="work-thread-header">
+          <div>
+            <span className="eyebrow">Feedback</span>
+            <h2>수정 요청</h2>
+          </div>
+          <span className={`work-thread-state ${run ? "working" : latestResult ? "ready" : "waiting"}`}>
+            {run ? <><LoaderCircle className="spin" size={12} /> 제작 중</> : latestResult ? <><Check size={12} /> 결과 도착</> : "대기"}
+          </span>
+        </header>
+
+        <div className="work-thread-scroll">
+          {firstRequest && (
+            <details className="work-brief-card">
+              <summary>
+                <span><ReceiptText size={14} /><strong>작업 주문서</strong></span>
+                <ChevronRight size={14} />
+              </summary>
+              <p>{firstRequest.text}</p>
+              {firstRequest.attachments?.length ? (
+                <div className="work-brief-files">
+                  {firstRequest.attachments.map((file, index) => (
+                    <span key={`${file.name}-${index}`}><FileThumbnail file={file} />{file.name}</span>
+                  ))}
+                </div>
+              ) : null}
+            </details>
+          )}
+
+          <div className="work-thread-guide">
+            <MessageCircleQuestion size={15} />
+            <span><strong>결과를 보면서 말해 주세요</strong><small>전체 방향은 여기에서, 특정 요소는 캔버스를 기준으로 요청하면 됩니다.</small></span>
+          </div>
+
+          <div className="work-thread-messages">
+            {threadMessages.map((message) => (
+              <MessageBubble key={message.id} message={message} agent={agent} onRetry={onRetry} />
+            ))}
+            {run && <RunProgress key={run.runId} run={run} agent={agent} queuedCount={queuedCount} onCancel={onCancel} />}
+            <div ref={threadEndRef} />
+          </div>
+        </div>
+
+        <div className="workspace-composer">
+          {selectedRegion && <div className="selected-region-chip"><PenLine size={13} /><span>선택 영역이 수정 요청에 포함됩니다</span><button type="button" aria-label="선택 영역 지우기" onClick={() => setSelectedRegion(null)}><X size={12} /></button></div>}
+          {attachments.length > 0 && (
+            <div className="attachment-strip">
+              {attachments.map((attachment, index) => (
+                <span className={`attachment-chip ${isImageFile(attachment) ? "image" : ""}`} key={`${attachment.name}-${index}`}>
+                  <FileThumbnail file={attachment} />
+                  <span className="attachment-chip-name">{attachment.name}</span>
+                  <button type="button" aria-label={`${attachment.name} 제거`} onClick={() => onRemoveFile(index)}>
+                    <X size={12} />
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+          <textarea
+            value={draft}
+            onChange={(event) => onDraftChange(event.target.value)}
+            onKeyDown={onKeyDown}
+            placeholder="예: 표정은 유지하고 배경 대비만 낮춰 주세요"
+            rows={3}
+            aria-label="디자인 수정 요청"
+          />
+          <div>
+            <button className="icon-button" type="button" aria-label="참고 파일 첨부" title="참고 파일 첨부" onClick={onPickFiles}>
+              <Paperclip size={17} />
+            </button>
+            <small>수정 요청도 같은 판단 기준으로 처리됩니다</small>
+            <button className="send-button" type="button" aria-label={run ? "수정 요청 대기열에 추가" : "수정 요청 보내기"} disabled={!draft.trim() && attachments.length === 0} onClick={() => onSubmit(selectedRegion ? `[선택 영역 수정: ${selectedRegion}]\n${draft}` : undefined)}>
+              <Send size={16} />
+            </button>
+          </div>
+        </div>
+      </aside>
+
+      <main className="design-canvas-panel">
+        <header className="design-canvas-toolbar">
+          <div>
+            <span className="eyebrow">Canvas</span>
+            <strong>{selectedArtifact?.name || (run ? "결과를 만드는 중" : "결과 미리보기")}</strong>
+          </div>
+          <div>
+            <span className="canvas-fit-label">화면 맞춤</span>
+            <button
+              className="secondary-button compact"
+              type="button"
+              disabled={!selectedArtifact?.path}
+              onClick={() => selectedArtifact && openWorkspaceFile(selectedArtifact)}
+            >
+              <ArrowUpRight size={13} /> 원본 열기
+            </button>
+          </div>
+        </header>
+
+        <div className="design-canvas-stage">
+          <DesignCanvasResult
+            result={selectedResult}
+            artifact={selectedArtifact}
+            agent={agent}
+            run={run}
+            onRegionChange={setSelectedRegion}
+          />
+          {run && selectedResult && (
+            <span className="canvas-working-pill"><LoaderCircle className="spin" size={12} /> 새 버전을 제작하고 있어요</span>
+          )}
+        </div>
+
+        <footer className="design-version-bar">
+          <span><Clock3 size={13} /> Versions</span>
+          <div>
+            {completedResults.length ? completedResults.map((result, index) => (
+              <button
+                className={result.id === selectedResult?.id ? "active" : ""}
+                type="button"
+                key={result.id}
+                onClick={() => setSelectedResultId(result.id)}
+              >
+                V{index + 1}
+              </button>
+            )) : <small>첫 결과가 만들어지면 버전이 여기에 저장됩니다.</small>}
+          </div>
+        </footer>
+      </main>
+
+      <aside className="design-standards-panel">
+        <header>
+          <span className="eyebrow">Expert System</span>
+          <h2>디자이너의 기준</h2>
+          <p>{system.purpose}</p>
+        </header>
+
+        <div className="workspace-stage-flow" aria-label="작업 진행 단계">
+          <span className="complete"><Check size={11} /> 요청</span>
+          <i />
+          <span className={run ? "active" : latestResult ? "complete" : ""}>{latestResult && !run ? <Check size={11} /> : "2"} 제작</span>
+          <i />
+          <span className={run ? "waiting" : latestResult ? "complete" : ""}>{latestResult && !run ? <Check size={11} /> : "3"} 기준 확인</span>
+        </div>
+
+        <section className="workspace-standard-list">
+          <div><MessageCircleQuestion size={15} /><span><strong>요청 맥락</strong><small>{system.questions.length}개 질문 답변 반영</small></span><CheckCircle2 size={15} /></div>
+          <div><Target size={15} /><span><strong>판단 우선순위</strong><small>{priorityCount}개 전문 기준 적용</small></span><ShieldCheck size={15} /></div>
+          <div><ListChecks size={15} /><span><strong>품질 기준</strong><small>{qualityCount}개 기준으로 결과 확인</small></span>{run ? <LoaderCircle className="spin" size={15} /> : <ShieldCheck size={15} />}</div>
+        </section>
+
+        <section className="protected-standard-note">
+          <LockKeyhole size={14} />
+          <p><strong>전문 기준은 보호됩니다</strong>세부 규칙은 공개하지 않고 모든 결과와 수정본에 일관되게 적용합니다.</p>
+        </section>
+
+        <section className="workspace-delivery-status">
+          <span>현재 상태</span>
+          <strong>{run ? "제작·기준 확인 중" : latestResult ? "결과 확인 가능" : "제작 대기"}</strong>
+          <small>{run ? "완료되면 캔버스와 버전에 자동 반영됩니다." : latestResult ? "캔버스를 확인하고 필요한 부분만 수정 요청하세요." : "주문서를 바탕으로 작업을 준비하고 있습니다."}</small>
+        </section>
+      </aside>
     </div>
   );
 }
 
-function toggleFilter<T>(filters: T[], value: T) {
-  return filters.includes(value)
-    ? filters.filter((item) => item !== value)
-    : [...filters, value];
-}
-
-function isPaidAgent(agent: Agent) {
-  return (
-    agent.pricePerCallUsd > 0 ||
-    agent.team.billing.basePriceUsd > 0 ||
-    agent.team.billing.overagePricePerCallUsd > 0
-  );
-}
-
-function totalAverageTokens(agent: Agent) {
-  return agent.avgInputTokens + agent.avgOutputTokens;
-}
-
-function agentCategories(agent: Agent) {
-  const categories = agent.categories?.length ? agent.categories : [agent.category];
-  return Array.from(new Set(categories));
-}
-
-function formatTokens(tokens: number) {
-  if (tokens >= 1000) {
-    return `${(tokens / 1000).toFixed(tokens >= 10_000 ? 0 : 1)}K`;
-  }
-  return tokens.toLocaleString();
-}
-
-function formatRuns(runs: number) {
-  if (runs >= 1_000_000) return `${(runs / 1_000_000).toFixed(1)}M`;
-  if (runs >= 1000) return `${(runs / 1000).toFixed(runs >= 10_000 ? 0 : 1)}K`;
-  return runs.toLocaleString();
-}
-
-function formatDuration(ms: number) {
-  if (!ms) return "N/A";
-  const hours = Math.floor(ms / 3_600_000);
-  const minutes = Math.floor((ms % 3_600_000) / 60_000);
-  if (hours > 0) {
-    return minutes > 0 ? `${hours} hr ${minutes} min` : `${hours} hr`;
-  }
-  if (minutes > 0) return `${minutes} min`;
-  if (ms >= 1000) return `${(ms / 1000).toFixed(1)}s`;
-  return `${ms}ms`;
-}
-
-function formatAgentPrice(price: number) {
-  const displayPrice =
-    price >= 1
-      ? price.toFixed(3).replace(/0+$/, "").replace(/\.$/, "")
-      : price.toFixed(6).replace(/0+$/, "").replace(/\.$/, "") || "0";
-  return `${displayPrice} SUI/1M tokens`;
-}
-
-function formatAgentPriceShort(price: number) {
-  const displayPrice =
-    price >= 1
-      ? price.toFixed(3).replace(/0+$/, "").replace(/\.$/, "")
-      : price.toFixed(6).replace(/0+$/, "").replace(/\.$/, "") || "0";
-  return `${displayPrice} SUI`;
-}
-
-function formatAgentUpdatedDate(value: string | undefined) {
-  if (!value) return "Not published";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "Not published";
-  return date.toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
-}
-
-function formatAgentVersion(agent: Agent) {
-  return `v${Math.max(1, Math.trunc(agent.currentVersionNumber || 1))}.0`;
-}
-
-function formatSuiBalance(value: string | number | null | undefined) {
-  const amount = readSuiNumber(value);
-  const displayPrice =
-    amount >= 1
-      ? amount.toFixed(3).replace(/0+$/, "").replace(/\.$/, "")
-      : amount.toFixed(6).replace(/0+$/, "").replace(/\.$/, "") || "0";
-  return `${displayPrice} SUI`;
-}
-
-function readSuiNumber(value: string | number | null | undefined) {
-  const amount = Number(value);
-  return Number.isFinite(amount) && amount > 0 ? amount : 0;
-}
-
-function formatFileSize(size: number) {
-  if (size >= 1024 * 1024) return `${(size / 1024 / 1024).toFixed(1)} MB`;
-  if (size >= 1024) return `${Math.round(size / 1024)} KB`;
-  return `${size} B`;
-}
-
-function normalizeCreatorInfoUrl(value: string | undefined) {
-  const trimmed = value?.trim();
-  if (!trimmed) return "";
-  const candidate = /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)
-    ? trimmed
-    : `https://${trimmed}`;
-  try {
-    const url = new URL(candidate);
-    if (url.protocol !== "http:" && url.protocol !== "https:") return "";
-    return url.href;
-  } catch {
-    return "";
-  }
-}
-
-function getResultArtifactExplorers(agent: Agent) {
-  const network = agent.sealedHarness.network;
-  const explorerNetwork = network === "walrus-mainnet" ? "mainnet" : "testnet";
-  const artifacts: Array<{ label: string; value: string; href: string }> = [];
-  const walrusBlobId = agent.sealedHarness.walrusBlobId?.trim();
-  if (walrusBlobId && isExplorerReadyWalrusBlobId(walrusBlobId)) {
-    artifacts.push({
-      label: "Walrus blob ID",
-      value: walrusBlobId,
-      href: `https://walruscan.com/${explorerNetwork}/blob/${encodeURIComponent(
-        walrusBlobId,
-      )}`,
-    });
-  }
-
-  const suiObjectId = agent.sealedHarness.suiObjectId?.trim();
-  if (suiObjectId && isSuiObjectId(suiObjectId)) {
-    artifacts.push({
-      label: "Sui object ID",
-      value: suiObjectId,
-      href: `https://suiexplorer.com/object/${encodeURIComponent(
-        suiObjectId,
-      )}?network=${explorerNetwork}`,
-    });
-  }
-
-  return artifacts;
-}
-
-function isExplorerReadyWalrusBlobId(value: string) {
-  return (
-    value.length > 8 &&
-    !value.startsWith("gateway-managed:") &&
-    !value.startsWith("local_walrus_") &&
-    !/\s/.test(value)
-  );
-}
-
-function isSuiObjectId(value: string) {
-  return /^0x[0-9a-f]{64}$/i.test(value);
-}
-
-function normalizeSuiAddressForCompare(value?: string | null) {
-  const text = String(value || "").trim().toLowerCase();
-  if (!text) return "";
-  const normalized = text.startsWith("0x") ? text : `0x${text}`;
-  return /^0x[0-9a-f]{64}$/.test(normalized) ? normalized : "";
-}
-
-function formatAccessDate(value: string | null) {
-  if (!value) return "No expiry";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "No expiry";
-  return date.toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
-}
-
-function shortAddress(value: string) {
-  if (value.length <= 14) return value;
-  return `${value.slice(0, 6)}...${value.slice(-4)}`;
-}
-
-function displayNameFor(user: AuthUser) {
-  return user.displayName?.trim() || "Set display name";
-}
-
-function slugifyAgentName(value: string) {
-  return value
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-}
-
-function typicalOutputMediaType(file: File): "image" | "video" {
-  const extension = file.name.split(".").pop()?.toLowerCase() || "";
-  if (
-    file.type === "image/jpeg" ||
-    file.type === "image/png" ||
-    ["jpg", "jpeg", "png"].includes(extension)
-  ) {
-    return "image";
-  }
-  if (
-    file.type.startsWith("video/") ||
-    ["mp4", "webm", "mov"].includes(extension)
-  ) {
-    return "video";
-  }
-  throw new Error("Result media must be a JPG, PNG, or video file.");
-}
-
-function safeUploadFileName(file: File) {
-  const fallbackExtension = file.type.startsWith("video/")
-    ? "mp4"
-    : file.type === "image/png"
-      ? "png"
-      : "jpg";
-  const extension = file.name.includes(".")
-    ? file.name.split(".").pop() || fallbackExtension
-    : fallbackExtension;
-  const stem = file.name
-    .replace(/\.[^.]+$/, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 48);
-  return `${stem || "typical-output"}.${extension.toLowerCase()}`;
-}
-
-async function uploadTypicalOutputMedia({
-  agentSlug,
-  file,
+function DesignCanvasResult({
+  result,
+  artifact,
+  agent,
+  run,
+  onRegionChange,
 }: {
-  agentSlug: string;
-  file: File;
+  result?: ChatMessage;
+  artifact?: Attachment;
+  agent: Agent;
+  run?: RunState;
+  onRegionChange: (region: string | null) => void;
 }) {
-  if (!supabase || !isSupabaseConfigured) {
-    throw new Error("Supabase Storage is not configured.");
+  const previewFile = artifact || { name: "result-preview" };
+  const { source, onError } = useFilePreview(previewFile);
+
+  if (artifact && isImageFile(artifact) && source) {
+    return (
+      <RegionEditCanvas source={source} artifact={artifact} onError={onError} onRegionChange={onRegionChange} />
+    );
   }
 
-  const mediaType = typicalOutputMediaType(file);
-  const objectPath = `${agentSlug}/${Date.now()}-${crypto.randomUUID()}-${safeUploadFileName(file)}`;
-  const { error } = await supabase.storage
-    .from(typicalOutputStorageBucket)
-    .upload(objectPath, file, {
-      cacheControl: "3600",
-      contentType: file.type || undefined,
-      upsert: true,
-    });
+  if (result) {
+    return (
+      <article className="design-canvas-text-result">
+        <span><AgentAvatar agent={agent} size="small" /> {agent.name} 결과</span>
+        <p>{result.text}</p>
+        {artifact && (
+          <button type="button" disabled={!artifact.path} onClick={() => openWorkspaceFile(artifact)}>
+            <FileText size={16} /><span><strong>{artifact.name}</strong><small>{artifact.size ? formatFileSize(artifact.size) : "결과 파일"}</small></span><ArrowUpRight size={14} />
+          </button>
+        )}
+      </article>
+    );
+  }
 
-  if (error) throw error;
-
-  const { data } = supabase.storage
-    .from(typicalOutputStorageBucket)
-    .getPublicUrl(objectPath);
-
-  return {
-    path: objectPath,
-    type: mediaType,
-    url: data.publicUrl,
-  };
+  return (
+    <div className="design-canvas-empty">
+      {run ? <LoaderCircle className="spin" size={25} /> : <LayoutGrid size={25} />}
+      <strong>{run ? "디자이너의 기준으로 제작하고 있어요" : "결과가 이 캔버스에 표시됩니다"}</strong>
+      <p>{run ? "요청을 해석한 뒤 결과를 만들고 품질 기준을 적용합니다." : "작업 주문서를 보내면 채팅이 아니라 실제 결과를 중심으로 작업할 수 있어요."}</p>
+    </div>
+  );
 }
 
+function RegionEditCanvas({ source, artifact, onError, onRegionChange }: { source: string; artifact: Attachment; onError: () => void; onRegionChange: (region: string | null) => void }) {
+  const [marking, setMarking] = useState(false);
+  const [strokes, setStrokes] = useState<Array<Array<{ x: number; y: number }>>>([]);
+  const canvasRef = useRef<HTMLDivElement>(null);
+  const pointFor = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if (!rect) return null;
+    return { x: ((event.clientX - rect.left) / rect.width) * 100, y: ((event.clientY - rect.top) / rect.height) * 100 };
+  };
+  const startMark = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!marking) return;
+    const point = pointFor(event);
+    if (!point) return;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setStrokes((current) => [...current, [point]]);
+  };
+  const drawMark = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!marking || event.buttons !== 1) return;
+    const point = pointFor(event);
+    if (!point) return;
+    setStrokes((current) => current.length ? [...current.slice(0, -1), [...current.at(-1)!, point]] : current);
+  };
+  const clearMarks = () => { setStrokes([]); onRegionChange(null); };
+  useEffect(() => {
+    onRegionChange(strokes.length ? `${strokes.length}개 브러시 마크` : null);
+  }, [strokes.length, onRegionChange]);
+  return <div className={`region-edit-canvas ${marking ? "marking" : ""}`} ref={canvasRef} onPointerDown={startMark} onPointerMove={drawMark}>
+    <img src={source} alt={artifact.name} onError={onError} draggable={false} />
+    <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+      {strokes.map((stroke, index) => <polyline key={index} points={stroke.map((point) => `${point.x},${point.y}`).join(" ")} />)}
+    </svg>
+    <div className="region-edit-toolbar">
+      <button className={marking ? "active" : ""} type="button" onClick={() => setMarking((current) => !current)}><PenLine size={13} /> {marking ? "영역 칠하기 중" : "영역 수정"}</button>
+      {strokes.length > 0 && <button type="button" onClick={clearMarks}><RefreshCw size={13} /> 지우기</button>}
+      {!marking && <button type="button" onClick={() => artifact.path && openWorkspaceFile(artifact)} disabled={!artifact.path}><ArrowUpRight size={13} /> 원본</button>}
+    </div>
+    {marking && <span className="region-edit-hint">수정할 부분을 드래그해 칠한 뒤, 왼쪽에 원하는 변경을 적어 주세요.</span>}
+  </div>;
+}
 
-function CreateAgentPage({
-  editingAgent,
-  editingRecord,
-  initialDraft,
-  mode = "create",
-  user,
+function DesignServiceIntake({
+  agent,
+  system,
+  attachments,
+  onPickFiles,
+  onRemoveFile,
+  onSubmit,
 }: {
-  editingAgent?: Agent;
-  editingRecord?: CreatedAgentRecord;
-  initialDraft?: AgentDraft;
-  mode?: "create" | "edit";
-  user: AuthUser | null;
+  agent: Agent;
+  system: DesignDecisionSystem;
+  attachments: Attachment[];
+  onPickFiles: () => void;
+  onRemoveFile: (index: number) => void;
+  onSubmit: (summary: string) => void;
 }) {
-  const navigate = useNavigate();
-  const isEditMode = mode === "edit";
-  const stepRefs = useRef<(HTMLElement | null)[]>([]);
-  const stepNavRefs = useRef<(HTMLButtonElement | null)[]>([]);
-  const [activeStep, setActiveStep] = useState(0);
-  const [completedSteps, setCompletedSteps] = useState<boolean[]>([false, false, false, false, false]);
-  const [stepError, setStepError] = useState<string | null>(null);
-  const stepItems = [
-    {
-      label: "Agent Info",
-      id: "agent-info",
-      description: "Name, summary, and description.",
-    },
-    {
-      label: "Pricing",
-      id: "pricing",
-      description: "Base price plus creator fee.",
-    },
-    {
-      label: "Protection",
-      id: "protection",
-      description: "Upload the private Harness.",
-    },
-    {
-      label: "How to use",
-      id: "how-to-use",
-      description: "Usage guide and sample input.",
-    },
-    {
-      label: "Publish",
-      id: "publish",
-      description: "Confirm and publish.",
-    },
-  ] as const;
-  const [draft, setDraft] = useState<AgentDraft>(() => ({
-    ...defaultAgentDraft(),
-    ...(initialDraft || {}),
-  }));
-  const [agentFiles, setAgentFiles] = useState<File[]>([]);
-  const [typicalOutputMedia, setTypicalOutputMedia] = useState<File | null>(null);
-  const [typicalOutputMediaPreviewUrl, setTypicalOutputMediaPreviewUrl] =
-    useState<string | null>(null);
-  const [uploadedTypicalOutputMedia, setUploadedTypicalOutputMedia] = useState<{
-    path: string;
-    type: "image" | "video";
-    url: string;
-  } | null>(() =>
-    editingAgent?.resultPreview.mediaUrl
-      ? {
-          path: editingRecord?.typicalOutputMediaPath || "",
-          type: editingAgent.resultPreview.mediaType || "image",
-          url: editingAgent.resultPreview.mediaUrl,
-        }
-      : null,
-  );
-  const [sealedRecord, setSealedRecord] = useState<SealedHarnessRecord>();
-  const [isSealing, setIsSealing] = useState(false);
-  const [publishProgressIndex, setPublishProgressIndex] = useState<number | null>(null);
-  const [createError, setCreateError] = useState<string | null>(null);
-  const selectedCategoryPricing = draft.category
-    ? categoryPricing[draft.category]
-    : null;
-  const basePriceUsd = selectedCategoryPricing?.basePriceUsd ?? 0;
-  const creatorFeeUsd = Math.max(
-    0,
-    Number.parseFloat(draft.creatorFeeUsd) || 0,
-  );
-  const totalPricePerCallUsd = basePriceUsd + creatorFeeUsd;
-  const agentSlug =
-    isEditMode && editingAgent
-      ? editingAgent.id
-      : slugifyAgentName(draft.agentName) || "new-agent";
-  const publicCapability =
-    editingAgent?.publicContract || `${agentSlug}(task, context, budget_calls)`;
-  const memWalScope = `agent:${agentSlug}`;
-  const currentTypicalOutputMediaUrl =
-    typicalOutputMediaPreviewUrl || uploadedTypicalOutputMedia?.url || "";
-  const currentTypicalOutputMediaType = typicalOutputMedia
-    ? typicalOutputMedia.type.startsWith("video/")
-      ? "video"
-      : "image"
-    : uploadedTypicalOutputMedia?.type;
-  const priceSummaryLabel = draft.category
-    ? formatAgentPrice(totalPricePerCallUsd)
-    : "Select a category";
-  const publishProgressPercent =
-    publishProgressIndex === null
-      ? 0
-      : Math.round(
-          ((publishProgressIndex + 1) / publishProgressSteps.length) * 100,
-        );
-  const publishProgressLabel =
-    publishProgressIndex === null
-      ? ""
-      : publishProgressSteps[publishProgressIndex];
+  const [answers, setAnswers] = useState<Record<string, string | string[]>>({});
+  const questions = system.questions;
+  const complete = questions.every((question) => {
+    if (!question.required) return true;
+    const answer = answers[question.id];
+    return Array.isArray(answer) ? answer.length > 0 : Boolean(answer?.trim());
+  });
 
-  useEffect(() => {
-    return () => {
-      if (typicalOutputMediaPreviewUrl?.startsWith("blob:")) {
-        URL.revokeObjectURL(typicalOutputMediaPreviewUrl);
-      }
-    };
-  }, [typicalOutputMediaPreviewUrl]);
-
-  useEffect(() => {
-    const activeButton = stepNavRefs.current[activeStep];
-    if (!activeButton) return;
-    if (window.matchMedia("(min-width: 768px)").matches) return;
-
-    activeButton.scrollIntoView({
-      behavior: prefersReducedMotion() ? "auto" : "smooth",
-      block: "nearest",
-      inline: "center",
-    });
-  }, [activeStep]);
-
-  const maxAccessibleStep = activeStep;
-  const canAccessStep = (index: number) => index <= maxAccessibleStep;
-
-  const validateStep = (stepIndex: number) => {
-    switch (stepIndex) {
-      case 0: {
-        if (!draft.category) return "Select a category before continuing.";
-        if (!draft.agentName.trim()) return "Add an agent name before continuing.";
-        if (!draft.headline.trim()) return "Add a one-line description before continuing.";
-        if (!draft.description.trim()) return "Add a description before continuing.";
-        if (draft.creatorInfoUrl.trim() && !normalizeCreatorInfoUrl(draft.creatorInfoUrl)) {
-          return "Add a valid creator info link or leave it empty.";
-        }
-        return null;
-      }
-      case 1: {
-        if (!draft.category) {
-          return "Select a category before pricing.";
-        }
-        if (Number.isNaN(creatorFeeUsd) || creatorFeeUsd < 0) {
-          return "Set a valid creator fee before continuing.";
-        }
-        return null;
-      }
-      case 2: {
-        if (!isEditMode && !agentFiles[0]) {
-          return "Upload the private Harness before continuing.";
-        }
-        return null;
-      }
-      case 3: {
-        if (!draft.howToUse.trim()) return "Describe how Clients should use this Agent.";
-        if (!draft.sampleInput.trim()) return "Add a sample input.";
-        return null;
-      }
-      default:
-        return null;
-    }
-  };
-
-  const goToStep = (index: number) => {
-    if (!canAccessStep(index)) return;
-    setStepError(null);
-    setActiveStep(index);
-  };
-
-  const handleNext = async () => {
-    const error = validateStep(activeStep);
-    if (error) {
-      setStepError(error);
+  const setChoice = (question: DesignQuestion, option: string) => {
+    if (question.kind === "multi") {
+      setAnswers((current) => {
+        const selected = Array.isArray(current[question.id]) ? current[question.id] as string[] : [];
+        return {
+          ...current,
+          [question.id]: selected.includes(option)
+            ? selected.filter((item) => item !== option)
+            : [...selected, option],
+        };
+      });
       return;
     }
-
-    setStepError(null);
-    setCompletedSteps((current) => {
-      const next = [...current];
-      next[activeStep] = true;
-      return next;
-    });
-
-    if (activeStep < stepItems.length - 1) {
-      setActiveStep((current) => Math.min(current + 1, stepItems.length - 1));
-      return;
-    }
-
-    await sealHarness();
+    setAnswers((current) => ({ ...current, [question.id]: option }));
   };
 
-  const handleBack = () => {
-    setStepError(null);
-    setActiveStep((current) => Math.max(current - 1, 0));
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    if (!complete) return;
+    const answerLines = questions
+      .map((question) => {
+        const answer = answers[question.id];
+        const value = Array.isArray(answer) ? answer.join(", ") : answer?.trim();
+        return value ? `- ${question.label}\n  ${value}` : "";
+      })
+      .filter(Boolean)
+      .join("\n");
+    onSubmit([
+      `${agent.name} 작업 주문서`,
+      "",
+      answerLines,
+      attachments.length ? `\n첨부 자료: ${attachments.map((file) => file.name).join(", ")}` : "",
+      "",
+      "위 답변을 바탕으로 디자이너가 설정한 판단 기준과 품질 검사를 적용해 결과를 만들어 주세요.",
+    ].join("\n"));
   };
 
-  async function sealHarness() {
-    setIsSealing(true);
-    setCreateError(null);
-    setPublishProgressIndex(0);
-    try {
-      const harnessFile = agentFiles[0];
-      if (isEditMode) {
-        if (!editingAgent) {
-          throw new Error("No Agent is loaded for editing.");
-        }
+  return (
+    <form className="design-service-intake" onSubmit={submit}>
+      <header className="design-intake-hero">
+        <div className="design-intake-step"><span>1</span> 작업 정보 <i /> <span>2</span> 제작·검증</div>
+        <div className="design-intake-title">
+          <AgentAvatar agent={agent} size="large" />
+          <div>
+            <span className="eyebrow">Designed by {agent.creator}</span>
+            <h1>{agent.name}에 작업을 맡겨볼게요</h1>
+            <p>{agent.headline}</p>
+          </div>
+        </div>
+        <div className="design-system-promise">
+          <ShieldCheck size={17} />
+          <span><strong>디자이너의 판단 시스템 적용</strong><small>답변을 받은 뒤 정보 위계, 금지 규칙과 통과 기준을 자동으로 검사합니다.</small></span>
+        </div>
+      </header>
 
-        setPublishProgressIndex(1);
-        const typicalOutputUpload = typicalOutputMedia
-          ? await uploadTypicalOutputMedia({
-              agentSlug,
-              file: typicalOutputMedia,
-            })
-          : uploadedTypicalOutputMedia;
-        const nextAgent = agentFromDraft({
-          baseAgent: editingAgent,
-          draft,
-          media: typicalOutputUpload,
-          pricePerCallUsd: totalPricePerCallUsd,
-        });
+      <div className="design-intake-body">
+        <div className="ask-question-heading">
+          <div><span>Ask Questions</span><h2>좋은 결과를 위해 먼저 확인할게요</h2></div>
+          <small>필수 {questions.filter((question) => question.required).length}개</small>
+        </div>
 
-        setPublishProgressIndex(2);
-        const gatewayRegistration = harnessFile
-          ? await updateAgentWithGatewayUpload({
-              agent: nextAgent,
-              harnessFile,
-              releaseNotes: "Updated from the HireMe web edit page.",
-              user,
-            })
-          : await updateAgentMetadataWithGateway({
-              agent: nextAgent,
-              user,
-            });
-        const registeredArtifact =
-          gatewayRegistration.protectedArtifact || nextAgent.sealedHarness;
+        <div className="design-question-list">
+          {questions.map((question, index) => {
+            const value = answers[question.id];
+            return (
+              <fieldset className="design-question" key={question.id}>
+                <legend><span>{String(index + 1).padStart(2, "0")}</span>{question.label}{question.required && <i>필수</i>}</legend>
+                {question.helper && <p>{question.helper}</p>}
+                {(question.kind === "single" || question.kind === "multi") ? (
+                  <div className="design-question-options">
+                    {(question.options || []).map((option) => {
+                      const active = Array.isArray(value) ? value.includes(option) : value === option;
+                      return <button className={active ? "active" : ""} type="button" key={option} onClick={() => setChoice(question, option)}>{active && <Check size={13} />}{option}</button>;
+                    })}
+                  </div>
+                ) : question.kind === "long" ? (
+                  <textarea value={typeof value === "string" ? value : ""} onChange={(event) => setAnswers((current) => ({ ...current, [question.id]: event.target.value }))} placeholder="맥락을 자유롭게 적어 주세요" rows={3} />
+                ) : (
+                  <input value={typeof value === "string" ? value : ""} onChange={(event) => setAnswers((current) => ({ ...current, [question.id]: event.target.value }))} placeholder="한 문장으로 적어 주세요" />
+                )}
+              </fieldset>
+            );
+          })}
+        </div>
 
-        setPublishProgressIndex(3);
-        if (editingRecord) {
-          writeCreatedAgentRecord({
-            ...editingRecord,
-            creatorInfoUrl:
-              normalizeCreatorInfoUrl(draft.creatorInfoUrl) || undefined,
-            agentName: nextAgent.name,
-            headline: nextAgent.headline,
-            description: nextAgent.publicSummary,
-            howToUse: nextAgent.howToUse,
-            typicalOutputSample: nextAgent.resultPreview.sample,
-            typicalOutputMediaUrl: nextAgent.resultPreview.mediaUrl,
-            typicalOutputMediaPath:
-              typicalOutputUpload?.path || editingRecord.typicalOutputMediaPath,
-            typicalOutputMediaType: nextAgent.resultPreview.mediaType,
-            pricePerCallUsd: totalPricePerCallUsd,
-            walrusBlobId:
-              "walrusBlobId" in registeredArtifact
-                ? registeredArtifact.walrusBlobId || editingRecord.walrusBlobId
-                : editingRecord.walrusBlobId,
-            suiObjectId:
-              "suiObjectId" in registeredArtifact
-                ? registeredArtifact.suiObjectId || editingRecord.suiObjectId
-                : editingRecord.suiObjectId,
-            ciphertextDigest:
-              "ciphertextDigest" in registeredArtifact
-                ? registeredArtifact.ciphertextDigest || editingRecord.ciphertextDigest
-                : editingRecord.ciphertextDigest,
-            fileCount: harnessFile ? 1 : editingRecord.fileCount,
-            createdAt: editingRecord.createdAt,
-            updatedAt: gatewayRegistration.registeredAt || new Date().toISOString(),
-            currentVersionNumber:
-              gatewayRegistration.version?.versionNumber ||
-              editingRecord.currentVersionNumber ||
-              nextAgent.currentVersionNumber ||
-              1,
-            status: "Published",
-            source: "gateway",
-          });
-        }
-        if (typicalOutputUpload) {
-          setUploadedTypicalOutputMedia(typicalOutputUpload);
-        }
-        setPublishProgressIndex(4);
-        navigate(`/agents/${agentSlug}`);
+        <section className="design-reference-upload">
+          <div><Paperclip size={16} /><span><strong>참고 자료</strong><small>기존 시안, 로고, 제품 이미지가 있다면 함께 넣어 주세요.</small></span></div>
+          <button className="secondary-button compact" type="button" onClick={onPickFiles}>파일 추가</button>
+          {attachments.length > 0 && <div className="design-reference-files">
+            {attachments.map((file, index) => <span key={`${file.name}-${index}`}><FileThumbnail file={file} />{file.name}<button type="button" aria-label={`${file.name} 제거`} onClick={() => onRemoveFile(index)}><X size={12} /></button></span>)}
+          </div>}
+        </section>
+
+        <footer className="design-intake-submit">
+          <span><small>디자인 서비스 이용료</small><strong><PendingPrice agent={agent} /></strong></span>
+          <button className="primary-button" type="submit" disabled={!complete}><Sparkles size={15} /> 이 기준으로 제작 시작</button>
+        </footer>
+      </div>
+    </form>
+  );
+}
+
+function EmptyConversation({ agent, authoring, onPrompt }: { agent: Agent; authoring?: boolean; onPrompt: (prompt: string) => void }) {
+  const Icon = categoryIcons[agent.category];
+  const prompts = authoring
+    ? [
+        "좋은 결과라고 판단하는 기준부터 정해보자.",
+        "일을 받을 때 가장 먼저 확인해야 할 정보를 정해보자.",
+        "자주 실패하는 사례와 피해야 할 방식을 알려줄게.",
+      ]
+    : quickPrompts[agent.category];
+  return (
+    <div className={`empty-conversation ${authoring ? "authoring" : ""}`}>
+      <div className={`empty-agent-mark ${agent.accent}`}>
+        <Icon size={24} />
+      </div>
+      <h1>{authoring ? agent.status === "초안" ? `${agent.name}를 어떻게 가르칠까요?` : `${agent.name}의 일하는 방식을 어떻게 다듬을까요?` : `${agent.name}에게 어떤 일을 맡길까요?`}</h1>
+      <p>{authoring ? "좋은 결과의 기준, 일하는 순서, 꼭 기억할 사례를 편하게 이야기해 주세요." : agent.headline}</p>
+      <div className="quick-prompts">
+        {prompts.map((prompt) => (
+          <button type="button" key={prompt} onClick={() => onPrompt(prompt)}>
+            <Sparkles size={15} />
+            {prompt}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function MessageBubble({ message, agent, onRetry }: {
+  message: ChatMessage;
+  agent: Agent;
+  onRetry?: (text: string, attachments: Attachment[]) => void;
+}) {
+  if (message.role === "user") {
+    return (
+      <div className="message-row user-message">
+        <div className="message-content">
+          {message.attachments?.length ? (
+            <MessageFiles files={message.attachments} align="end" label="첨부 이미지" />
+          ) : null}
+          <div className="user-bubble">{message.text}</div>
+          <small className={`message-status ${message.status || "sent"}`}>
+            {message.status === "queued"
+              ? "대기 중"
+              : message.status === "cancelled"
+                ? "중지됨"
+                : message.status === "failed"
+                  ? "실행 실패"
+                  : formatClock(message.at)}
+          </small>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="message-row assistant-message">
+      <AgentAvatar agent={agent} size="small" />
+      <div className="message-content">
+        <div className="assistant-name">{agent.name}</div>
+        <div className={`assistant-copy${message.streaming ? " streaming" : ""}`}>
+          {message.text || "결과를 정리하고 있어요"}
+          {message.streaming && <span className="streaming-cursor" aria-label="응답 작성 중" />}
+        </div>
+        {message.artifacts?.length ? (
+          <MessageFiles files={message.artifacts} align="start" label="생성 결과" />
+        ) : null}
+        <div className="assistant-meta">
+          {message.elapsedMs && <span><Clock3 size={13} /> {formatElapsed(message.elapsedMs)}</span>}
+          {message.retry && onRetry && !message.streaming && (
+            <button
+              type="button"
+              className="assistant-retry"
+              title="같은 요청 다시 시도"
+              onClick={() => onRetry(message.retry!.text, message.retry!.attachments)}
+            >
+              다시 시도
+            </button>
+          )}
+          <button type="button" aria-label="답변 복사" title="답변 복사" disabled={message.streaming} onClick={() => navigator.clipboard?.writeText(message.text)}>
+            <Copy size={14} />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MessageFiles({
+  files,
+  align,
+  label,
+}: {
+  files: Attachment[];
+  align: "start" | "end";
+  label: string;
+}) {
+  const images = files.filter(isImageFile);
+  const documents = files.filter((file) => !isImageFile(file));
+  return (
+    <div className={`message-files ${align}`}>
+      {images.length > 0 && (
+        <div className={`message-image-grid ${images.length === 1 ? "single" : ""}`} aria-label={label}>
+          {images.map((file, index) => (
+            <MessageImage key={`${file.path || file.previewUrl || file.name}-${index}`} file={file} />
+          ))}
+        </div>
+      )}
+      {documents.length > 0 && (
+        <div className="message-file-list">
+          {documents.map((file, index) => (
+            <button
+              type="button"
+              key={`${file.path || file.name}-${index}`}
+              disabled={!file.path || !window.hiremeDesktop}
+              onClick={() => openWorkspaceFile(file)}
+            >
+              <FileText size={16} />
+              <span>
+                <strong>{file.name}</strong>
+                {file.size ? <small>{formatFileSize(file.size)}</small> : null}
+              </span>
+              {file.path && <ArrowUpRight size={14} />}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MessageImage({ file }: { file: Attachment }) {
+  const { source, onError } = useFilePreview(file);
+  const canOpen = Boolean(file.path && window.hiremeDesktop);
+  return (
+    <button
+      className="message-image"
+      type="button"
+      disabled={!canOpen}
+      title={canOpen ? `${file.name} 열기` : file.name}
+      onClick={() => openWorkspaceFile(file)}
+    >
+      {source ? (
+        <img src={source} alt={file.name} onError={onError} />
+      ) : (
+        <span className="image-unavailable"><FileText size={20} /> 미리보기 없음</span>
+      )}
+      <span className="message-image-caption">
+        <strong>{file.name}</strong>
+        {file.size ? <small>{formatFileSize(file.size)}</small> : null}
+      </span>
+    </button>
+  );
+}
+
+function FileThumbnail({ file }: { file: Attachment }) {
+  const { source, onError } = useFilePreview(file);
+  if (!source || !isImageFile(file)) return <FileText size={14} />;
+  return <img className="attachment-thumbnail" src={source} alt="" onError={onError} />;
+}
+
+function useFilePreview(file: Attachment) {
+  const sourceKey = `${file.path || ""}\u0000${file.previewUrl || ""}`;
+  const initialSource = appAssetUrl(file.previewUrl || "");
+  const [override, setOverride] = useState<{ key: string; source: string } | null>(null);
+  const refreshAttempted = useRef("");
+  const source = override?.key === sourceKey ? override.source : initialSource;
+
+  const onError = async () => {
+    if (refreshAttempted.current !== sourceKey && file.path && window.hiremeDesktop) {
+      refreshAttempted.current = sourceKey;
+      const refreshed = await window.hiremeDesktop.previewFile(file.path).catch(() => null);
+      if (refreshed?.previewUrl) {
+        setOverride({ key: sourceKey, source: refreshed.previewUrl });
         return;
       }
-
-      if (!harnessFile) {
-        throw new Error("Upload a .zip or .tar.gz Agent Harness before creating.");
-      }
-
-      setPublishProgressIndex(1);
-      const typicalOutputUpload = typicalOutputMedia
-        ? await uploadTypicalOutputMedia({
-            agentSlug,
-            file: typicalOutputMedia,
-          })
-        : uploadedTypicalOutputMedia;
-
-      setPublishProgressIndex(2);
-      const gatewayRegistration = await createAgentWithGatewayUpload({
-        draft,
-        agentSlug,
-        totalPricePerCallUsd,
-        publicCapability,
-        typicalOutputUpload,
-        harnessFile,
-        user,
-      });
-      const registeredArtifact = gatewayRegistration.protectedArtifact;
-      if (
-        !registeredArtifact?.walrusBlobId ||
-        !registeredArtifact.suiObjectId ||
-        !registeredArtifact.ciphertextDigest
-      ) {
-        throw new Error("Gateway did not return a protected artifact record.");
-      }
-
-      const record: SealedHarnessRecord = {
-        id: `gateway_${agentSlug}_${registeredArtifact.ciphertextDigest
-          .replace(/^sha256:/, "")
-          .slice(0, 12)}`,
-        agentName: draft.agentName,
-        description: draft.description || draft.headline,
-        network: registeredArtifact.network || "walrus-testnet",
-        sealProvider:
-          registeredArtifact.encryptionProvider || "platform_encryption",
-        platformKmsKeyId:
-          registeredArtifact.platformKmsKeyId || "platform:local-dev-key",
-        sealPolicyId:
-          registeredArtifact.sealPolicyId || `platform:agent:${agentSlug}`,
-        walrusBlobId: registeredArtifact.walrusBlobId,
-        suiObjectId: registeredArtifact.suiObjectId,
-        encryptionId:
-          registeredArtifact.sealEncryptionId ||
-          `hireme::agent-folder::${agentSlug}`,
-        sealCiphertextFormat:
-          registeredArtifact.ciphertextFormat ||
-          "hireme.platform_encryption.v1",
-        sealThreshold: registeredArtifact.sealThreshold ?? 0,
-        sealKeyServerIds: registeredArtifact.sealKeyServerIds || [],
-        ciphertextDigest: registeredArtifact.ciphertextDigest,
-        fileName: harnessFile.name,
-        fileSize:
-          gatewayRegistration.upload?.ciphertextSizeBytes || harnessFile.size,
-        fileCount: gatewayRegistration.upload?.entryCount || 1,
-        entryPreview: gatewayRegistration.upload?.entryPreview || [
-          harnessFile.name,
-        ],
-        epochs:
-          gatewayRegistration.upload?.storageEpochs ||
-          registeredArtifact.storageEpochs ||
-          defaultAgentStorageEpochs,
-        pricePerCallUsd: totalPricePerCallUsd,
-        policyRule: `Caller must hold an active AgentHireReceipt. Results commit safe summaries and artifact digests to ${memWalScope}.`,
-        createdAt: gatewayRegistration.registeredAt || new Date().toISOString(),
-      };
-
-      setPublishProgressIndex(3);
-      writeCreatedAgentRecord({
-        id: record.id,
-        creatorId: user ? creatorIdFor(user) : "local-anonymous",
-        creatorEmail: user?.email || "",
-        creatorInfoUrl: normalizeCreatorInfoUrl(draft.creatorInfoUrl) || undefined,
-        agentName: draft.agentName,
-        agentSlug,
-        headline: draft.headline,
-        description: draft.description || draft.headline,
-        howToUse: draft.howToUse,
-        typicalOutputSample: draft.sampleInput,
-        typicalOutputMediaUrl: typicalOutputUpload?.url,
-        typicalOutputMediaPath: typicalOutputUpload?.path,
-        typicalOutputMediaType: typicalOutputUpload?.type,
-        pricePerCallUsd: totalPricePerCallUsd,
-        walrusBlobId: registeredArtifact.walrusBlobId,
-        suiObjectId: registeredArtifact.suiObjectId,
-        ciphertextDigest: registeredArtifact.ciphertextDigest,
-        fileCount: record.fileCount,
-        createdAt: record.createdAt,
-        updatedAt: record.createdAt,
-        currentVersionNumber: gatewayRegistration.version?.versionNumber || 1,
-        status: "Published",
-        source: "gateway",
-      });
-      if (typicalOutputUpload) {
-        setUploadedTypicalOutputMedia(typicalOutputUpload);
-      }
-      setSealedRecord(record);
-      setPublishProgressIndex(4);
-      navigate(`/agents/${agentSlug}`);
-    } catch (err) {
-      setPublishProgressIndex(null);
-      setCreateError(
-        err instanceof Error ? err.message : "Could not create Agent.",
-      );
-    } finally {
-      setIsSealing(false);
     }
-  }
-
-  const updateDraft =
-    (field: keyof typeof draft) =>
-    (event: ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
-      setDraft((current) => ({ ...current, [field]: event.target.value }));
-    };
-
-  function handleAgentFileChange(event: ChangeEvent<HTMLInputElement>) {
-    const nextFiles = Array.from(event.target.files ?? []);
-    if (!nextFiles.length) return;
-    setCreateError(null);
-    setStepError(null);
-    setAgentFiles(nextFiles);
-  }
-
-  function handleTypicalOutputMediaChange(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0] || null;
-    setCreateError(null);
-    setUploadedTypicalOutputMedia(null);
-    if (!file) {
-      setTypicalOutputMedia(null);
-      setTypicalOutputMediaPreviewUrl(null);
-      return;
-    }
-
-    try {
-      typicalOutputMediaType(file);
-      if (typicalOutputMediaPreviewUrl?.startsWith("blob:")) {
-        URL.revokeObjectURL(typicalOutputMediaPreviewUrl);
-      }
-      setTypicalOutputMedia(file);
-      setTypicalOutputMediaPreviewUrl(URL.createObjectURL(file));
-    } catch (err) {
-      setTypicalOutputMedia(null);
-      setTypicalOutputMediaPreviewUrl(null);
-      setCreateError(
-        err instanceof Error ? err.message : "Unsupported media file.",
-      );
-    }
-  }
-
-  const wizardReadiness = [
-    {
-      label: "Agent info",
-      ready:
-        Boolean(draft.category) &&
-        Boolean(draft.agentName.trim()) &&
-        Boolean(draft.headline.trim()) &&
-        Boolean(draft.description.trim()),
-    },
-    {
-      label: "Pricing",
-      ready:
-        Boolean(draft.category) &&
-        !Number.isNaN(creatorFeeUsd) &&
-        creatorFeeUsd >= 0,
-    },
-    {
-      label: "Protection",
-      ready: isEditMode || Boolean(agentFiles[0]),
-    },
-    {
-      label: "How to use",
-      ready:
-        Boolean(draft.howToUse.trim()) &&
-        Boolean(draft.sampleInput.trim()),
-    },
-  ];
-  const publishReady = wizardReadiness.every((item) => item.ready);
-  const getStepState = (index: number) => {
-    if (activeStep === index) return "active" as const;
-    if (index < activeStep && completedSteps[index]) return "completed" as const;
-    return "locked" as const;
-  };
-  const renderStepSummary = (index: number) => {
-    switch (index) {
-      case 0:
-        return (
-          <div className="grid gap-1.5 text-sm text-[#4e5968]">
-            <div className="font-medium text-[#191f28]">
-              {draft.agentName || "Untitled Agent"}
-            </div>
-            <div>{draft.category || "Select a category"}</div>
-            <div className="overflow-hidden [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2]">
-              {draft.headline || "Add a short summary for Clients."}
-            </div>
-          </div>
-        );
-      case 1:
-        return (
-          <div className="grid gap-1.5 text-sm text-[#4e5968]">
-            <div className="font-medium text-[#191f28]">{priceSummaryLabel}</div>
-            <div>Base price + creator fee per 1M tokens</div>
-          </div>
-        );
-      case 2:
-        return (
-          <div className="grid gap-1.5 text-sm text-[#4e5968]">
-            <div className="font-medium text-[#191f28]">
-              {agentFiles[0]?.name ||
-                (isEditMode
-                  ? "Current protected Harness"
-                  : "No Harness uploaded yet")}
-            </div>
-            <div>
-              {isEditMode && !agentFiles[0]
-                ? "Upload a replacement only when the private Harness changed."
-                : "Private files stay protected inside the runner."}
-            </div>
-          </div>
-        );
-      case 3:
-        return (
-          <div className="grid gap-1.5 text-sm text-[#4e5968]">
-            <div className="font-medium text-[#191f28]">
-              {draft.howToUse || "How Clients should use it"}
-            </div>
-            <div className="overflow-hidden [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2]">
-              {draft.sampleInput || "Add a sample input."}
-            </div>
-          </div>
-        );
-      case 4:
-        return (
-          <div className="grid gap-1.5 text-sm text-[#4e5968]">
-            <div className="font-medium text-[#191f28]">
-              {publishReady ? "Ready to publish" : "More info needed"}
-            </div>
-            <div>
-              {publishReady
-                ? "All required fields are complete."
-                : "Complete the required steps before publishing."}
-            </div>
-          </div>
-        );
-      default:
-        return null;
-    }
+    setOverride({ key: sourceKey, source: "" });
   };
 
-  return (
-    <main className="min-h-[calc(100vh-4.25rem)] bg-[#f6f9fc]">
-      <section className="px-4 py-3 md:px-8 md:py-4">
-        <div className="mx-auto max-w-5xl">
-          <Link
-            className="mb-2 inline-flex items-center gap-1.5 text-xs font-medium text-[#6b7684] transition hover:text-[#191f28]"
-            to={isEditMode ? "/my" : "/agents"}
-          >
-            <ArrowLeft className="size-3.5" />
-            Back
-          </Link>
-          <div className="stepStickyShell -mx-4 mb-0 px-4 md:mx-0 md:px-3">
-            <div className="stepNav flex gap-2.5 overflow-x-auto md:grid md:grid-cols-5 md:gap-3 md:overflow-visible">
-              {stepItems.map((step, index) => {
-                const isActive = activeStep === index;
-                const isCompleted = completedSteps[index] && !isActive;
-                const isLocked = index > maxAccessibleStep;
-                return (
-                  <button
-                    aria-current={isActive ? "step" : undefined}
-                    aria-disabled={isLocked ? true : undefined}
-                    className={`min-w-[9.2rem] flex-1 rounded-2xl border px-4 py-2.5 text-center text-xs font-semibold transition-colors duration-200 md:min-w-0 ${isActive ? "border-[#533afd]/35 bg-gradient-to-br from-[#efeaff] to-[#f8f5ff] text-[#2e2b8c] shadow-[0_8px_20px_rgba(83,58,253,0.08)]" : isCompleted ? "border-[#cfe0ff] bg-[#eef5ff] text-[#1f4da8]" : isLocked ? "cursor-not-allowed border-[#d9d5e2] bg-white/72 text-[#8b95a1]" : "border-[#d9d5e2] bg-white/94 text-[#5f6f85] hover:border-[#c8c2d8] hover:bg-[#fbfaff]"}`}
-                    disabled={isLocked}
-                    key={step.id}
-                    onClick={() => goToStep(index)}
-                    ref={(element) => { stepNavRefs.current[index] = element; }}
-                    type="button"
-                  >
-                    <span className="flex flex-col items-center gap-1.5">
-                      <span className={`inline-flex size-6 items-center justify-center rounded-full border text-[10px] font-semibold ${isActive ? "border-[#cfc6ff] bg-white/70 text-[#2e2b8c]" : isCompleted ? "border-[#cfe0ff] bg-white/80 text-[#1f4da8]" : isLocked ? "border-[#d9d5e2] bg-white text-[#9aa3b2]" : "border-[#d9d5e2] bg-[#f8f7fb] text-[#6b7280]"}`}>
-                        {isCompleted ? <CheckCircle2 className="size-3.5" /> : String(index + 1).padStart(2, "0")}
-                      </span>
-                      <span className="whitespace-nowrap text-[11px] leading-4 md:text-[12px]">{step.label}</span>
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="pt-0">
-            <div className="space-y-5">
-              {stepError ? (
-                <div className="rounded-2xl border border-[#d7d0f9] bg-[#f7f4ff] px-4 py-3 text-sm text-[#4b4a79]">
-                  {stepError}
-                </div>
-              ) : null}
-              {createError ? (
-                <div className="rounded-2xl border border-[#ead2df] bg-[#fff8fb] px-4 py-3 text-sm text-[#9f1239]">
-                  {createError}
-                </div>
-              ) : null}
-
-              <WizardStepCard
-                active={activeStep === 0}
-                body={
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <div className="min-w-0 md:col-span-2">
-                      <div className="mb-1.5 block text-xs font-medium text-muted-foreground">
-                        Category
-                        <span className="ml-1 text-[#e11d48]" aria-label="required">
-                          *
-                        </span>
-                      </div>
-                      <div className="grid w-full grid-cols-2 gap-2 sm:grid-cols-4" data-category-row>
-                        {topicFilters.map((category) => {
-                          const categoryMeta = categoryPricing[category];
-                          const CategoryIcon = categoryMeta.Icon;
-                          const selected = draft.category === category;
-                          return (
-                            <button
-                              aria-pressed={selected}
-                              className={`flex h-14 w-full min-w-0 items-center gap-2 rounded-2xl border px-3 py-2 text-left transition ${
-                                selected
-                                  ? "border-[#533afd]/45 bg-[#f7f4ff] shadow-[0_12px_28px_rgba(83,58,253,0.12)]"
-                                  : "border-[#dbe3ef] bg-white hover:border-[#cfc6ff] hover:bg-[#fbfaff]"
-                              }`}
-                              key={category}
-                              onClick={() =>
-                                setDraft((current) => ({ ...current, category }))
-                              }
-                              type="button"
-                            >
-                              <span
-                                className={`flex size-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br ${categoryMeta.iconClassName}`}
-                              >
-                                <CategoryIcon className="size-4" aria-hidden="true" />
-                              </span>
-                              <span className="grid min-w-0 gap-0.5">
-                                <span className="truncate text-sm font-semibold text-[#191f28]">
-                                  {category}
-                                </span>
-                                <span className="number-cell text-[11px] font-semibold text-[#536073]">
-                                  Base {formatAgentPriceShort(categoryMeta.basePriceUsd)}
-                                </span>
-                              </span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                    <Field label="Agent name" required>
-                      <Input
-                        required
-                        value={draft.agentName}
-                        onChange={updateDraft("agentName")}
-                      />
-                    </Field>
-                    <Field label="One-line description" required>
-                      <Input
-                        required
-                        value={draft.headline}
-                        onChange={updateDraft("headline")}
-                      />
-                    </Field>
-                    <Field className="md:col-span-2" label="Description" required>
-                      <textarea
-                        required
-                        className="min-h-20 w-full rounded-md border border-input bg-white px-3 py-2 text-sm text-foreground shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                        onChange={updateDraft("description")}
-                        value={draft.description}
-                      />
-                    </Field>
-                    <Field className="md:col-span-2" label="creator_info link">
-                      <Input
-                        inputMode="url"
-                        placeholder="https://example.com/creator"
-                        type="url"
-                        value={draft.creatorInfoUrl}
-                        onChange={updateDraft("creatorInfoUrl")}
-                      />
-                    </Field>
-                  </div>
-                }
-                description="Name the Agent and explain what it does."
-                footer={
-                  <div className="flex flex-col gap-3 border-t border-[#ece8fb] pt-3 md:flex-row md:items-center md:justify-between">
-                    <Button disabled size="lg" type="button" variant="secondary">
-                      Back
-                    </Button>
-                    <Button
-                      className="min-w-[10rem]"
-                      onClick={handleNext}
-                      size="lg"
-                      type="button"
-                    >
-                      Next <ChevronRight />
-                    </Button>
-                  </div>
-                }
-                index={0}
-                onEdit={() => goToStep(0)}
-                state={getStepState(0)}
-                summary={renderStepSummary(0)}
-                wrapperRef={(node) => {
-                  stepRefs.current[0] = node;
-                }}
-                title="Agent Info"
-              />
-
-              <WizardStepCard
-                active={activeStep === 1}
-                body={
-                  <div className="grid gap-4 md:grid-cols-[1fr_1.2fr] md:items-end">
-                    <Field label="Creator fee / 1M tokens">
-                      <Input
-                        min="0"
-                        step="0.001"
-                        type="number"
-                        value={draft.creatorFeeUsd}
-                        onChange={updateDraft("creatorFeeUsd")}
-                      />
-                    </Field>
-                    <div className="rounded-2xl border border-[#cfe0ff] bg-[#f7fbff] px-4 py-3">
-                      <div className="text-[10px] font-medium uppercase text-muted-foreground">
-                        Client price / 1M tokens
-                      </div>
-                      <div className="mt-2 grid gap-1.5 text-sm text-[#536073]">
-                        <div className="flex items-center justify-between gap-4">
-                          <span>Base</span>
-                          <span className="number-cell font-medium text-[#191f28]">
-                            {draft.category
-                              ? formatAgentPrice(basePriceUsd)
-                              : "Select category"}
-                          </span>
-                        </div>
-                        <div className="flex items-center justify-between gap-4">
-                          <span>Creator fee</span>
-                          <span className="number-cell font-medium text-[#191f28]">
-                            {formatAgentPrice(creatorFeeUsd)}
-                          </span>
-                        </div>
-                      </div>
-                      <div className="number-cell mt-3 border-t border-[#dbeafe] pt-3 text-xl font-semibold text-[#1c1e54]">
-                        Total {priceSummaryLabel}
-                      </div>
-                    </div>
-                  </div>
-                }
-                description="The Client price is category base price plus your creator fee."
-                footer={
-                  <div className="flex flex-col gap-3 border-t border-[#ece8fb] pt-3 md:flex-row md:items-center md:justify-between">
-                    <Button onClick={handleBack} size="lg" type="button" variant="secondary">
-                      <ArrowLeft />
-                      Back
-                    </Button>
-                    <Button
-                      className="min-w-[10rem]"
-                      onClick={handleNext}
-                      size="lg"
-                      type="button"
-                    >
-                      Next <ChevronRight />
-                    </Button>
-                  </div>
-                }
-                index={1}
-                onEdit={() => goToStep(1)}
-                state={getStepState(1)}
-                summary={renderStepSummary(1)}
-                wrapperRef={(node) => {
-                  stepRefs.current[1] = node;
-                }}
-                title="Pricing"
-              />
-
-              <WizardStepCard
-                active={activeStep === 2}
-                body={
-                  <label className="flex min-h-36 cursor-pointer flex-col items-center justify-center rounded-[24px] border-2 border-dashed border-[#8f7dff] bg-white p-6 text-center transition hover:bg-[#f8f5ff]">
-                    <UploadCloud className="size-7 text-primary" />
-                    <span className="mt-3 text-sm font-semibold text-[#1c1e54]">
-                      {isEditMode
-                        ? "Upload replacement Harness archive"
-                        : "Upload private Harness archive"}
-                    </span>
-                    <span className="mt-1 text-xs text-muted-foreground">
-                      {isEditMode
-                        ? "Leave empty to keep the current protected Harness"
-                        : "ZIP, TAR.GZ, or GZ · prompts, skills, examples, rubrics"}
-                    </span>
-                    <input
-                      accept=".zip,.gz,.tgz,.tar.gz,application/zip,application/gzip"
-                      className="sr-only"
-                      onChange={handleAgentFileChange}
-                      type="file"
-                    />
-                    {agentFiles[0] ? (
-                      <span className="mt-3 rounded-full bg-[#edfff4] px-3 py-1 text-xs font-semibold text-[#166534]">
-                        {agentFiles[0].name}
-                      </span>
-                    ) : null}
-                  </label>
-                }
-                description={
-                  isEditMode
-                    ? "Keep the current Harness or upload a protected replacement."
-                    : "Upload the protected Harness that stays private."
-                }
-                footer={
-                  <div className="flex flex-col gap-3 border-t border-[#ece8fb] pt-3 md:flex-row md:items-center md:justify-between">
-                    <Button onClick={handleBack} size="lg" type="button" variant="secondary">
-                      <ArrowLeft />
-                      Back
-                    </Button>
-                    <Button
-                      className="min-w-[10rem]"
-                      onClick={handleNext}
-                      size="lg"
-                      type="button"
-                    >
-                      Next <ChevronRight />
-                    </Button>
-                  </div>
-                }
-                index={2}
-                onEdit={() => goToStep(2)}
-                state={getStepState(2)}
-                summary={renderStepSummary(2)}
-                wrapperRef={(node) => {
-                  stepRefs.current[2] = node;
-                }}
-                title="Protection"
-              />
-
-              <WizardStepCard
-                active={activeStep === 3}
-                body={
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <Field className="md:col-span-2" label="How Clients should use it">
-                      <textarea
-                        className="min-h-24 w-full rounded-md border border-input bg-white px-3 py-2 text-sm shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                        onChange={updateDraft("howToUse")}
-                        value={draft.howToUse}
-                      />
-                    </Field>
-                    <Field className="md:col-span-2" label="Sample Input">
-                      <textarea
-                        className="min-h-24 w-full rounded-md border border-input bg-white px-3 py-2 text-sm shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                        onChange={updateDraft("sampleInput")}
-                        value={draft.sampleInput}
-                      />
-                    </Field>
-                    <Field className="md:col-span-2" label="Result Image / Video">
-                      <input
-                        accept=".jpg,.jpeg,.png,image/jpeg,image/png,video/*"
-                        className="block w-full rounded-md border border-dashed border-input bg-white px-3 py-3 text-sm text-muted-foreground file:mr-4 file:rounded-full file:border-0 file:bg-secondary file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-primary"
-                        onChange={handleTypicalOutputMediaChange}
-                        type="file"
-                      />
-                    </Field>
-                    {currentTypicalOutputMediaUrl ? (
-                      <div className="overflow-hidden rounded-[24px] border border-border bg-secondary md:col-span-2">
-                        {currentTypicalOutputMediaType === "video" ? (
-                          <video
-                            className="aspect-video w-full bg-black object-contain"
-                            controls
-                            src={currentTypicalOutputMediaUrl}
-                          />
-                        ) : (
-                          <img
-                            alt="Result preview"
-                            className="aspect-video w-full object-cover"
-                            src={currentTypicalOutputMediaUrl}
-                          />
-                        )}
-                      </div>
-                    ) : null}
-                  </div>
-                }
-                description="Tell Clients how to use this Agent and provide a sample input."
-                footer={
-                  <div className="flex flex-col gap-3 border-t border-[#ece8fb] pt-3 md:flex-row md:items-center md:justify-between">
-                    <Button onClick={handleBack} size="lg" type="button" variant="secondary">
-                      <ArrowLeft />
-                      Back
-                    </Button>
-                    <Button
-                      className="min-w-[10rem]"
-                      onClick={handleNext}
-                      size="lg"
-                      type="button"
-                    >
-                      Next <ChevronRight />
-                    </Button>
-                  </div>
-                }
-                index={3}
-                onEdit={() => goToStep(3)}
-                state={getStepState(3)}
-                summary={renderStepSummary(3)}
-                wrapperRef={(node) => {
-                  stepRefs.current[3] = node;
-                }}
-                title="How to use"
-              />
-
-              <WizardStepCard
-                active={activeStep === 4}
-                body={
-                  <div className="grid gap-4">
-                    <div className="grid gap-3 rounded-[24px] border border-[#dbeafe] bg-[#f7fbff] p-4 text-sm text-[#4e5968]">
-                      <div className="flex items-start justify-between gap-4">
-                        <span>Agent name</span>
-                        <span className="max-w-[60%] text-right font-medium text-[#191f28]">
-                          {draft.agentName || "Untitled Agent"}
-                        </span>
-                      </div>
-                      <div className="flex items-start justify-between gap-4">
-                        <span>One-line description</span>
-                        <span className="max-w-[60%] text-right font-medium text-[#191f28]">
-                          {draft.headline || "No description"}
-                        </span>
-                      </div>
-                      <div className="flex items-start justify-between gap-4">
-                        <span>Price</span>
-                        <span className="number-cell font-medium text-[#191f28]">
-                          {priceSummaryLabel}
-                        </span>
-                      </div>
-                      <div className="flex flex-col gap-3 rounded-2xl border border-[#dbeafe] bg-white p-3 md:flex-row md:items-center md:justify-between">
-                        <div>
-                          <div className="text-xs font-medium text-muted-foreground">
-                            Uploaded file
-                          </div>
-                          <div className="mt-1 text-sm font-medium text-[#191f28]">
-                            {agentFiles[0]?.name || "No file uploaded"}
-                          </div>
-                          {agentFiles[0] ? (
-                            <div className="mt-0.5 text-xs text-[#6b7684]">
-                              {formatFileSize(agentFiles[0].size)}
-                            </div>
-                          ) : null}
-                        </div>
-                        <label
-                          className={`inline-flex cursor-pointer items-center justify-center rounded-xl border border-[#cfe0ff] bg-[#eef5ff] px-3 py-2 text-xs font-semibold text-[#1f4da8] transition hover:bg-[#e0efff] ${
-                            isSealing ? "pointer-events-none opacity-50" : ""
-                          }`}
-                        >
-                          Change file
-                          <input
-                            accept=".zip,.gz,.tgz,.tar.gz,application/zip,application/gzip"
-                            className="sr-only"
-                            disabled={isSealing}
-                            onChange={handleAgentFileChange}
-                            type="file"
-                          />
-                        </label>
-                      </div>
-                    </div>
-                    {isSealing ? (
-                      <div className="rounded-[24px] border border-[#cfe0ff] bg-white p-4">
-                        <div className="flex items-center justify-between gap-4 text-xs font-semibold text-[#536073]">
-                          <span>{publishProgressLabel}</span>
-                          <span>
-                            {publishProgressIndex !== null
-                              ? `${publishProgressIndex + 1}/${publishProgressSteps.length}`
-                              : ""}
-                          </span>
-                        </div>
-                        <div
-                          aria-label="Publish progress"
-                          aria-valuemax={publishProgressSteps.length}
-                          aria-valuemin={0}
-                          aria-valuenow={
-                            publishProgressIndex === null
-                              ? 0
-                              : publishProgressIndex + 1
-                          }
-                          className="mt-3 h-2 overflow-hidden rounded-full bg-[#e8eef8]"
-                          role="progressbar"
-                        >
-                          <div
-                            className="h-full rounded-full bg-[#533afd] transition-[width] duration-500 ease-out"
-                            style={{ width: `${publishProgressPercent}%` }}
-                          />
-                        </div>
-                      </div>
-                    ) : null}
-                  </div>
-                }
-                description="Confirm the final details before publishing."
-                footer={
-                  <div className="flex flex-col gap-3 border-t border-[#ece8fb] pt-3 md:flex-row md:items-center md:justify-between">
-                    <Button onClick={handleBack} size="lg" type="button" variant="secondary">
-                      <ArrowLeft />
-                      Back
-                    </Button>
-                    <Button
-                      className="min-w-[10rem]"
-                      disabled={isSealing || !publishReady}
-                      onClick={handleNext}
-                      size="lg"
-                      type="button"
-                    >
-                      <ShieldCheck />
-                      {isSealing
-                        ? isEditMode
-                          ? "Saving..."
-                          : "Publishing..."
-                        : isEditMode
-                          ? "Save Agent"
-                          : "Publish Agent"}
-                    </Button>
-                  </div>
-                }
-                index={4}
-                onEdit={() => goToStep(4)}
-                state={getStepState(4)}
-                summary={renderStepSummary(4)}
-                wrapperRef={(node) => {
-                  stepRefs.current[4] = node;
-                }}
-                title="Publish"
-              />
-            </div>
-          </div>
-        </div>
-
-        {sealedRecord ? (
-          <div className="mx-auto mt-6 max-w-7xl">
-            <SealedRecordPreview record={sealedRecord} />
-          </div>
-        ) : null}
-      </section>
-    </main>
-  );
+  return { source, onError };
 }
 
-function WizardStepCard({
-  active,
-  body,
-  description,
-  footer,
-  index,
-  onEdit,
-  wrapperRef,
-  state,
-  summary,
-  title,
+function useAgentProfileImage(value?: string) {
+  const key = String(value || "");
+  const [override, setOverride] = useState<{ key: string; source: string } | null>(null);
+  const refreshAttempted = useRef("");
+  const source = override?.key === key ? override.source : appAssetUrl(key);
+  const onError = async () => {
+    if (refreshAttempted.current !== key && key && window.hiremeDesktop) {
+      refreshAttempted.current = key;
+      const refreshed = await window.hiremeDesktop.previewFile(key).catch(() => null);
+      if (refreshed?.previewUrl) {
+        setOverride({ key, source: refreshed.previewUrl });
+        return;
+      }
+    }
+    setOverride({ key, source: "" });
+  };
+  return { source, onError };
+}
+
+function openWorkspaceFile(file: Attachment) {
+  if (file.path) void window.hiremeDesktop?.openFile(file.path).catch(() => false);
+}
+
+function RunProgress({
+  run,
+  agent,
+  queuedCount,
+  onCancel,
 }: {
-  active: boolean;
-  body: ReactNode;
-  description: string;
-  footer?: ReactNode;
-  index: number;
-  onEdit?: () => void;
-  wrapperRef?: (node: HTMLElement | null) => void;
-  state: "active" | "completed" | "locked";
-  summary: ReactNode;
-  title: string;
+  run: RunState;
+  agent: Agent;
+  queuedCount: number;
+  onCancel: () => void;
 }) {
-  const isActive = state === "active";
-  const isCompleted = state === "completed";
-  const isLocked = state === "locked";
-
-  if (!active) return null;
-
-  const shellClassName = [
-    "overflow-hidden rounded-b-[28px] rounded-t-none border border-t-0 transition-all duration-500 ease-out",
-    isActive
-      ? "border-[#533afd]/35 bg-white shadow-[0_24px_70px_rgba(49,130,246,0.11)]"
-      : isCompleted
-        ? "border-[#cfe0ff] bg-[#f7fbff] shadow-[0_18px_50px_rgba(49,130,246,0.06)]"
-        : "border-[#d9d5e2] bg-white/70 opacity-60",
-  ].join(" ");
-
+  const elapsed = useElapsed(run.startedAt);
   return (
-    <div className="scroll-mt-28 md:scroll-mt-32" ref={wrapperRef}>
-      <Card className={shellClassName}>
-      <div className="flex items-start justify-between gap-4 px-5 pt-4">
-        {isCompleted && onEdit ? (
-          <button
-            className="flex flex-1 items-start gap-3 text-left transition hover:opacity-90"
-            onClick={onEdit}
-            type="button"
-          >
-            <WizardStepBadge index={index} state={state} />
-            <div className="min-w-0">
-              <div className="text-[1.05rem] font-semibold tracking-[-0.03em] text-[#191f28] md:text-[1.1rem]">
-                {title}
-              </div>
-              <p className="mt-0.5 text-[0.88rem] leading-5 text-[#6b7684]">
-                {description}
-              </p>
-            </div>
+    <div className="run-progress">
+      <AgentAvatar agent={agent} size="small" />
+      <div className="run-progress-body">
+        <div className="run-progress-title">
+          <span><LoaderCircle className="spin run-activity-spinner" size={15} /> {run.image ? "이미지 생성 중" : agent.runtime === "preview" ? "미리보기 결과 생성 중" : "작업 중"}</span>
+          <strong role="timer" aria-label={`작업 경과 시간 ${formatElapsed(elapsed)}`}>경과 {formatElapsed(elapsed)}</strong>
+        </div>
+        <div className="run-steps">
+          {run.steps.map((step, index) => (
+            <span key={`${step}-${index}`} className={index === run.steps.length - 1 ? "active" : "done"}>
+              {index === run.steps.length - 1 ? <LoaderCircle className="spin run-activity-spinner" size={13} /> : <Check size={13} />}
+              {step}
+            </span>
+          ))}
+        </div>
+        <div className="run-progress-footer">
+          {queuedCount > 0 ? <span>{queuedCount}개 요청 대기 중</span> : <span>다른 채팅으로 이동해도 작업은 계속됩니다</span>}
+          <button className="secondary-button compact" type="button" onClick={onCancel}>
+            <Square size={12} />
+            중지
           </button>
-        ) : (
-          <div className="flex flex-1 items-start gap-3">
-            <WizardStepBadge index={index} state={state} />
-            <div className="min-w-0">
-              <div className="text-[1.05rem] font-semibold tracking-[-0.03em] text-[#191f28] md:text-[1.1rem]">
-                {title}
-              </div>
-              <p className="mt-0.5 text-[0.88rem] leading-5 text-[#6b7684]">
-                {description}
-              </p>
-            </div>
-          </div>
-        )}
-
-        <div
-          className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-semibold ${
-            isActive
-              ? "border-[#cfc6ff] bg-[#f3efff] text-[#2e2b8c]"
-              : isCompleted
-                ? "border-[#cde1ff] bg-[#eef5ff] text-[#1f4da8]"
-                : "border-[#d9d5e2] bg-white text-[#8b95a1]"
-          }`}
-        >
-          {isActive ? "Current" : isCompleted ? "Done" : "Locked"}
         </div>
       </div>
-
-      <div className="px-5 pb-4 pt-3">
-        {isActive ? (
-          <div
-            className={`grid gap-3 transition-all duration-500 ease-out ${
-              active
-                ? "translate-y-0 opacity-100"
-                : "pointer-events-none -translate-y-3 opacity-0"
-            }`}
-          >
-            {body}
-            {footer}
-          </div>
-        ) : (
-          <div className="grid gap-3">{summary}</div>
-        )}
-
-        {isLocked ? (
-          <p className="mt-4 text-sm leading-6 text-[#8b95a1]">
-            Complete the previous step to unlock this section.
-          </p>
-        ) : null}
-      </div>
-      </Card>
     </div>
   );
 }
 
-function WizardStepBadge({
-  index,
-  state,
+function ProjectStartView({
+  agents,
+  selectedAgentId,
+  onSelect,
+  onUse,
 }: {
-  index: number;
-  state: "active" | "completed" | "locked";
+  agents: Agent[];
+  selectedAgentId: string;
+  onSelect: (agentId: string) => void;
+  onUse: (agentId: string) => void;
 }) {
-  const isActive = state === "active";
-  const isCompleted = state === "completed";
-  const isLocked = state === "locked";
+  const [step, setStep] = useState<"intake" | "diagnosis" | "proposal">("intake");
+  const [brief, setBrief] = useState("");
+  const [diagnosis, setDiagnosis] = useState({ channel: "자사몰", assets: "제품 사진", goal: "구매 전환" });
+  const [deliveryMode, setDeliveryMode] = useState<"instant" | "reviewed" | "custom">("reviewed");
+  const designAgents = agents.filter((agent) => agent.category === "디자인");
+  const expert = designAgents.find((agent) => agent.id === selectedAgentId) || designAgents[0] || agents[0];
+  const beginDiagnosis = () => {
+    if (!brief.trim()) return;
+    setStep("diagnosis");
+  };
+  const startProject = () => {
+    if (!expert) return;
+    onSelect(expert.id);
+    onUse(expert.id);
+  };
+  const showAnotherExpert = () => {
+    const currentIndex = designAgents.findIndex((agent) => agent.id === expert?.id);
+    const next = designAgents[(Math.max(currentIndex, 0) + 1) % designAgents.length];
+    if (next) onSelect(next.id);
+  };
 
   return (
-    <span
-      className={`mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-2xl border text-xs font-semibold transition-all ${
-        isActive
-          ? "border-[#533afd]/30 bg-gradient-to-br from-[#efeaff] to-[#f8f5ff] text-[#2e2b8c] shadow-[0_10px_24px_rgba(83,58,253,0.10)]"
-          : isCompleted
-            ? "border-[#cde1ff] bg-[#eef5ff] text-[#1f4da8]"
-            : "border-[#d8d0e6] bg-white text-[#8b95a1]"
-      }`}
+    <section className="page-view project-start-view">
+      <header className="project-hero">
+        <div className="project-stepper" aria-label={`프로젝트 시작 ${step}`}>
+          {["프로젝트 접수", "간단한 진단", "작업 제안"].map((label, index) => {
+            const activeIndex = step === "intake" ? 0 : step === "diagnosis" ? 1 : 2;
+            return <span className={index <= activeIndex ? "active" : ""} key={label}>{index < activeIndex ? <Check size={12} /> : index + 1} {label}</span>;
+          })}
+        </div>
+        <span className="eyebrow">Design project concierge</span>
+        <h1>{step === "intake" ? "무엇을 만들고 계신가요?" : step === "diagnosis" ? "필요한 정보만 짧게 확인할게요." : "이 프로젝트는 이렇게 해결하는 게 좋습니다."}</h1>
+        <p>{step === "intake" ? "아이디어만 있어도 괜찮아요. 필요한 디자인 작업부터 적합한 전문가까지 정리해드릴게요." : step === "diagnosis" ? "긴 설문 대신 지금 결정에 필요한 세 가지만 답해 주세요." : "프롬프트가 아니라 작업 범위와 결과물을 승인하면 바로 시작할 수 있어요."}</p>
+      </header>
+
+      {step === "intake" && <div className="project-intake-card">
+        <label className="project-brief-field">
+          <span>프로젝트 이야기</span>
+          <textarea value={brief} onChange={(event) => setBrief(event.target.value)} placeholder="예: 다음 달 화장품 신제품을 출시하는데, 어떤 디자인이 필요한지 잘 모르겠어요." autoFocus />
+        </label>
+        <div className="project-attach-row">
+          <button type="button"><Upload size={15} /> 파일 업로드</button><button type="button"><Paperclip size={15} /> 링크 추가</button>
+          <small>웹사이트, 기존 디자인, 제품 이미지, 브랜드 가이드를 추가할 수 있어요.</small>
+          <button className="primary-button" type="button" onClick={beginDiagnosis} disabled={!brief.trim()}>프로젝트 진단 시작 <ArrowUpRight size={16} /></button>
+        </div>
+        <div className="project-situation-list"><span>어디서부터 시작해야 할지 모르겠나요?</span>{["신제품 출시", "광고 성과 개선", "상세페이지 개선", "SNS 콘텐츠 제작", "발표자료 개선"].map((item) => <button key={item} type="button" onClick={() => setBrief(`${item}을(를) 준비하고 있는데, 어떤 디자인 작업이 필요한지 먼저 정리하고 싶어요.`)}>{item}</button>)}</div>
+      </div>}
+
+      {step === "diagnosis" && <div className="diagnosis-card">
+        <DiagnosisQuestion label="어디에서 고객을 만나나요?" value={diagnosis.channel} options={["자사몰", "네이버 스마트스토어", "쿠팡", "오프라인", "아직 정하지 않음"]} onChange={(channel) => setDiagnosis((current) => ({ ...current, channel }))} />
+        <DiagnosisQuestion label="현재 준비된 자료는 무엇인가요?" value={diagnosis.assets} options={["제품 사진", "로고와 브랜드 가이드", "제품 설명", "기존 상세페이지", "아직 준비된 것이 없음"]} onChange={(assets) => setDiagnosis((current) => ({ ...current, assets }))} />
+        <DiagnosisQuestion label="이번 프로젝트에서 가장 중요한 목표는 무엇인가요?" value={diagnosis.goal} options={["제품 이해", "구매 전환", "브랜드 인지도", "광고 클릭", "출시 일정 준수"]} onChange={(goal) => setDiagnosis((current) => ({ ...current, goal }))} />
+        <div className="diagnosis-actions"><button className="secondary-button" type="button" onClick={() => setStep("intake")}>이전</button><button className="primary-button" type="button" onClick={() => setStep("proposal")}>작업 제안 보기 <ArrowUpRight size={16} /></button></div>
+      </div>}
+
+      {step === "proposal" && expert && <div className="project-proposal">
+        <section className="proposal-summary"><span className="proposal-label"><Sparkles size={14} /> 진단 결과</span><h2>단순한 디자인 한 장보다, 구매 이유를 정리한 뒤 채널별로 확장하는 작업이 필요합니다.</h2><p>{diagnosis.channel}에서 {diagnosis.goal}을 목표로 하며, 현재 {diagnosis.assets}을 기반으로 시작합니다.</p></section>
+        <div className="proposal-grid"><section className="proposal-package"><span className="eyebrow">Recommended project</span><h2>뷰티 신제품 출시 패키지</h2><p>상세페이지의 핵심 메시지를 먼저 설계하고 광고 소재까지 일관되게 확장합니다.</p><ul><li><CheckCircle2 size={15} /> 상세페이지 콘텐츠 구조와 디자인 1종</li><li><CheckCircle2 size={15} /> 인스타그램 광고 소재 5종</li><li><CheckCircle2 size={15} /> 쇼핑몰 메인 배너 2종 · 채널별 리사이징</li><li><CheckCircle2 size={15} /> 편집 가능한 원본 파일과 전달 가이드</li></ul><div className="proposal-timeline"><span>1. 경쟁 상품 분석</span><span>2. 셀링 포인트 정리</span><span>3. 시안 제작 · 검수</span></div></section>
+          <aside className="expert-recommendation"><span>가장 적합한 전문가</span><div className="expert-profile"><AgentAvatar agent={expert} size="large" /><div><strong>{expert.creator}</strong><small>뷰티 이커머스 디자이너</small><p><Star size={13} fill="currentColor" /> {expert.rating} · {formatCompact(expert.uses)}건 프로젝트</p></div></div><p>제품의 사용 후 경험을 시각적으로 전달하는 작업 방식이 이번 요청에 적합합니다.</p><button type="button" onClick={showAnotherExpert}>다른 전문가 보기 <ChevronRight size={14} /></button></aside></div>
+        <section className="delivery-mode"><div><span className="eyebrow">How involved should the expert be?</span><h2>진행 방식을 선택하세요</h2></div><div className="delivery-options">{([ ["instant", "Instant", "AI 실행", "즉시 초안 · 전문가 직접 검수 없음"], ["reviewed", "Reviewed", "AI 실행 + 디자이너 검수", "최종 확인 · 품질 수정 1회 · 기본 추천"], ["custom", "Custom", "디자이너 직접 참여", "맞춤 상담 · 여러 차례 수정"] ] as const).map(([id, title, heading, detail]) => <button type="button" key={id} className={deliveryMode === id ? "active" : ""} onClick={() => setDeliveryMode(id)}><span>{deliveryMode === id ? <CheckCircle2 size={15} /> : <span className="radio-dot" />}{title}</span><strong>{heading}</strong><small>{detail}</small></button>)}</div></section>
+        <div className="proposal-actions"><button className="text-button" type="button" onClick={() => setStep("diagnosis")}>결과물 조정하기</button><div><span>예상 납기 3일 · 편집 가능한 원본 포함</span><button className="primary-button" type="button" onClick={startProject}>이 구성으로 프로젝트 시작 <ArrowUpRight size={16} /></button></div></div>
+      </div>}
+    </section>
+  );
+}
+
+function StudioHome({ agents, onCreate, onOpenAgent }: { agents: Agent[]; onCreate: () => void; onOpenAgent: (agentId: string) => void }) {
+  const drafts = agents.filter((agent) => agent.status !== "공개");
+  return <section className="studio-home">
+    <header className="studio-hero">
+      <div><span className="eyebrow">HireMe · designer studio</span><h1>좋은 디자인 에이전트는<br />작업 방식을 설계하는 것에서 시작합니다.</h1><p>고객이 답할 질문과 전달 기준을 정리하고, 에이전트를 지속적으로 개선하세요.</p></div>
+      <button className="primary-button studio-create-button" type="button" onClick={onCreate}><Plus size={17} /> 새 에이전트 만들기</button>
+    </header>
+    <section className="studio-flow" aria-label="에이전트 제작 흐름">
+      <article><span>01</span><div><strong>서비스를 정의하세요</strong><p>누구를 위해 어떤 결과물을 만들지 정합니다.</p></div></article>
+      <article><span>02</span><div><strong>고객 질문을 설계하세요</strong><p>프롬프트 대신 선택지로 필요한 맥락을 받습니다.</p></div></article>
+      <article><span>03</span><div><strong>기준을 관리하세요</strong><p>품질 기준과 전달 범위를 지속적으로 개선합니다.</p></div></article>
+    </section>
+    <section className="studio-overview">
+      <div className="studio-overview-heading"><div><span className="eyebrow">Your workspace</span><h2>지금 이어서 할 일</h2></div><span>{agents.length}개 에이전트</span></div>
+      <div className="studio-action-grid">
+        <button className="studio-primary-action" type="button" onClick={onCreate}><span><Plus size={19} /></span><strong>새 에이전트 설계</strong><small>기본 정보와 고객 질문부터 시작</small><ChevronRight size={17} /></button>
+        {drafts[0] ? <button className="studio-draft-action" type="button" onClick={() => onOpenAgent(drafts[0].id)}><span className="studio-status draft">초안</span><strong>{drafts[0].name}</strong><small>질문과 전달 방식을 계속 설정하세요</small><ChevronRight size={16} /></button> : <div className="studio-empty-action"><CheckCircle2 size={18} /><strong>설계 중인 초안이 없어요</strong><small>새 에이전트를 만들어 첫 작업 방식을 정의해 보세요.</small></div>}
+      </div>
+    </section>
+    <section className="studio-agent-section">
+      <div className="studio-overview-heading"><div><span className="eyebrow">Agent management</span><h2>최근 만든 에이전트</h2></div><button className="text-button" type="button" onClick={() => agents[0] && onOpenAgent(agents[0].id)}>전체 보기 <ArrowUpRight size={14} /></button></div>
+      <div className="studio-agent-grid">{agents.slice(0, 3).map((agent) => <article key={agent.id}><AgentCover agent={agent} compact /><div><span className={agent.status === "공개" ? "studio-status live" : "studio-status draft"}>{agent.status === "공개" ? "운영 중" : "설계 중"}</span><h3>{agent.name}</h3><p>{agent.headline}</p><div className="studio-agent-actions"><button type="button" onClick={() => onOpenAgent(agent.id)}>관리하기</button></div></div></article>)}</div>
+      {!agents.length && <div className="studio-no-agents"><Bot size={25} /><h3>첫 디자인 에이전트를 만들어 보세요</h3><p>고객이 직접 프롬프트를 쓰지 않아도, 당신의 작업 방식으로 결과를 받을 수 있게 됩니다.</p><button className="primary-button" type="button" onClick={onCreate}>새 에이전트 만들기</button></div>}
+    </section>
+    <aside className="studio-insight"><Sparkles size={17} /><span><strong>전문성을 관리 가능한 서비스로 만드세요</strong><small>반복되는 요구사항과 품질 기준을 질문과 전달 규칙에 반영하면, 에이전트가 더 정확해집니다.</small></span></aside>
+  </section>;
+}
+
+function DiagnosisQuestion({ label, value, options, onChange }: { label: string; value: string; options: string[]; onChange: (value: string) => void }) {
+  return <section className="diagnosis-question"><h2>{label}</h2><div>{options.map((option) => <button type="button" key={option} className={option === value ? "active" : ""} onClick={() => onChange(option)}>{option === value && <Check size={14} />}{option}</button>)}</div></section>;
+}
+
+function MyAgentsView({
+  agents,
+  selectedAgentId,
+  onSelect,
+  onCreate,
+  onEdit,
+  onDelete,
+  onOpenEarnings,
+  onOpenReview,
+  reviewer,
+  onManage,
+}: {
+  agents: Agent[];
+  selectedAgentId: string;
+  onSelect: (agentId: string) => void;
+  onCreate: () => void;
+  onEdit: (agentId: string) => void;
+  onDelete: (agentId: string) => void;
+  onOpenEarnings: () => void;
+  onOpenReview: () => void;
+  reviewer: boolean;
+  onManage: (agentId: string) => void;
+}) {
+  const totalRevenue = agents.reduce((sum, agent) => sum + (agent.revenue30d || 0), 0);
+  return (
+    <section className="page-view my-agents-view">
+      <CreatorSectionNav active="agents" onAgents={() => {}} onEarnings={onOpenEarnings} onReview={onOpenReview} reviewer={reviewer} />
+      <header className="page-header split">
+        <div>
+          <span className="eyebrow">Design service studio</span>
+          <h1>내 에이전트 관리</h1>
+          <p>고객 질문, 디자인 판단 기준, 전달 기준을 관리하고 버전을 개선하세요.</p>
+        </div>
+        <div className="header-actions">
+          <button className="secondary-button" type="button" onClick={onOpenEarnings}><Wallet size={16} /> 수익 관리</button>
+          <button className="primary-button" type="button" onClick={onCreate}><Plus size={16} /> 새 에이전트 만들기</button>
+        </div>
+      </header>
+
+      <div className="metric-strip three">
+        <Metric label="운영 중인 서비스" value={`${agents.filter((agent) => agent.status === "공개").length}`} detail={`전체 ${agents.length}개`} icon={<Target size={17} />} />
+        <Metric label="최근 30일 수익" value={formatWon(totalRevenue)} detail="지난달보다 18.4% 증가" positive icon={<TrendingUp size={17} />} />
+        <Metric label="관리 중인 버전" value={`${agents.length}개`} detail="질문과 기준을 최신 상태로 유지" icon={<ListChecks size={17} />} />
+      </div>
+
+      <div className="table-toolbar">
+        <div className="section-title">
+          <h2>에이전트 목록</h2>
+          <span>{agents.length}</span>
+        </div>
+        <div>
+          <label className="mini-search"><Search size={15} /><input placeholder="이름 검색" /></label>
+          <button className="icon-button" type="button" aria-label="목록 보기 설정" title="목록 보기 설정"><LayoutGrid size={16} /></button>
+        </div>
+      </div>
+
+      <div className="agent-table-wrap">
+        <table className="agent-table">
+          <thead>
+            <tr>
+              <th>에이전트</th>
+              <th>고객 질문</th>
+              <th>가격</th>
+              <th>30일 수익</th>
+              <th>상태</th>
+              <th><span className="sr-only">관리</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            {agents.map((agent) => (
+              <tr key={agent.id} className={selectedAgentId === agent.id ? "selected" : ""} onClick={() => onSelect(agent.id)}>
+                <td>
+                  <div className="table-agent-cell">
+                    <AgentAvatar agent={agent} size="medium" />
+                    <span><strong>{agent.name}</strong><small>{agent.category}</small></span>
+                  </div>
+                </td>
+                <td><span className="version-cell"><MessageCircleQuestion size={13} /> {agent.designSystem?.questions.length || 0}개</span></td>
+                <td><PendingPrice agent={agent} /></td>
+                <td><strong>{formatWon(agent.revenue30d || 0)}</strong></td>
+                <td><span className={agent.status === "공개" ? "studio-status live" : "studio-status draft"}>{agent.status === "공개" ? "운영 중" : "초안"}</span></td>
+                <td>
+                  <div className="table-row-actions">
+                    <button className="icon-button" type="button" aria-label={`${agent.name} 관리 모드`} title="관리 모드" onClick={(event) => { event.stopPropagation(); onManage(agent.id); }}><SlidersHorizontal size={15} /></button>
+                    <button className="icon-button" type="button" aria-label={`${agent.name} 프로필 수정`} title="프로필 수정" onClick={(event) => { event.stopPropagation(); onEdit(agent.id); }}><PenLine size={15} /></button>
+                    <button className="icon-button danger-icon-button" type="button" aria-label={`${agent.name} 삭제`} title="에이전트 삭제" onClick={(event) => { event.stopPropagation(); onDelete(agent.id); }}><Trash2 size={15} /></button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+function CreatorSectionNav({
+  active,
+  onAgents,
+  onEarnings,
+  onReview,
+  reviewer,
+}: {
+  active: "agents" | "earnings" | "review";
+  onAgents: () => void;
+  onEarnings: () => void;
+  onReview: () => void;
+  reviewer: boolean;
+}) {
+  return (
+    <nav className="creator-section-nav" aria-label="내 디자인 서비스 관리">
+      <button type="button" className={active === "agents" ? "active" : ""} onClick={onAgents}><Target size={15} /> 디자인 서비스</button>
+      <button type="button" className={active === "earnings" ? "active" : ""} onClick={onEarnings}><Wallet size={15} /> 수익</button>
+      {reviewer && <button type="button" className={active === "review" ? "active" : ""} onClick={onReview}><ShieldCheck size={15} /> 검토함</button>}
+    </nav>
+  );
+}
+
+function ReviewInboxView({
+  inbox,
+  busyVersionId,
+  onRefresh,
+  onDecide,
+  onOpenAgents,
+  onOpenEarnings,
+}: {
+  inbox: HireMeReviewInbox;
+  busyVersionId: string | null;
+  onRefresh: () => void;
+  onDecide: (versionId: string, decision: "approved" | "rejected") => void;
+  onOpenAgents: () => void;
+  onOpenEarnings: () => void;
+}) {
+  return (
+    <section className="review-inbox-view">
+      <CreatorSectionNav active="review" onAgents={onOpenAgents} onEarnings={onOpenEarnings} onReview={() => {}} reviewer />
+      <header className="review-inbox-header">
+        <div><span className="eyebrow">플랫폼 운영</span><h1>검토함</h1><p>Private Harness 원문 없이 배포 계약과 자동 검사 결과를 검토합니다.</p></div>
+        <button className="icon-button" type="button" onClick={onRefresh} title="새로고침" aria-label="새로고침"><RefreshCw size={17} /></button>
+      </header>
+      {!inbox.items.length ? <div className="empty-state"><ShieldCheck size={28} /><h2>검토 대기 항목이 없어요</h2><p>새 버전이 제출되면 여기에 나타납니다.</p></div> : (
+        <div className="review-inbox-list">
+          {inbox.items.map((item) => {
+            const preflight = item.preflight || {};
+            const blocking = Array.isArray(preflight.blocking) ? preflight.blocking : [];
+            const warnings = Array.isArray(preflight.warnings) ? preflight.warnings : [];
+            const busy = busyVersionId === item.versionId;
+            return <article className="review-inbox-item" key={item.versionId}>
+              <div className="review-item-topline"><div><span className="review-category">{item.category}</span><h2>{item.name} <small>v{item.version}</small></h2><p>{item.headline}</p></div><time>{formatRelativeTime(item.submittedAt)}</time></div>
+              <div className="review-contract"><span>결과: {readManifestList(item.manifest, "finalizers").join(", ") || "미정"}</span><span>입력: {readManifestList(item.manifest, "inputModes").join(", ") || "미정"}</span><span>{formatBytes(item.packageSizeBytes)}</span></div>
+              <div className={preflight.passed ? "review-preflight passed" : "review-preflight blocked"}>
+                <ShieldCheck size={16} /><span>{preflight.passed ? "자동 사전검사 통과" : "자동 사전검사 차단"}</span>
+              </div>
+              {!!blocking.length && <ul className="review-findings blocking">{blocking.map((line) => <li key={line}>{line}</li>)}</ul>}
+              {!!warnings.length && <ul className="review-findings">{warnings.map((line) => <li key={line}>{line}</li>)}</ul>}
+              <div className="review-item-actions"><button className="secondary-button" type="button" disabled={busy} onClick={() => onDecide(item.versionId, "rejected")}>반려</button><button className="primary-button" type="button" disabled={busy || !preflight.passed} onClick={() => onDecide(item.versionId, "approved")}>{busy ? "처리 중" : "승인"}</button></div>
+            </article>;
+          })}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function EarningsView({ agents, onOpenAgents, onOpenReview, reviewer, onDownload, onPayout }: { agents: Agent[]; onOpenAgents: () => void; onOpenReview: () => void; reviewer: boolean; onDownload: () => void; onPayout: () => void }) {
+  const total = agents.reduce((sum, agent) => sum + (agent.revenue30d || 0), 0);
+  const runRevenue = Math.round(total * 0.63);
+  const subscriptionRevenue = total - runRevenue;
+  const bars = [32, 40, 36, 55, 49, 67, 61, 74, 70, 82, 76, 92];
+  return (
+    <section className="page-view earnings-view">
+      <CreatorSectionNav active="earnings" onAgents={onOpenAgents} onEarnings={() => {}} onReview={onOpenReview} reviewer={reviewer} />
+      <div className="earnings-coming-soon-notice" role="status">
+        <Clock3 size={15} />
+        <strong>수익 기능은 추후 오픈됩니다.</strong>
+      </div>
+      <header className="page-header split">
+        <div>
+          <span className="eyebrow">Creator earnings <span className="demo-label">추후 오픈</span></span>
+          <h1>수익</h1>
+          <p>실행과 구독에서 발생한 예상 수익을 확인하세요.</p>
+        </div>
+        <div className="header-actions">
+          <button className="secondary-button" type="button" onClick={onDownload}><Download size={16} /> 내역 받기</button>
+          <button className="primary-button" type="button" onClick={onPayout}><Wallet size={16} /> 정산 신청</button>
+        </div>
+      </header>
+
+      <div className="metric-strip earnings-metrics">
+        <Metric label="이번 달 예상 수익" value={formatWon(total)} detail="지난달보다 18.4% 증가" positive icon={<DollarSign size={17} />} />
+        <Metric label="정산 가능" value={formatWon(974000)} detail="다음 정산일 7월 25일" icon={<Wallet size={17} />} />
+        <Metric label="실행 수익" value={formatWon(runRevenue)} detail="전체 수익의 63%" icon={<Zap size={17} />} />
+        <Metric label="구독 수익" value={formatWon(subscriptionRevenue)} detail="활성 구독 34건" icon={<CalendarDays size={17} />} />
+      </div>
+
+      <div className="earnings-layout">
+        <section className="revenue-chart-section">
+          <div className="section-heading-row">
+            <div><h2>월별 수익</h2><p>최근 12개월</p></div>
+            <button className="period-select" type="button">2026년 <ChevronDown size={14} /></button>
+          </div>
+          <div className="bar-chart" aria-label="월별 수익 차트">
+            {bars.map((height, index) => (
+              <div className="bar-column" key={index}>
+                <span className="bar-value">{Math.round(height * 18)}K</span>
+                <span className="bar" style={{ height: `${height}%` }} />
+                <small>{index + 1}월</small>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="revenue-split-section">
+          <div className="section-heading-row"><div><h2>수익 구성</h2><p>이번 달 기준</p></div></div>
+          <div className="split-meter"><span style={{ width: "63%" }} /><span style={{ width: "37%" }} /></div>
+          <div className="split-list">
+            <div><span className="legend usage" /><span><strong>실행 요금</strong><small>에이전트 작업이 실행될 때마다 발생</small></span><b>{formatWon(runRevenue)}</b></div>
+            <div><span className="legend subscription" /><span><strong>월 구독</strong><small>구독 기간 동안 정해진 실행 횟수 제공</small></span><b>{formatWon(subscriptionRevenue)}</b></div>
+          </div>
+          <div className="protection-note"><LockKeyhole size={16} /><span><strong>에이전트의 작업 방식은 판매되지 않아요</strong><small>사용자는 실행 권한과 결과만 받습니다.</small></span></div>
+        </section>
+      </div>
+
+      <section className="earnings-table-section">
+        <div className="section-heading-row"><div><h2>최근 수익</h2><p>수수료 반영 전 예상 금액</p></div><button className="text-button" type="button">전체 보기 <ArrowUpRight size={14} /></button></div>
+        <table className="earnings-table">
+          <thead><tr><th>날짜</th><th>에이전트</th><th>유형</th><th>사용량</th><th>상태</th><th>금액</th></tr></thead>
+          <tbody>
+            <EarningRow date="7월 11일 14:32" agent={agents[0]?.name} type="실행" usage="1회 실행" amount="₩1,900" />
+            <EarningRow date="7월 11일 11:18" agent={agents[0]?.name} type="구독" usage="월간 구독" amount="₩29,000" />
+            <EarningRow date="7월 10일 20:41" agent={agents[1]?.name} type="실행" usage="1회 실행" amount="₩900" />
+            <EarningRow date="7월 10일 16:05" agent={agents[0]?.name} type="실행" usage="1회 실행" amount="₩1,900" />
+          </tbody>
+        </table>
+      </section>
+    </section>
+  );
+}
+
+function PrivateHarnessInspector({
+  agent,
+  conversation,
+  managementSession,
+  onNotify,
+  onDirtyChange,
+  onSessionInvalid,
+  onPublish,
+  publishing,
+  runActive,
+  onRevisionChange,
+}: {
+  agent: Agent;
+  conversation: Conversation;
+  managementSession: HireMeAgentManagementSession;
+  onNotify: (title: string, detail?: string) => void;
+  onDirtyChange: (conversationId: string, dirty: boolean) => void;
+  onSessionInvalid: (conversationId: string, error: unknown) => boolean;
+  onPublish: () => void;
+  publishing: boolean;
+  runActive: boolean;
+  onRevisionChange: (phase: string, revision: number) => void;
+}) {
+  const [files, setFiles] = useState<HireMePrivateHarnessFileSummary[]>([]);
+  const [selectedPath, setSelectedPath] = useState("");
+  const [document, setDocument] = useState<HireMePrivateHarnessFile | null>(null);
+  const [draft, setDraft] = useState("");
+  const [revision, setRevision] = useState(agent.authoring?.revision || 0);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const dirty = Boolean(document && draft !== document.content);
+
+  const managementRequest = {
+    conversationId: conversation.id,
+    agentId: agent.id,
+    managementSessionId: managementSession.id,
+  };
+
+  const handleManagementError = useCallback((managementError: unknown) => {
+    if (!isManagementSessionError(managementError)) return false;
+    setFiles([]);
+    setSelectedPath("");
+    setDocument(null);
+    setDraft("");
+    setError(publicErrorMessage(managementError));
+    onDirtyChange(conversation.id, false);
+    onSessionInvalid(conversation.id, managementError);
+    return true;
+  }, [conversation.id, onDirtyChange, onSessionInvalid]);
+
+  useEffect(() => {
+    onDirtyChange(conversation.id, dirty);
+  }, [conversation.id, dirty, onDirtyChange]);
+
+  useEffect(() => () => {
+    onDirtyChange(conversation.id, false);
+  }, [conversation.id, onDirtyChange]);
+
+  useEffect(() => {
+    const desktop = window.hiremeDesktop;
+    if (!desktop) return;
+    let disposed = false;
+    const load = async () => {
+      await Promise.resolve();
+      if (disposed) return;
+      setLoading(true);
+      setError("");
+      try {
+        const result = await desktop.listPrivateHarnessFiles({
+          conversationId: conversation.id,
+          agentId: agent.id,
+          managementSessionId: managementSession.id,
+        });
+        if (disposed) return;
+        setFiles(result.files);
+        setRevision(result.revision);
+        setSelectedPath(result.files.find((file) => file.path === "AGENTS.md")?.path || result.files[0]?.path || "");
+      } catch (loadError) {
+        if (!disposed && !handleManagementError(loadError)) {
+          setError(publicErrorMessage(loadError));
+        }
+      } finally {
+        if (!disposed) setLoading(false);
+      }
+    };
+    void load();
+    return () => {
+      disposed = true;
+    };
+  }, [agent.id, conversation.id, handleManagementError, managementSession.id]);
+
+  useEffect(() => {
+    const desktop = window.hiremeDesktop;
+    if (!desktop || !selectedPath) return;
+    let disposed = false;
+    const load = async () => {
+      await Promise.resolve();
+      if (disposed) return;
+      setLoading(true);
+      setError("");
+      try {
+        const result = await desktop.readPrivateHarnessFile({
+          conversationId: conversation.id,
+          agentId: agent.id,
+          managementSessionId: managementSession.id,
+          path: selectedPath,
+        });
+        if (disposed) return;
+        setDocument(result);
+        setDraft(result.content);
+      } catch (loadError) {
+        if (!disposed && !handleManagementError(loadError)) {
+          setError(publicErrorMessage(loadError));
+        }
+      } finally {
+        if (!disposed) setLoading(false);
+      }
+    };
+    void load();
+    return () => {
+      disposed = true;
+    };
+  }, [agent.id, conversation.id, handleManagementError, managementSession.id, selectedPath]);
+
+  const chooseFile = (path: string) => {
+    if (path === selectedPath) return;
+    if (dirty && !window.confirm("저장하지 않은 변경을 버리고 다른 파일을 열까요?")) return;
+    setDocument(null);
+    setDraft("");
+    setSelectedPath(path);
+  };
+
+  const save = async () => {
+    const desktop = window.hiremeDesktop;
+    if (!desktop || !document || !dirty || saving) return;
+    setSaving(true);
+    setError("");
+    try {
+      const result = await desktop.updatePrivateHarnessFile({
+        ...managementRequest,
+        path: document.path,
+        content: draft,
+        expectedSha256: document.sha256,
+      });
+      setDocument({
+        ...document,
+        content: draft,
+        bytes: result.bytes,
+        sha256: result.sha256,
+      });
+      setFiles((current) => current.map((file) => (
+        file.path === result.path
+          ? { ...file, bytes: result.bytes, sha256: result.sha256 }
+          : file
+      )));
+      setRevision(result.revision);
+      onRevisionChange(result.phase, result.revision);
+      onNotify("Private Harness를 저장했어요", `${result.path} · revision ${result.revision}`);
+    } catch (saveError) {
+      if (handleManagementError(saveError)) return;
+      const message = publicErrorMessage(saveError);
+      setError(message);
+      onNotify("Private Harness를 저장하지 못했어요", message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="private-harness-panel">
+      <div className="private-harness-heading">
+        <div>
+          <span className="private-harness-kicker"><LockKeyhole size={13} /> Owner only</span>
+          <h2>Private Harness</h2>
+          <p>revision {revision} · 이 관리 세션에서만 원문을 표시합니다.</p>
+        </div>
+        <span className="verified-management-badge"><ShieldCheck size={13} /> 검증됨</span>
+      </div>
+
+      <div className="private-harness-file-list" aria-label="Private Harness 파일">
+        {files.map((file) => (
+          <button
+            type="button"
+            key={file.path}
+            className={file.path === selectedPath ? "active" : ""}
+            onClick={() => chooseFile(file.path)}
+          >
+            <FileText size={14} />
+            <span><strong>{file.path}</strong><small>{file.role} · {formatFileBytes(file.bytes)}</small></span>
+          </button>
+        ))}
+        {!loading && files.length === 0 && !error && <p className="private-harness-empty">편집할 Private Harness 파일이 없습니다.</p>}
+      </div>
+
+      <div className="private-harness-editor">
+        <div className="private-harness-editor-bar">
+          <span>{document?.path || "파일을 선택하세요"}</span>
+          {dirty && <small>저장되지 않음</small>}
+        </div>
+        {loading && !document ? (
+          <div className="private-harness-loading"><LoaderCircle className="spin" size={18} /> 불러오는 중</div>
+        ) : (
+          <textarea
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            disabled={!document || saving}
+            spellCheck={false}
+            aria-label="Private Harness 원문 편집"
+          />
+        )}
+      </div>
+
+      {error && <p className="private-harness-error">{error}</p>}
+      <div className="private-harness-actions">
+        <span>{document ? document.sha256.slice(0, 10) : "—"}</span>
+        <div>
+          <button className="secondary-button compact" type="button" onClick={() => void save()} disabled={!dirty || saving || publishing}>
+            {saving ? <LoaderCircle className="spin" size={14} /> : <Check size={14} />}
+            {saving ? "저장 중" : "변경 저장"}
+          </button>
+          <button className="primary-button compact publish-agent-button" type="button" onClick={onPublish} disabled={publishing || saving || runActive}>
+            {publishing ? <LoaderCircle className="spin" size={14} /> : <Upload size={14} />}
+            {publishing ? "배포 준비 중" : agent.status === "공개" ? "새 버전 배포" : "배포하기"}
+          </button>
+        </div>
+      </div>
+      <div className="private-harness-boundary">
+        <ShieldCheck size={15} />
+        <span>원문은 채팅 메시지나 온라인 대화 기록에 저장하지 않습니다.</span>
+      </div>
+    </div>
+  );
+}
+
+function AgentProfileDialog({
+  agent,
+  onClose,
+  onUse,
+  onEdit,
+  onManage,
+}: {
+  agent: Agent;
+  onClose: () => void;
+  onUse: (agentId: string) => void;
+  onEdit: (agentId: string) => void;
+  onManage: (agentId: string) => void;
+}) {
+  const outputExamples = outputExamplesForAgent(agent);
+  const [selectedOutputName, setSelectedOutputName] = useState(outputExamples[0]?.name || "");
+  const selectedOutput = outputExamples.find((output) => output.name === selectedOutputName) ?? outputExamples[0];
+  const mine = agent.ownership === "mine";
+
+  return (
+    <Dialog
+      title={agent.name}
+      subtitle={`${agent.category} 서비스 · ${mine ? "내가 설계함" : `Designed by ${agent.creator}`}`}
+      onClose={onClose}
+      profile
     >
-      {isCompleted ? <CheckCircle2 className="size-4" /> : isLocked ? <LockKeyhole className="size-4" /> : String(index + 1).padStart(2, "0")}
+      <div className="agent-profile-modal">
+        <section className="agent-profile-overview">
+          <AgentCover agent={agent} compact />
+          <div className="agent-profile-copy">
+            <div className="agent-profile-meta">
+              <StatusBadge status={agent.status} />
+              <span>v{agent.version}</span>
+              {!mine && <span><Star size={13} fill="currentColor" /> {agent.rating}</span>}
+              <span>{formatCompact(agent.uses)}건 납품</span>
+            </div>
+            <h3>{agent.headline}</h3>
+            <p>{agent.summary}</p>
+            <div className="agent-profile-capabilities">
+              <div>
+                <small>잘하는 일</small>
+                <div className="detail-skill-list">{agent.skills.map((skill) => <span key={skill}><Check size={13} /> {skill}</span>)}</div>
+              </div>
+              <div>
+                <small>받을 수 있는 결과</small>
+                <div className="result-type-row">{agent.resultTypes.map((type) => <span key={type}><FileText size={13} /> {type}</span>)}</div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {agent.designSystem && <section className="agent-design-system-summary">
+          <div className="agent-design-system-heading">
+            <span><ShieldCheck size={18} /></span>
+            <div><h3>디자이너의 판단 시스템이 적용됩니다</h3><p>{agent.designSystem.purpose}</p></div>
+          </div>
+          <div className="agent-design-system-facts">
+            <span><MessageCircleQuestion size={15} /><strong>{agent.designSystem.questions.length}개</strong><small>작업 전 질문</small></span>
+            <span><Target size={15} /><strong>{agent.designSystem.priorityCount ?? agent.designSystem.priorities.length}단계</strong><small>판단 우선순위</small></span>
+            <span><ListChecks size={15} /><strong>{agent.designSystem.qualityBarCount ?? agent.designSystem.qualityBar.length}개</strong><small>자동 품질 검사</small></span>
+          </div>
+          <p className="agent-design-system-boundary"><LockKeyhole size={13} /> 세부 작업 방식은 디자이너의 비공개 자산으로 보호되고 결과에만 적용됩니다.</p>
+        </section>}
+
+        <section className="agent-output-examples">
+          <div className="agent-output-heading">
+            <div><h3>결과 파일 예시</h3><p>에이전트가 실제로 전달하는 결과의 형식과 내용을 확인하세요.</p></div>
+            <span>{outputExamples.length}개 파일</span>
+          </div>
+          <div className="agent-output-browser">
+            <div className="agent-output-file-list" role="list" aria-label="결과 파일 예시">
+              {outputExamples.map((output) => (
+                <button
+                  type="button"
+                  role="listitem"
+                  className={output.name === selectedOutput?.name ? "active" : ""}
+                  key={output.name}
+                  onClick={() => setSelectedOutputName(output.name)}
+                >
+                  <span className="agent-output-file-icon"><FileText size={16} /></span>
+                  <span><strong>{output.name}</strong><small>{outputTypeLabel(output.mimeType)}{output.size ? ` · ${formatFileSize(output.size)}` : ""}</small></span>
+                  <ChevronRight size={14} />
+                </button>
+              ))}
+            </div>
+            {selectedOutput && <AgentOutputPreview output={selectedOutput} />}
+          </div>
+        </section>
+
+        <div className="agent-profile-modal-actions">
+          <span><small>{mine ? "실행당 가격" : "가격"}</small><PendingPrice agent={agent} /></span>
+          <div>
+            {mine ? (
+              <>
+                <button className="secondary-button" type="button" onClick={() => onEdit(agent.id)}><PenLine size={15} /> 프로필 수정</button>
+                <button className="primary-button" type="button" onClick={() => onManage(agent.id)}><SlidersHorizontal size={15} /> 관리 모드</button>
+              </>
+            ) : (
+              <button className={agent.hired ? "primary-button" : "secondary-button"} type="button" onClick={() => onUse(agent.id)}>{agent.hired ? "질문에 답하고 맡기기" : "서비스 이용하기"}</button>
+            )}
+          </div>
+        </div>
+      </div>
+    </Dialog>
+  );
+}
+
+function AgentOutputPreview({ output }: { output: AgentOutputExample }) {
+  const { source, onError } = useFilePreview(output);
+  const canOpen = Boolean(output.path && window.hiremeDesktop);
+  return (
+    <div className="agent-output-preview" aria-live="polite">
+      <div className="agent-output-preview-bar">
+        <span><FileText size={14} /> {output.name}</span>
+        <small>{outputTypeLabel(output.mimeType)}</small>
+      </div>
+      <div className={`agent-output-preview-stage ${isImageFile(output) ? "image" : "document"}`}>
+        {isImageFile(output) && source ? (
+          <img src={source} alt={`${output.name} 결과 예시`} onError={onError} />
+        ) : output.previewText ? (
+          <pre>{output.previewText}</pre>
+        ) : (
+          <div className="agent-output-external-file">
+            <FileText size={30} />
+            <strong>{output.name}</strong>
+            <span>이 파일은 연결된 기본 앱에서 확인할 수 있습니다.</span>
+          </div>
+        )}
+      </div>
+      <div className="agent-output-preview-footer">
+        <p>{output.description || "에이전트가 전달하는 결과 파일 예시입니다."}</p>
+        {canOpen && <button className="secondary-button compact" type="button" onClick={() => openWorkspaceFile(output)}><ArrowUpRight size={14} /> 파일 열기</button>}
+      </div>
+    </div>
+  );
+}
+
+function EarningsInspector({ onPayout }: { onPayout: () => void }) {
+  return (
+    <div className="inspector-content">
+      <div className="inspector-heading"><span>정산 정보</span><span className="demo-label">추후 오픈</span></div>
+      <div className="payout-balance"><small>정산 가능 금액</small><strong>₩974,000</strong><span><CheckCircle2 size={14} /> 계좌 인증 완료</span></div>
+      <button className="primary-button full" type="button" onClick={onPayout}>정산 신청</button>
+      <InspectorSection title="다음 정산"><InfoRow icon={<CalendarDays size={15} />} label="예정일" value="7월 25일" /><InfoRow icon={<ReceiptText size={15} />} label="예상 금액" value="₩1,129,000" /></InspectorSection>
+      <InspectorSection title="정산 계좌"><div className="bank-row"><span className="bank-mark">KB</span><span><strong>국민은행 · 3921</strong><small>예금주 한랩</small></span><button className="text-button" type="button">변경</button></div></InspectorSection>
+      <div className="info-panel"><Info size={16} /><span><strong>수익 기능은 현재 초안입니다</strong><small>실제 결제·세금·환불 정책은 결제 제공자 연결 시 확정됩니다.</small></span></div>
+    </div>
+  );
+}
+
+function NewChatDialog({
+  agents,
+  initialScope,
+  onSelect,
+  onBrowse,
+  onCreateAgent,
+  onClose,
+}: {
+  agents: Agent[];
+  initialScope: WorkScope;
+  onSelect: (agentId: string) => void;
+  onBrowse: () => void;
+  onCreateAgent: () => void;
+  onClose: () => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [scope, setScope] = useState<WorkScope>(initialScope);
+  const scopeAgents = agents.filter((agent) => (
+    scope === "created" ? agent.ownership === "mine" : agent.ownership === "market" && agent.hired
+  ));
+  const available = scopeAgents.filter((agent) => (
+    `${agent.name} ${agent.headline}`.toLowerCase().includes(query.trim().toLowerCase())
+  ));
+  const counts: Record<WorkScope, number> = {
+    created: agents.filter((agent) => agent.ownership === "mine").length,
+    hired: agents.filter((agent) => agent.ownership === "market" && agent.hired).length,
+  };
+  return (
+    <Dialog
+      title={scope === "created" ? "내 서비스 고객 경험 테스트" : "새 디자인 작업 맡기기"}
+      subtitle="디자이너가 설계한 질문과 품질 기준을 확인할 서비스를 선택하세요."
+      onClose={onClose}
+    >
+      <div className="dialog-work-scope-tabs" role="tablist" aria-label="에이전트 구분">
+        {([
+          { id: "created", label: "직접 만든" },
+          { id: "hired", label: "고용한" },
+        ] as Array<{ id: WorkScope; label: string }>).map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            role="tab"
+            aria-selected={scope === item.id}
+            className={scope === item.id ? "active" : ""}
+            onClick={() => setScope(item.id)}
+          >
+            <span>{item.label}</span>
+            <small>{counts[item.id]}</small>
+          </button>
+        ))}
+      </div>
+      <label className="dialog-search"><Search size={16} /><input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="디자인 서비스 검색" /></label>
+      <div className="dialog-agent-list">
+        {available.length > 0 ? (
+          available.map((agent) => (
+            <button type="button" key={agent.id} onClick={() => onSelect(agent.id)}>
+              <AgentAvatar agent={agent} size="medium" />
+              <span><strong>{agent.name}</strong><small>{agent.headline}</small></span>
+              <span className="dialog-agent-price"><PendingPrice agent={agent} compact /></span>
+              <ChevronRight size={16} />
+            </button>
+          ))
+        ) : (
+          <div className="dialog-agent-empty">
+            {query.trim() ? <Search size={20} /> : scope === "created" ? <Bot size={20} /> : <Compass size={20} />}
+            <strong>{query.trim()
+              ? "검색 결과가 없어요"
+              : scope === "created" ? "아직 직접 만든 에이전트가 없어요" : "아직 고용한 에이전트가 없어요"}</strong>
+          </div>
+        )}
+      </div>
+      <button
+        className="dialog-footer-action"
+        type="button"
+        onClick={scope === "created" ? onCreateAgent : onBrowse}
+      >
+        {scope === "created" ? <Plus size={15} /> : <Compass size={15} />}
+        {scope === "created" ? "새 디자인 서비스 만들기" : "디자인 서비스 둘러보기"}
+        <ChevronRight size={14} />
+      </button>
+    </Dialog>
+  );
+}
+
+function NewAgentDialog({ onClose, onCreate }: { onClose: () => void; onCreate: (agent: Agent) => Promise<void> }) {
+  const [creationStep, setCreationStep] = useState(0);
+  const [name, setName] = useState("");
+  const [category, setCategory] = useState<AgentCategory>("디자인");
+  const [headline, setHeadline] = useState("");
+  const [summary, setSummary] = useState("");
+  const [skills, setSkills] = useState("");
+  const [runPrice, setRunPrice] = useState("");
+  const [designSystem, setDesignSystem] = useState<DesignDecisionSystem>(() => defaultDesignSystem());
+  const [seedFiles, setSeedFiles] = useState<AgentOutputExample[]>([]);
+  const [profileImage, setProfileImage] = useState<Attachment | null>(null);
+  const [pickingSeedFiles, setPickingSeedFiles] = useState<"example" | "prompt" | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const validBasic = Boolean(name.trim() && headline.trim() && summary.trim());
+  const valid = Boolean(validBasic && normalizeRunPrice(runPrice) > 0);
+  const pickSeedFiles = async (kind: "example" | "prompt") => {
+    if (!window.hiremeDesktop || pickingSeedFiles) return;
+    setPickingSeedFiles(kind);
+    try {
+      const picked = await window.hiremeDesktop.pickFiles();
+      const supported = (picked || []).filter(isAgentSeedFile).map((file) => ({
+        ...file,
+        kind: kind === "example" ? "agent-output-example" : "agent-prompt-file",
+        description: kind === "example" ? "예시 결과" : "프롬프트 파일",
+      }));
+      if (!supported.length && picked?.length) {
+        setError("예시 결과와 프롬프트 파일에는 Markdown 또는 이미지 파일만 넣을 수 있어요.");
+        return;
+      }
+      setSeedFiles((current) => {
+        const next = [...current, ...supported];
+        return next.filter((file, index) => (
+          next.findIndex((candidate) => (candidate.path || candidate.name) === (file.path || file.name)) === index
+        )).slice(0, 6);
+      });
+    } finally {
+      setPickingSeedFiles(null);
+    }
+  };
+  const pickProfileImage = async () => {
+    if (!window.hiremeDesktop) return;
+    const files = await window.hiremeDesktop.pickFiles();
+    const image = (files || []).find(isImageFile);
+    if (!image) {
+      if (files?.length) setError("프로필 사진은 PNG, JPEG, WebP 또는 GIF 이미지여야 해요.");
+      return;
+    }
+    setProfileImage(image);
+  };
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!valid || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await onCreate({
+        id: slugify(name),
+        name: name.trim(),
+        creator: "나",
+        category,
+        headline: headline.trim(),
+        summary: summary.trim(),
+        image: profileImage?.path,
+        skills: parseCommaSeparated(skills, [category, "맞춤 작업"]),
+        resultTypes: seedFiles.length
+          ? seedFiles.map((file) => file.name)
+          : [defaultOutputFileForCategory(category)],
+        outputExamples: seedFiles,
+        accent: "green",
+        rating: 0,
+        reviews: 0,
+        uses: 0,
+        billingMode: "run",
+        runPrice: normalizeRunPrice(runPrice),
+        version: "0.1.0",
+        ownership: "mine",
+        status: "초안",
+        revenue30d: 0,
+        subscribers: 0,
+        runtime: "local",
+        designSystem: category === "디자인" ? designSystem : undefined,
+      });
+    } catch (caught) {
+      const message = caught instanceof Error ? caught.message : String(caught || "");
+      setError(/already exists|agent_exists/i.test(message)
+        ? "같은 이름의 에이전트가 이미 있어요. 이름을 조금 다르게 정해 주세요."
+        : "초안을 만들지 못했어요. 연결 상태를 확인한 뒤 다시 시도해 주세요.");
+      setBusy(false);
+    }
+  };
+  return (
+    <Dialog title="새 디자인 에이전트 만들기" subtitle="전문가의 작업 방식을 고객이 쉽게 실행할 수 있는 서비스로 구성합니다." onClose={onClose} wide scrollable>
+      <form className="agent-form edit-agent-form" onSubmit={submit}>
+        <CreationStepper step={creationStep} />
+        {creationStep === 0 && <section className="creation-step-panel">
+          <div className="creation-step-copy"><span>01 · 서비스 기본 정보</span><h3>어떤 디자인 작업을 대신할 에이전트인가요?</h3><p>사용자에게 보이는 이름과 결과물 약속부터 정합니다. 기술 용어는 노출하지 않습니다.</p></div>
+          <ProfileImageField image={profileImage} onPick={() => void pickProfileImage()} onClear={() => setProfileImage(null)} />
+          <label><span>서비스 이름</span><input autoFocus value={name} onChange={(event) => setName(event.target.value)} placeholder="예: 뷰티 상세페이지 디자이너" required disabled={busy} /></label>
+          <label><span>한 줄 약속</span><input value={headline} onChange={(event) => setHeadline(event.target.value)} placeholder="예: 제품의 구매 이유가 한눈에 읽히는 상세페이지를 만들어요" required disabled={busy} /></label>
+          <label><span>이 서비스가 해결하는 일</span><textarea value={summary} onChange={(event) => setSummary(event.target.value)} placeholder="누구의 어떤 문제를 해결하고, 어떤 결과를 잘 만드는지 알려주세요." required disabled={busy} /></label>
+          <fieldset disabled={busy}><legend>전문 분야</legend><div className="segmented-options">{(["디자인", "글쓰기", "비즈니스", "리서치", "생산성"] as AgentCategory[]).map((item) => <button className={category === item ? "active" : ""} type="button" key={item} onClick={() => setCategory(item)}>{item}</button>)}</div></fieldset>
+          <label><span>제작하는 결과물</span><input value={skills} onChange={(event) => setSkills(event.target.value)} placeholder="상세페이지, 광고 소재, 배너" disabled={busy} /><small>쉼표로 구분해 주세요.</small></label>
+        </section>}
+        {creationStep === 1 && <section className="creation-step-panel">
+          <div className="creation-step-copy"><span>02 · 고객 질문 설계</span><h3>좋은 결과를 위해 무엇을 물어봐야 하나요?</h3><p>사용자는 프롬프트를 쓰지 않습니다. 질문과 선택지를 통해 필요한 맥락을 받습니다.</p></div>
+          {category === "디자인" && <DesignSystemEditor value={designSystem} onChange={setDesignSystem} disabled={busy} />}
+        </section>}
+        {creationStep === 2 && <section className="creation-step-panel">
+          <div className="creation-step-copy"><span>03 · 전달 방식과 테스트</span><h3>결과물과 첫 테스트를 준비하세요.</h3><p>대표 결과를 넣으면 다음 단계에서 실제 고객 화면과 캔버스 수정 흐름을 바로 확인할 수 있습니다.</p></div>
+          <label><span>실행당 가격</span><input type="text" inputMode="numeric" value={runPrice} onChange={(event) => setRunPrice(formatRunPriceInput(event.target.value))} placeholder="예: 1,900" required disabled={busy} /><small>{runPrice ? `${formatWon(normalizeRunPrice(runPrice))} / 실행` : "사용자가 에이전트를 한 번 실행할 때 받을 금액(원)입니다."}</small></label>
+          <section className="profile-output-editor agent-seed-file-editor">
+          <div className="profile-output-editor-heading">
+            <span><strong>전달할 파일</strong><small>예시 결과와 프롬프트 파일은 Markdown 또는 이미지 파일로 추가할 수 있습니다.</small></span>
+            <div className="agent-seed-file-actions">
+              <button className="secondary-button compact" type="button" onClick={() => void pickSeedFiles("example")} disabled={!window.hiremeDesktop || Boolean(pickingSeedFiles) || busy}>
+                {pickingSeedFiles === "example" ? <LoaderCircle className="spin" size={14} /> : <Paperclip size={14} />}
+                예시 결과
+              </button>
+              <button className="secondary-button compact" type="button" onClick={() => void pickSeedFiles("prompt")} disabled={!window.hiremeDesktop || Boolean(pickingSeedFiles) || busy}>
+                {pickingSeedFiles === "prompt" ? <LoaderCircle className="spin" size={14} /> : <Paperclip size={14} />}
+                프롬프트 파일
+              </button>
+            </div>
+          </div>
+          {seedFiles.length > 0 && <div className="profile-output-editor-list">
+            {seedFiles.map((file) => (
+              <div key={file.path || `${file.kind}-${file.name}`}>
+                <span className="profile-output-editor-thumbnail"><FileThumbnail file={file} /></span>
+                <span><strong>{file.name}</strong><small>{file.description} · {outputTypeLabel(file.mimeType)}{file.size ? ` · ${formatFileSize(file.size)}` : ""}</small></span>
+                <button className="icon-button" type="button" aria-label={`${file.name} 제거`} title="제거" onClick={() => setSeedFiles((current) => current.filter((item) => item !== file))}><X size={14} /></button>
+              </div>
+            ))}
+          </div>}
+          {!seedFiles.length && <p className="agent-seed-file-empty">아직 추가한 파일이 없습니다. 설계 대화 중에도 더 추가할 수 있어요.</p>}
+          {!window.hiremeDesktop && <small className="profile-output-editor-note">설치된 데스크톱 앱에서 파일을 추가할 수 있습니다.</small>}
+          </section>
+        </section>}
+        {error && <p className="agent-create-error" role="alert">{error}</p>}
+        <div className="dialog-actions creation-actions">
+          {creationStep === 0 ? <button className="secondary-button" type="button" onClick={onClose} disabled={busy}>취소</button> : <button className="secondary-button" type="button" onClick={() => setCreationStep((current) => current - 1)} disabled={busy}>이전</button>}
+          {creationStep < 2 ? <button className="primary-button" type="button" onClick={() => setCreationStep((current) => current + 1)} disabled={busy || (creationStep === 0 && !validBasic)}>다음 단계 <ChevronRight size={15} /></button> : <button className="primary-button" type="submit" disabled={!valid || busy}>{busy ? <><LoaderCircle className="spin" size={15} /> 초안 만드는 중</> : "에이전트 만들고 관리 시작"}</button>}
+        </div>
+      </form>
+    </Dialog>
+  );
+}
+
+function CreationStepper({ step }: { step: number }) {
+  return <div className="creation-stepper" aria-label="에이전트 생성 단계">{["기본 정보", "고객 질문", "전달·테스트"].map((label, index) => <span className={index === step ? "active" : index < step ? "complete" : ""} key={label}><i>{index < step ? <Check size={12} /> : index + 1}</i>{label}</span>)}</div>;
+}
+
+function EditAgentDialog({
+  agent,
+  onClose,
+  onSave,
+}: {
+  agent: Agent;
+  onClose: () => void;
+  onSave: (updates: Partial<Agent>) => Promise<boolean>;
+}) {
+  const [name, setName] = useState(agent.name);
+  const [headline, setHeadline] = useState(agent.headline);
+  const [summary, setSummary] = useState(agent.summary);
+  const [category, setCategory] = useState<AgentCategory>(agent.category);
+  const [skills, setSkills] = useState(agent.skills.join(", "));
+  const [runPrice, setRunPrice] = useState(agent.runPrice ? String(agent.runPrice) : "");
+  const [resultTypes, setResultTypes] = useState(agent.resultTypes.join(", "));
+  const [designSystem, setDesignSystem] = useState<DesignDecisionSystem>(() => agent.designSystem || defaultDesignSystem());
+  const [outputExamples, setOutputExamples] = useState<AgentOutputExample[]>(outputExamplesForAgent(agent));
+  const [profileImage, setProfileImage] = useState<Attachment | null>(agent.image ? {
+    name: "agent-profile-image",
+    path: agent.image,
+  } : null);
+  const [pickingOutput, setPickingOutput] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const valid = Boolean(name.trim() && headline.trim() && summary.trim() && normalizeRunPrice(runPrice) > 0);
+  const pickOutputExamples = async () => {
+    if (!window.hiremeDesktop || pickingOutput) return;
+    setPickingOutput(true);
+    try {
+      const files = await window.hiremeDesktop.pickFiles();
+      if (!files?.length) return;
+      setOutputExamples((current) => {
+        const next = [...current, ...files];
+        return next.filter((file, index) => (
+          next.findIndex((candidate) => (candidate.path || candidate.name) === (file.path || file.name)) === index
+        )).slice(0, 6);
+      });
+    } finally {
+      setPickingOutput(false);
+    }
+  };
+  const pickProfileImage = async () => {
+    if (!window.hiremeDesktop) return;
+    const files = await window.hiremeDesktop.pickFiles();
+    const image = (files || []).find(isImageFile);
+    if (image) setProfileImage(image);
+  };
+  return (
+    <Dialog title="에이전트 프로필 수정" subtitle="사용자에게 보이는 이름, 소개, 능력과 결과물을 관리합니다." onClose={onClose} wide scrollable>
+      <form className="agent-form edit-agent-form" onSubmit={async (event) => {
+        event.preventDefault();
+        if (!valid || saving) return;
+        setSaving(true);
+        await onSave({
+          name: name.trim(),
+          headline: headline.trim(),
+          summary: summary.trim(),
+          category,
+          image: profileImage?.path,
+          runPrice: normalizeRunPrice(runPrice),
+          skills: parseCommaSeparated(skills, agent.skills),
+          resultTypes: parseCommaSeparated(resultTypes, agent.resultTypes),
+          outputExamples,
+          designSystem: category === "디자인" ? designSystem : undefined,
+        });
+        setSaving(false);
+      }}>
+        <ProfileImageField image={profileImage} onPick={() => void pickProfileImage()} onClear={() => setProfileImage(null)} />
+        <label><span>이름</span><input autoFocus value={name} onChange={(event) => setName(event.target.value)} required /></label>
+        <label><span>한 줄 소개</span><input value={headline} onChange={(event) => setHeadline(event.target.value)} required /></label>
+        <label><span>상세 설명</span><textarea value={summary} onChange={(event) => setSummary(event.target.value)} required /></label>
+        <fieldset><legend>분야</legend><div className="segmented-options">{(["디자인", "글쓰기", "비즈니스", "리서치", "생산성"] as AgentCategory[]).map((item) => <button className={category === item ? "active" : ""} type="button" key={item} onClick={() => setCategory(item)}>{item}</button>)}</div></fieldset>
+        <div className="agent-create-two-column">
+          <label><span>잘하는 일</span><input value={skills} onChange={(event) => setSkills(event.target.value)} /><small>쉼표로 구분</small></label>
+          <label><span>결과물</span><input value={resultTypes} onChange={(event) => setResultTypes(event.target.value)} /><small>쉼표로 구분</small></label>
+        </div>
+        {category === "디자인" && <DesignSystemEditor value={designSystem} onChange={setDesignSystem} />}
+        <label><span>실행당 가격</span><input type="text" inputMode="numeric" value={runPrice} onChange={(event) => setRunPrice(formatRunPriceInput(event.target.value))} placeholder="예: 1,900" required /><small>{runPrice ? `${formatWon(normalizeRunPrice(runPrice))} / 실행` : "사용자가 에이전트를 한 번 실행할 때 받을 금액(원)입니다."} · 수익 기능 준비 중</small></label>
+        <section className="profile-output-editor">
+          <div className="profile-output-editor-heading">
+            <span><strong>결과 예시 파일</strong><small>프로필에서 사용자가 미리 확인할 수 있는 실제 결과물을 추가하세요.</small></span>
+            <button className="secondary-button compact" type="button" onClick={() => void pickOutputExamples()} disabled={!window.hiremeDesktop || pickingOutput}>
+              {pickingOutput ? <LoaderCircle className="spin" size={14} /> : <Paperclip size={14} />}
+              파일 추가
+            </button>
+          </div>
+          <div className="profile-output-editor-list">
+            {outputExamples.map((output) => (
+              <div key={output.path || output.name}>
+                <span className="profile-output-editor-thumbnail"><FileThumbnail file={output} /></span>
+                <span><strong>{output.name}</strong><small>{outputTypeLabel(output.mimeType)}{output.size ? ` · ${formatFileSize(output.size)}` : ""}</small></span>
+                <button className="icon-button" type="button" aria-label={`${output.name} 제거`} title="제거" onClick={() => setOutputExamples((current) => current.filter((item) => item !== output))}><X size={14} /></button>
+              </div>
+            ))}
+          </div>
+          {!window.hiremeDesktop && <small className="profile-output-editor-note">설치된 데스크톱 앱에서 예시 파일을 추가할 수 있습니다.</small>}
+        </section>
+        <div className="dialog-actions"><button className="secondary-button" type="button" onClick={onClose} disabled={saving}>취소</button><button className="primary-button" type="submit" disabled={!valid || saving}>{saving ? <><LoaderCircle className="spin" size={14} /> 저장 중</> : "저장"}</button></div>
+      </form>
+    </Dialog>
+  );
+}
+
+function DesignSystemEditor({
+  value,
+  onChange,
+  disabled = false,
+}: {
+  value: DesignDecisionSystem;
+  onChange: (value: DesignDecisionSystem) => void;
+  disabled?: boolean;
+}) {
+  const updateQuestion = (id: string, updates: Partial<DesignQuestion>) => {
+    onChange({
+      ...value,
+      questions: value.questions.map((question) => question.id === id ? { ...question, ...updates } : question),
+    });
+  };
+  const setLines = (key: "priorities" | "avoid" | "qualityBar", text: string) => {
+    onChange({ ...value, [key]: text.split("\n").map((line) => line.trim()).filter(Boolean) });
+  };
+  const addQuestion = () => {
+    onChange({
+      ...value,
+      questions: [
+        ...value.questions,
+        {
+          id: `question-${eventTimeMs().toString(36)}`,
+          label: "",
+          kind: "short",
+          required: true,
+        },
+      ],
+    });
+  };
+
+  return (
+    <section className="design-system-editor">
+      <div className="design-system-editor-heading">
+        <span className="design-system-editor-icon"><Target size={18} /></span>
+        <span><strong>Design Decision System</strong><small>색상보다 중요한 목적, 우선순위, 금지 규칙과 통과 기준을 정의합니다.</small></span>
+      </div>
+
+      <label>
+        <span>이 서비스가 지켜야 할 핵심 목적</span>
+        <textarea value={value.purpose} onChange={(event) => onChange({ ...value, purpose: event.target.value })} rows={2} disabled={disabled} placeholder="예: 제품의 전문성을 유지하면서 3초 안에 핵심 효능이 읽히게 합니다." />
+      </label>
+
+      <div className="design-system-rule-grid">
+        <label><span>판단 우선순위</span><textarea value={value.priorities.join("\n")} onChange={(event) => setLines("priorities", event.target.value)} rows={3} disabled={disabled} /><small>한 줄에 하나씩 입력</small></label>
+        <label><span>절대 피할 것</span><textarea value={value.avoid.join("\n")} onChange={(event) => setLines("avoid", event.target.value)} rows={3} disabled={disabled} /><small>평균적인 AI 결과를 막는 기준</small></label>
+      </div>
+
+      <label>
+        <span>결과 통과 기준</span>
+        <textarea value={value.qualityBar.join("\n")} onChange={(event) => setLines("qualityBar", event.target.value)} rows={3} disabled={disabled} />
+        <small>결과 생성 후 자동 검사에 사용됩니다.</small>
+      </label>
+
+      <div className="design-question-editor-heading">
+        <span><strong><MessageCircleQuestion size={15} /> User Ask Questions</strong><small>고객은 빈 프롬프트 대신 아래 질문에 답하고 작업을 시작합니다.</small></span>
+        <button className="secondary-button compact" type="button" onClick={addQuestion} disabled={disabled}><Plus size={14} /> 질문 추가</button>
+      </div>
+
+      <div className="design-question-editor-list">
+        {value.questions.map((question, index) => (
+          <article className="design-question-editor-card" key={question.id}>
+            <span className="design-question-number">{String(index + 1).padStart(2, "0")}</span>
+            <div className="design-question-editor-fields">
+              <input value={question.label} onChange={(event) => updateQuestion(question.id, { label: event.target.value })} placeholder="고객에게 물어볼 질문" disabled={disabled} />
+              <div>
+                <select value={question.kind} onChange={(event) => updateQuestion(question.id, { kind: event.target.value as DesignQuestionKind })} disabled={disabled}>
+                  <option value="single">하나 선택</option>
+                  <option value="multi">복수 선택</option>
+                  <option value="short">짧은 답변</option>
+                  <option value="long">긴 답변</option>
+                </select>
+                {(question.kind === "single" || question.kind === "multi") && (
+                  <input value={(question.options || []).join(", ")} onChange={(event) => updateQuestion(question.id, { options: event.target.value.split(",").map((item) => item.trim()).filter(Boolean) })} placeholder="선택지, 쉼표로 구분" disabled={disabled} />
+                )}
+              </div>
+              <label className="design-question-required"><input type="checkbox" checked={question.required} onChange={(event) => updateQuestion(question.id, { required: event.target.checked })} disabled={disabled} /> 필수 질문</label>
+            </div>
+            <button className="icon-button" type="button" aria-label={`${index + 1}번 질문 제거`} title="질문 제거" disabled={disabled || value.questions.length === 1} onClick={() => onChange({ ...value, questions: value.questions.filter((item) => item.id !== question.id) })}><Trash2 size={14} /></button>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function ProfileImageField({
+  image,
+  onPick,
+  onClear,
+}: {
+  image: Attachment | null;
+  onPick: () => void;
+  onClear: () => void;
+}) {
+  const { source, onError } = useFilePreview(image || { name: "" });
+  return (
+    <section className="agent-profile-image-field">
+      <span className="agent-profile-image-preview">
+        {source ? <img src={source} alt="선택한 에이전트 프로필" onError={onError} /> : <Bot size={19} />}
+      </span>
+      <span><strong>프로필 사진</strong><small>에이전트 목록과 작업 채팅에 표시됩니다.</small></span>
+      <div>
+        <button className="secondary-button compact" type="button" onClick={onPick} disabled={!window.hiremeDesktop}><Paperclip size={14} /> 사진 선택</button>
+        {image && <button className="icon-button" type="button" aria-label="프로필 사진 제거" title="제거" onClick={onClear}><X size={14} /></button>}
+      </div>
+    </section>
+  );
+}
+
+function Dialog({ title, subtitle, onClose, closeable = true, wide = false, profile = false, scrollable = false, children }: { title: string; subtitle?: string; onClose: () => void; closeable?: boolean; wide?: boolean; profile?: boolean; scrollable?: boolean; children: ReactNode }) {
+  return (
+    <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (closeable && event.target === event.currentTarget) onClose(); }}>
+      <section className={profile ? "dialog agent-profile-dialog" : `dialog${wide ? " wide" : ""}${scrollable ? " scrollable-dialog" : ""}`} role="dialog" aria-modal="true" aria-labelledby="dialog-title">
+        <header><div><h2 id="dialog-title">{title}</h2>{subtitle && <p>{subtitle}</p>}</div>{closeable && <button className="icon-button" type="button" aria-label="닫기" title="닫기" onClick={onClose}><X size={18} /></button>}</header>
+        <div className="dialog-body">{children}</div>
+      </section>
+    </div>
+  );
+}
+
+function AgentAvatar({ agent, size }: { agent?: Agent; size: "small" | "medium" | "large" }) {
+  const Icon = agent ? categoryIcons[agent.category] : Bot;
+  const { source: image, onError } = useAgentProfileImage(agent?.image);
+  if (image) {
+    return <span className={`agent-avatar ${size}`}><img src={image} alt="" onError={onError} /></span>;
+  }
+  return <span className={`agent-avatar ${size} ${agent?.accent || "charcoal"}`}><Icon size={size === "large" ? 25 : size === "medium" ? 19 : 15} /></span>;
+}
+
+function AgentCover({ agent, compact = false }: { agent: Agent; compact?: boolean }) {
+  const Icon = categoryIcons[agent.category];
+  const { source: image, onError } = useAgentProfileImage(agent.image);
+  return (
+    <div className={`agent-cover ${agent.accent} ${compact ? "compact" : ""}`}>
+      {image
+        ? <img src={image} alt={`${agent.name} 결과 예시`} onError={onError} />
+        : <Icon size={compact ? 34 : 42} />}
+      <span className="cover-category"><Icon size={12} /> {agent.category}</span>
+    </div>
+  );
+}
+
+function Metric({ label, value, detail, positive, icon }: { label: string; value: string; detail: string; positive?: boolean; icon: ReactNode }) {
+  return <div className="metric"><div className="metric-label"><span>{icon}</span>{label}</div><strong>{value}</strong><small className={positive ? "positive" : ""}>{positive && <TrendingUp size={12} />}{detail}</small></div>;
+}
+
+function StatusBadge({ status }: { status: Agent["status"] }) {
+  return <span className={`status-badge ${status === "공개" ? "published" : status === "검토 중" ? "review" : "draft"}`}><span />{status}</span>;
+}
+
+function InspectorSection({ title, children }: { title: string; children: ReactNode }) {
+  return <section className="inspector-section"><h3>{title}</h3>{children}</section>;
+}
+
+function InfoRow({ icon, label, value }: { icon: ReactNode; label: string; value: string }) {
+  return <div className="info-row"><span>{icon}{label}</span><strong>{value}</strong></div>;
+}
+
+function EarningRow({ date, agent, type, usage, amount }: { date: string; agent?: string; type: string; usage: string; amount: string }) {
+  return <tr><td>{date}</td><td><strong>{agent || "에이전트"}</strong></td><td><span className={`earning-type ${type === "구독" ? "subscription" : "usage"}`}>{type}</span></td><td>{usage}</td><td><span className="earning-status"><Check size={12} /> 반영됨</span></td><td><strong>{amount}</strong></td></tr>;
+}
+
+function workScopeForAgent(agent?: Agent): WorkScope {
+  return agent?.ownership === "market" ? "hired" : "created";
+}
+
+function workScopeForConversation(conversation: Conversation, agents: Agent[]): WorkScope {
+  return workScopeForAgent(agents.find((agent) => agent.id === conversation.agentId));
+}
+
+function eventTimeMs() {
+  return Date.now();
+}
+
+function isManagementSessionActive(
+  session?: HireMeAgentManagementSession,
+): session is HireMeAgentManagementSession {
+  return Boolean(session && Date.parse(session.expiresAt) > eventTimeMs());
+}
+
+function isManagementSessionError(error: unknown) {
+  const record = error && typeof error === "object"
+    ? error as { code?: unknown; message?: unknown }
+    : null;
+  const code = String(record?.code || "");
+  const message = error instanceof Error
+    ? error.message
+    : typeof record?.message === "string"
+      ? record.message
+      : String(error || "");
+  return (
+    /^(management_session_required|management_session_mismatch)$/i.test(code) ||
+    /management_session_(required|mismatch)/i.test(message) ||
+    /관리 모드.*다시 열어야|관리 세션.*일치하지 않|관리 세션.*만료/i.test(message)
+  );
+}
+
+function runErrorCode(error: unknown) {
+  const record = error && typeof error === "object"
+    ? error as { code?: unknown; message?: unknown }
+    : null;
+  const direct = String(record?.code || "").trim().toLowerCase();
+  if (/^[a-z0-9_]{1,80}$/.test(direct)) return direct;
+  const message = error instanceof Error
+    ? error.message
+    : typeof record?.message === "string"
+      ? record.message
+      : String(error || "");
+  return message.match(/\[([a-z0-9_]{1,80})\]/i)?.[1]?.toLowerCase() || "";
+}
+
+function isRunCancelledError(error: unknown) {
+  return runErrorCode(error) === "run_cancelled";
+}
+
+function createEntityUuid() {
+  if (typeof window.crypto?.randomUUID === "function") return window.crypto.randomUUID();
+  const bytes = new Uint8Array(16);
+  window.crypto.getRandomValues(bytes);
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = Array.from(bytes, (value) => value.toString(16).padStart(2, "0"));
+  return `${hex.slice(0, 4).join("")}-${hex.slice(4, 6).join("")}-${hex.slice(6, 8).join("")}-${hex.slice(8, 10).join("")}-${hex.slice(10).join("")}`;
+}
+
+function useElapsed(startedAt: number) {
+  const [elapsed, setElapsed] = useState(() => Math.max(0, Date.now() - startedAt));
+  useEffect(() => {
+    const updateElapsed = () => setElapsed(Math.max(0, Date.now() - startedAt));
+    updateElapsed();
+    const timer = window.setInterval(updateElapsed, 250);
+    return () => window.clearInterval(timer);
+  }, [startedAt]);
+  return elapsed;
+}
+
+function usePersistentState<T>(key: string, initial: T) {
+  const [value, setValue] = useState<T>(() => {
+    try {
+      const saved = window.localStorage.getItem(key);
+      return saved ? (JSON.parse(saved) as T) : initial;
+    } catch {
+      return initial;
+    }
+  });
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(key, JSON.stringify(value));
+    } catch {
+      // Browser storage is optional; the desktop runtime remains the durable source.
+    }
+  }, [key, value]);
+  return [value, setValue] as const;
+}
+
+async function runAgentRequest({ runId, conversationId, agent, text, attachments, workspace, conversation, managementSession }: { runId: string; conversationId: string; agent: Agent; text: string; attachments: Attachment[]; workspace: string; conversation?: Conversation; managementSession?: HireMeAgentManagementSession }) {
+  const bridge = window.hiremeDesktop;
+  const managementActive = Boolean(
+    isManagementSessionActive(managementSession) &&
+    managementSession.conversationId === conversationId &&
+    managementSession.agentId === agent.id,
+  );
+  if (bridge && agent.runtime !== "preview") {
+    return bridge.sendChat({
+      runId,
+      conversationId,
+      agentId: agent.id,
+      text,
+      attachments,
+      workspace,
+      mode: managementActive ? "agent_authoring" : "work",
+      managementSessionId: managementActive ? managementSession?.id : undefined,
+      agentName: agent.name,
+      agentBrief: `${agent.headline}\n${agent.summary}`,
+      history: managementActive
+        ? conversation?.messages.map(({ role, text: messageText }) => ({ role, text: messageText })) || []
+        : undefined,
+    });
+  }
+  if (bridge) {
+    throw new Error("이 에이전트의 실행 패키지를 준비하지 못했습니다.");
+  }
+  await new Promise((resolve) => window.setTimeout(resolve, 840));
+  if (managementActive) {
+    return {
+      output: "말해준 기준을 초안에 반영했어요. 다음으로, 결과가 좋지 않았던 대표 사례 한 가지와 그때 반드시 피해야 할 점을 알려주세요.",
+      elapsedMs: 840,
+      artifacts: [],
+    };
+  }
+  return {
+    output: buildPreviewAgentResult(agent, text),
+    elapsedMs: 840,
+    artifacts: buildPreviewArtifacts(agent),
+  };
+}
+
+function buildPreviewArtifacts(agent: Agent): Attachment[] {
+  if (agent.category !== "디자인") return [];
+  return (agent.outputExamples || outputExampleCatalog[agent.id] || [])
+    .slice(0, 2)
+    .map((example) => ({
+      name: example.name,
+      mimeType: example.mimeType,
+      size: example.size,
+      previewUrl: example.previewUrl,
+      kind: example.mimeType?.startsWith("image/") ? "image" : "file",
+    }));
+}
+
+function buildPreviewAgentResult(agent: Agent, text: string) {
+  if (agent.id === "brand-voice-editor") return buildBrandVoicePreview(text);
+  return sampleReplies[agent.id] || [
+    `${agent.name} 결과 초안`,
+    "",
+    "요청 요약",
+    text.trim() || "요청한 작업을 정리합니다.",
+    "",
+    "다음 단계",
+    "필요한 맥락과 결과 형식을 확인한 뒤, 바로 사용할 수 있는 산출물로 정리합니다.",
+  ].join("\n");
+}
+
+function buildBrandVoicePreview(text: string) {
+  const compact = String(text || "").trim().replace(/\s+/g, " ");
+  const isHireMeMarketingBrief = /hireme|에이전트|agent/i.test(compact);
+  if (isHireMeMarketingBrief) {
+    return [
+      "HireMe 마케팅 초안",
+      "",
+      "핵심 메시지",
+      "당신은 결정하세요. 일은 당신의 에이전트가 합니다.",
+      "",
+      "히어로 헤드라인",
+      "일은 맡기고, 결과만 확인하세요.",
+      "",
+      "소개 카피",
+      "HireMe에서는 필요한 전문 AI 에이전트를 고용해 리서치, 카피, 검토, 제작 같은 반복 업무를 맡길 수 있습니다. 당신은 일을 처음부터 끝까지 처리하는 대신, 목표를 정하고 결과를 검토하며 다음 결정을 내리면 됩니다.",
+      "",
+      "보조 메시지",
+      "당신이 직접 일하지 마세요. 당신의 에이전트가 일하게 하세요.",
+      "",
+      "CTA",
+      "내 일을 맡길 에이전트 찾기",
+    ].join("\n");
+  }
+  return [
+    "브랜드 카피 초안",
+    "",
+    "다듬은 메시지",
+    compact || "브랜드가 고객에게 약속하는 가치를 한 문장으로 정리하세요.",
+    "",
+    "권장 방향",
+    "과장된 표현보다 고객이 얻는 변화와 실제 작업 방식을 먼저 보여 주세요. 짧은 문장으로 핵심 약속을 말하고, 바로 다음 문장에서 근거를 덧붙이면 더 단정하고 자신감 있게 읽힙니다.",
+    "",
+    "CTA",
+    "지금 브랜드 문장 다듬기",
+  ].join("\n");
+}
+
+function createStreamFrames(value: string) {
+  const characters = Array.from(String(value || ""));
+  if (!characters.length) return [""];
+  const frameCount = Math.min(42, Math.max(8, Math.ceil(characters.length / 34)));
+  const step = Math.max(1, Math.ceil(characters.length / frameCount));
+  const frames: string[] = [];
+  for (let end = step; end < characters.length; end += step) {
+    frames.push(characters.slice(0, end).join(""));
+  }
+  frames.push(value);
+  return frames;
+}
+
+function streamFrameDelayMs(frameCount: number) {
+  return Math.max(18, Math.min(48, Math.round(1_050 / Math.max(1, frameCount))));
+}
+
+function waitForStreamFrame(ms: number) {
+  return new Promise<void>((resolveWait) => window.setTimeout(resolveWait, ms));
+}
+
+function mergeNativeAgents(current: Agent[], nativeAgents: HireMeNativeAgent[]) {
+  const byId = new Map(current.map((agent) => [agent.id, agent]));
+  for (const nativeAgent of nativeAgents) {
+    const existing = byId.get(nativeAgent.id);
+    if (existing) {
+      byId.set(nativeAgent.id, {
+        ...existing,
+        name: nativeAgent.name || existing.name,
+        headline: nativeAgent.headline || existing.headline,
+        summary: nativeAgent.publicSummary || existing.summary,
+        skills: nativeAgent.publicSkills?.length ? nativeAgent.publicSkills : existing.skills,
+        runtime: "local",
+      });
+      continue;
+    }
+    byId.set(nativeAgent.id, {
+      id: nativeAgent.id,
+      name: nativeAgent.name,
+      creator: "나",
+      category: normalizeCategory(nativeAgent.category),
+      headline: nativeAgent.headline || "로컬에서 만든 전문 에이전트",
+      summary: nativeAgent.publicSummary || "HireMe 로컬 런타임에서 실행되는 에이전트입니다.",
+      skills: nativeAgent.publicSkills || [],
+      resultTypes: ["문서"],
+      accent: "green",
+      rating: 0,
+      reviews: 0,
+      uses: 0,
+      billingMode: "run",
+      runPrice: 1000,
+      version: "0.1.0",
+      ownership: "mine",
+      status: "초안",
+      revenue30d: 0,
+      subscribers: 0,
+      runtime: "local",
+    });
+  }
+  return Array.from(byId.values());
+}
+
+function mergeDatabaseAgents(current: Agent[], databaseAgents: HireMeDatabaseAgent[]) {
+  const byId = new Map(current.map((agent) => [agent.id, agent]));
+  for (const databaseAgent of databaseAgents) {
+    if (isRetiredMockAgent(databaseAgent)) continue;
+    const existing = byId.get(databaseAgent.id);
+    const keepLocalPublishedVersion = Boolean(
+      existing?.ownership === "mine" &&
+      existing.authoring?.packageDigest &&
+      compareVersions(existing.version, databaseAgent.version) > 0,
+    );
+    byId.set(databaseAgent.id, {
+      ...existing,
+      ...databaseAgent,
+      ...(keepLocalPublishedVersion ? { version: existing!.version } : {}),
+      ...(existing?.ownership === "mine" && normalizeRunPrice(existing.runPrice) > 0
+        ? { runPrice: existing.runPrice }
+        : {}),
+      image: databaseAgent.image || existing?.image,
+      runtime: databaseAgent.runtime === "local" || existing?.runtime === "local"
+        ? "local"
+        : databaseAgent.runtime,
+      source: "database",
+    });
+  }
+  return Array.from(byId.values());
+}
+
+function isRetiredMockAgent(agent: Pick<Agent, "id" | "name"> | Pick<HireMeDatabaseAgent, "id" | "name">) {
+  return legacyMockAgentIds.has(agent.id) || /friendly\s*empathy/i.test(agent.name);
+}
+
+function isRetiredMockAgentId(agentId: string) {
+  return legacyMockAgentIds.has(agentId) || /friendly[-_]?empathy/i.test(String(agentId || ""));
+}
+
+function mergeDatabaseConversations(
+  current: Conversation[],
+  databaseConversations: HireMeDatabaseConversation[],
+) {
+  const currentById = new Map(current.map((conversation) => [conversation.id, conversation]));
+  const databaseIds = new Set(databaseConversations.map((conversation) => conversation.id));
+  const recoveredLocal = current
+    .filter((conversation) => !databaseIds.has(conversation.id))
+    .map((conversation) => (
+      conversation.storage === "database"
+        ? { ...conversation, storage: "local" as const }
+        : conversation
+    ));
+  return [
+    ...databaseConversations.map((conversation) => {
+      const existing = currentById.get(conversation.id);
+      const messagesById = new Map(
+        (existing?.messages || []).map((message) => [message.id, message]),
+      );
+      conversation.messages.forEach((message) => {
+        messagesById.set(message.id, { ...message });
+      });
+      return {
+        ...conversation,
+        mode: existing?.mode || "work",
+        messages: Array.from(messagesById.values()).sort(
+          (left, right) => Date.parse(left.at) - Date.parse(right.at),
+        ),
+      };
+    }),
+    ...recoveredLocal,
+  ];
+}
+
+function normalizeCategory(value: string): AgentCategory {
+  const lower = String(value || "").toLowerCase();
+  if (/image|design|character/.test(lower)) return "디자인";
+  if (/writing|copy|conversation/.test(lower)) return "글쓰기";
+  if (/business|launch|growth/.test(lower)) return "비즈니스";
+  if (/research|data/.test(lower)) return "리서치";
+  return "생산성";
+}
+
+function normalizeRunPrice(value: unknown) {
+  const price = Math.round(Number(String(value ?? "").replace(/[^0-9]/g, "")));
+  return Number.isFinite(price) && price > 0 && price <= 10_000_000 ? price : 0;
+}
+
+function formatRunPriceInput(value: string) {
+  const digits = String(value || "").replace(/[^0-9]/g, "").slice(0, 8);
+  if (!digits) return "";
+  return Number(digits).toLocaleString("ko-KR");
+}
+
+function formatAgentPrice(agent: Pick<Agent, "runPrice">) {
+  const price = normalizeRunPrice(agent.runPrice);
+  return price ? `1회 ${formatWon(price)}` : "가격 미설정";
+}
+
+function PendingPrice({ agent, compact = false }: { agent: Pick<Agent, "runPrice">; compact?: boolean }) {
+  return (
+    <span className={`pending-price${compact ? " compact" : ""}`}>
+      <s>{formatAgentPrice(agent)}</s>
+      {!compact && <small>수익 기능 준비 중</small>}
     </span>
   );
 }
 
-function Field({
-  label,
-  className,
-  children,
-  required = false,
-}: {
-  label: string;
-  className?: string;
-  children: ReactNode;
-  required?: boolean;
-}) {
-  return (
-    <label className={`block ${className ?? ""}`}>
-      <span className="mb-1.5 block text-xs font-medium text-muted-foreground">
-        {label}
-        {required ? (
-          <span className="ml-1 text-[#e11d48]" aria-label="required">
-            *
-          </span>
-        ) : null}
-      </span>
-      {children}
-    </label>
-  );
+function readManifestList(manifest: Record<string, unknown>, key: string) {
+  return Array.isArray(manifest?.[key]) ? manifest[key].map(String).slice(0, 6) : [];
 }
 
-function SealedRecordPreview({ record }: { record: SealedHarnessRecord }) {
-  const walrusCommand = record.walrusBlobId.startsWith("local_walrus_")
-    ? `cat .hireme/walrus/local-blobs/*${record.walrusBlobId.replace("local_walrus_", "").slice(0, 24)}*.platform-encryption.json`
-    : `walrus read ${record.walrusBlobId} --out ${record.fileName}.platform-encryption.json`;
-
-  return (
-    <div className="mt-5 rounded-xl border border-[#533afd]/20 bg-white p-4">
-      <div className="mb-4 flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2 text-sm font-medium">
-          <CheckCircle2 className="size-4 text-primary" />
-          Protected public record
-        </div>
-        <span className="text-xs text-muted-foreground">{record.network}</span>
-      </div>
-
-      <div className="grid gap-3 md:grid-cols-4">
-        <RecordCell label="Token fee" value={formatAgentPrice(record.pricePerCallUsd)} />
-        <RecordCell label="Provider" value={record.sealProvider} />
-        <RecordCell label="KMS key" value={record.platformKmsKeyId} />
-        <RecordCell label="Policy" value={record.sealPolicyId} />
-        <RecordCell label="Identity" value={record.encryptionId} />
-        <RecordCell label="Walrus blob" value={record.walrusBlobId} />
-        <RecordCell label="Sui object" value={record.suiObjectId} />
-        <RecordCell label="Ciphertext" value={record.sealCiphertextFormat} />
-        <RecordCell label="Digest" value={record.ciphertextDigest} />
-      </div>
-
-      <div className="mt-4 rounded-lg bg-secondary p-3">
-        <div className="mb-2 text-xs font-medium text-muted-foreground">
-          Protected artifact read
-        </div>
-        <code className="block break-all font-mono text-xs leading-5 text-[#1c1e54]">
-          {walrusCommand}
-        </code>
-      </div>
-
-      <div className="mt-3 rounded-lg border border-border bg-white p-3">
-        <div className="mb-2 text-xs font-medium text-muted-foreground">
-          Folder entries protected in preview
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {record.entryPreview.map((entry) => (
-            <span
-              className="rounded-md border border-border bg-secondary px-2 py-1 text-xs text-[#273951]"
-              key={entry}
-            >
-              {entry}
-            </span>
-          ))}
-          {record.fileCount > record.entryPreview.length ? (
-            <span className="rounded-md border border-border bg-secondary px-2 py-1 text-xs text-[#273951]">
-              +{record.fileCount - record.entryPreview.length} more
-            </span>
-          ) : null}
-        </div>
-      </div>
-    </div>
-  );
+function formatBytes(bytes: number) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "크기 미정";
+  if (bytes < 1024 * 1024) return `${Math.ceil(bytes / 1024)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
-function RecordCell({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-lg border border-border bg-white p-3">
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="mt-1 truncate font-mono text-xs text-[#1c1e54]">{value}</div>
-    </div>
-  );
+function formatRelativeTime(value: string) {
+  const elapsed = Date.now() - Date.parse(value);
+  if (!Number.isFinite(elapsed) || elapsed < 60_000) return "방금";
+  const minutes = Math.floor(elapsed / 60_000);
+  if (minutes < 60) return `${minutes}분 전`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}시간 전`;
+  return `${Math.floor(hours / 24)}일 전`;
 }
 
-export default App;
+function outputExamplesForAgent(agent: Agent): AgentOutputExample[] {
+  if (agent.outputExamples?.length) return agent.outputExamples;
+  const catalog = outputExampleCatalog[agent.id];
+  if (catalog?.length) return catalog;
+
+  const fileBase = slugify(agent.name) || "agent-output";
+  if (agent.image) {
+    const imageName = agent.image.split("/").pop() || `${fileBase}-example.png`;
+    return [{
+      name: imageName,
+      mimeType: imageName.toLowerCase().match(/\.jpe?g$/) ? "image/jpeg" : "image/png",
+      previewUrl: agent.image,
+      description: `${agent.name}이 전달하는 대표 결과 이미지입니다.`,
+    }];
+  }
+
+  const previewText = [
+    `# ${agent.name} 결과 예시`,
+    "",
+    agent.summary,
+    "",
+    "## 포함 내용",
+    ...agent.resultTypes.map((type) => `- ${type}`),
+    "",
+    "## 적용 기준",
+    ...agent.skills.map((skill) => `- ${skill}`),
+  ].join("\n");
+  return [{
+    name: `${fileBase}-example.md`,
+    mimeType: "text/markdown",
+    size: new Blob([previewText]).size,
+    previewText,
+    description: `${agent.name}의 대표 결과 구조를 보여주는 예시 문서입니다.`,
+  }];
+}
+
+function outputTypeLabel(mimeType?: string) {
+  const normalized = String(mimeType || "").toLowerCase();
+  if (normalized === "image/png") return "PNG";
+  if (normalized === "image/jpeg") return "JPG";
+  if (normalized === "application/pdf") return "PDF";
+  if (normalized === "text/markdown") return "Markdown";
+  if (normalized === "text/csv") return "CSV";
+  if (normalized.startsWith("text/")) return "텍스트";
+  return "파일";
+}
+
+function defaultOutputFileForCategory(category: AgentCategory) {
+  if (category === "디자인") return "result.png";
+  if (category === "글쓰기") return "result.md";
+  if (category === "비즈니스") return "proposal.pdf";
+  if (category === "리서치") return "research-report.md";
+  return "result.md";
+}
+
+function formatWon(value: number) {
+  return `₩${Math.round(value).toLocaleString("ko-KR")}`;
+}
+
+function appAssetUrl(value: string) {
+  return value.startsWith("/assets/") ? `.${value}` : value;
+}
+
+function isImageFile(file: Attachment) {
+  if (file.mimeType?.startsWith("image/")) return true;
+  return /\.(png|jpe?g|webp|gif|svg)$/i.test(file.name);
+}
+
+function isAgentSeedFile(file: Attachment) {
+  return isImageFile(file) || file.mimeType === "text/markdown" || /\.md$/i.test(file.name);
+}
+
+function isDraftOutputRequest(text: string, attachments: Attachment[]) {
+  if (attachments.length > 0) return true;
+  const value = String(text || "").trim();
+  if (!value) return false;
+  if (/^시험\s*[:：]/.test(value)) return true;
+
+  // Creator-facing changes stay in the protected management flow. A concrete
+  // deliverable request instead runs the current local draft and returns its artifacts.
+  if (/하네스|프롬프트|규칙|작업\s*방식|기억|메모리|스킬|배포|버전|수정|고쳐|바꿔|추가|삭제|검증|평가|관리\s*모드/i.test(value)) {
+    return false;
+  }
+  return /그려|이미지|사진|일러스트|만들어|제작|생성|작성|써줘|정리해|분석해|계획|제안서|파일|결과물|output/i.test(value);
+}
+
+function formatFileSize(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function formatCompact(value: number) {
+  return new Intl.NumberFormat("ko-KR", { notation: "compact", maximumFractionDigits: 1 }).format(value);
+}
+
+function formatFileBytes(value: number) {
+  const bytes = Math.max(0, Number(value) || 0);
+  if (bytes < 1_024) return `${bytes} B`;
+  if (bytes < 1_024 * 1_024) return `${(bytes / 1_024).toFixed(bytes < 10 * 1_024 ? 1 : 0)} KB`;
+  return `${(bytes / (1_024 * 1_024)).toFixed(1)} MB`;
+}
+
+function formatElapsed(ms: number) {
+  if (ms < 1000) return `${ms}ms`;
+  const seconds = Math.floor(ms / 1000);
+  if (seconds < 60) return `${seconds}초`;
+  return `${Math.floor(seconds / 60)}분 ${seconds % 60}초`;
+}
+
+function formatClock(iso: string) {
+  return new Intl.DateTimeFormat("ko-KR", { hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(iso));
+}
+
+function summarizeTitle(value: string) {
+  const text = value.trim().replace(/\s+/g, " ");
+  return text.length > 26 ? `${text.slice(0, 26)}…` : text || "새 작업";
+}
+
+function shortPath(value: string) {
+  if (!value) return "선택 안 됨";
+  const parts = value.split(/[\\/]/).filter(Boolean);
+  return parts.slice(-2).join("/") || value;
+}
+
+function userInitials(value?: string | null) {
+  const parts = String(value || "H")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  return parts.slice(0, 2).map((part) => part[0]?.toUpperCase()).join("") || "H";
+}
+
+function incrementPatch(version: string) {
+  const parts = version.split(".").map((part) => Number(part) || 0);
+  return `${parts[0] || 0}.${parts[1] || 0}.${(parts[2] || 0) + 1}`;
+}
+
+function compareVersions(left: string, right: string) {
+  const leftParts = String(left).split(".").map((part) => Number(part) || 0);
+  const rightParts = String(right).split(".").map((part) => Number(part) || 0);
+  for (let index = 0; index < 3; index += 1) {
+    const difference = (leftParts[index] || 0) - (rightParts[index] || 0);
+    if (difference !== 0) return difference;
+  }
+  return 0;
+}
+
+function slugify(value: string) {
+  const slug = value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  return slug || `agent-${Date.now().toString(36)}`;
+}
+
+function parseCommaSeparated(value: string, fallback: string[]) {
+  const items = String(value || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+  return items.length ? [...new Set(items)].slice(0, 12) : fallback;
+}
+
+function publicErrorMessage(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error || "");
+  const code = runErrorCode(error);
+  if (isManagementSessionError(error)) return "관리 모드가 만료되었거나 현재 작업과 일치하지 않아요. 관리 모드를 다시 열어 주세요.";
+  if (code === "run_cancelled" || /cancel/i.test(message)) return "작업을 중지했어요.";
+  if (code === "runtime_interrupted") return "AI 실행이 예기치 않게 중단됐어요. 다시 시도할 수 있도록 로컬 진단 기록을 남겼습니다.";
+  if (code === "agent_unavailable") return "이 컴퓨터에서 선택한 에이전트의 실행 패키지를 찾지 못했어요.";
+  if (code === "agent_hire_required") return "이 에이전트를 먼저 고용한 뒤 작업을 시작해 주세요.";
+  if (code === "agent_run_entitlement_required") return "이 에이전트의 남은 실행 권한을 확인해 주세요.";
+  if (code === "agent_package_unavailable") return "이 에이전트의 실행 패키지가 아직 준비되지 않았어요. 공개 버전과 검토 상태를 확인해 주세요.";
+  if (code === "hireme_auth_required") return "HireMe에 다시 로그인한 뒤 작업을 시작해 주세요.";
+  if (code === "provider_connection_required") return "설정에서 ChatGPT 계정을 다시 연결해 주세요.";
+  if (code === "provider_response_limit") return "이미지 생성 응답이 앱의 처리 한도를 넘었어요. HireMe를 최신 버전으로 업데이트한 뒤 다시 시도해 주세요.";
+  if (/openai_codex_image_(rate_limited|slow_down)/i.test(code) || /temporarily rate limited|slow down/i.test(message)) {
+    return "이미지 생성 요청이 잠시 제한됐어요. 안내된 시간 후 다시 시도해 주세요.";
+  }
+  if (/openai_codex_image_timeout/i.test(code) || /image generation timed out/i.test(message)) {
+    return "이미지 생성이 오래 걸려 결과를 받지 못했어요. 잠시 후 다시 시도해 주세요.";
+  }
+  if (/iteration budget exceeded|tool-call budget exceeded/i.test(message)) {
+    return "AI가 내부 작업 단계를 정리하지 못했어요. 변경 대상이나 원하는 결과를 한 가지로 좁혀 다시 시도해 주세요.";
+  }
+  if (/설정|codex|login|oauth|local ai|ollama/i.test(message)) return "설정에서 작업에 사용할 AI의 연결 상태를 확인해 주세요.";
+  return "AI 실행을 완료하지 못했어요. 다시 시도할 수 있도록 로컬 진단 기록을 남겼습니다.";
+}
+
+function publicAiSettingsError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error || "");
+  if (/cancel|취소/i.test(message)) return "계정 연결을 취소했습니다.";
+  if (/network|fetch/i.test(message)) return "연결 상태를 확인하지 못했습니다. 인터넷 연결을 확인해 주세요.";
+  return message.slice(0, 300) || "AI 연결 설정을 완료하지 못했습니다.";
+}
+
+function publicLoginError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error || "");
+  if (/network|fetch|connect/i.test(message)) return "로그인 서버에 연결할 수 없습니다.";
+  return message.slice(0, 300) || "Google 로그인을 완료하지 못했습니다.";
+}

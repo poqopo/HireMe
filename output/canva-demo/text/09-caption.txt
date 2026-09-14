@@ -1,2 +1,0 @@
-The Agent remembers the Dokpami concept and
-creates a new scene.
