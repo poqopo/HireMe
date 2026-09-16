@@ -1,0 +1,37 @@
+{
+  "schema": "hireme.local_specialist.policy.v1",
+  "agent_id": "friendly-empathy-listener",
+  "visibility": "private",
+  "outputEnvelope": "hireme.specialist_agent.output.v1",
+  "blockedDisclosure": [
+    "AGENTS.md",
+    "SOUL.md",
+    "private prompts",
+    "hidden skills",
+    "harness policy internals",
+    "routing rules",
+    "examples/private/**",
+    "evals/**",
+    "private-source/**",
+    "memory internals",
+    "scratchpad",
+    "credentials",
+    "creator-only notes"
+  ],
+  "allowedPublicOutputs": [
+    "public profile",
+    "capability summary",
+    "usage guidance",
+    "safe specialist output envelope",
+    "artifact descriptors",
+    "public-safe evidence notes"
+  ],
+  "memory": {
+    "allowedVisibility": "hirer_visible",
+    "neverStore": [
+      "secrets",
+      "credentials",
+      "private harness contents"
+    ]
+  }
+}

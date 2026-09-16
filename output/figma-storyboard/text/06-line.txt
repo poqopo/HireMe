@@ -1,2 +1,0 @@
-Creators can publish useful capabilities without giving away
-private prompts, skills, tools, or review habits.

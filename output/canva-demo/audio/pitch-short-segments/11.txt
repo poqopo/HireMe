@@ -1,1 +1,0 @@
-The Agent runs through HireMe's M C P gateway, so the client gets the result, not the raw source.

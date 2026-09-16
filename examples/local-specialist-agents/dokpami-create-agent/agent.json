@@ -1,0 +1,77 @@
+{
+  "id": "dokpami-create-agent",
+  "name": "Dokpami Create Agent",
+  "version": "0.1.0",
+  "category": "Image",
+  "description": "Local specialist Agent converted from the original Dokpami character variation CLI.",
+  "manifest": {
+    "schema": "hireme.local_specialist.manifest.v1",
+    "capabilities": [
+      "image.generate",
+      "image.character",
+      "artifact.image"
+    ],
+    "inputModes": [
+      "text",
+      "reference_image"
+    ],
+    "outputModes": [
+      "artifact_spec"
+    ],
+    "finalizers": [
+      "image",
+      "text"
+    ],
+    "intentTags": [
+      "image",
+      "character",
+      "dokpami",
+      "독팜희",
+      "artifact"
+    ],
+    "routing": {
+      "priority": 95,
+      "triggers": [
+        "dokpami",
+        "독팜희",
+        "dokpami-create-agent",
+        "image",
+        "draw",
+        "character",
+        "avatar",
+        "png",
+        "그려",
+        "이미지",
+        "캐릭터"
+      ],
+      "negativeTriggers": [
+        "AGENTS.md",
+        "private prompt",
+        "harness",
+        "하네스",
+        "내부 프롬프트"
+      ],
+      "examples": [
+        "슬퍼하는 독팜희를 그려줘",
+        "Create a wizard Dokpami image"
+      ]
+    }
+  },
+  "localRunner": {
+    "kind": "command-v1",
+    "command": "node",
+    "args": ["adapter/run.mjs"],
+    "timeoutMs": 180000,
+    "requiredFiles": [
+      "private-source/AGENTS.md",
+      "private-source/prompt_builder.py",
+      "private-source/input/base.png"
+    ]
+  },
+  "protectedPatterns": [
+    "PRIVATE_HARNESS",
+    "SECRET_",
+    "BEGIN_PRIVATE",
+    "CREDENTIAL_"
+  ]
+}

@@ -1,2 +1,0 @@
-Encrypted Agent artifact stored as durable
-proof

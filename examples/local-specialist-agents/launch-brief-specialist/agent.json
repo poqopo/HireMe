@@ -1,0 +1,99 @@
+{
+  "id": "launch-brief-specialist",
+  "name": "Launch Brief Specialist",
+  "version": "0.1.0",
+  "category": "Research",
+  "description": "Local specialist Agent for producing concise launch briefs from public-safe product context.",
+  "manifest": {
+    "schema": "hireme.local_specialist.manifest.v1",
+    "capabilities": [
+      "text.launch_brief",
+      "strategy.positioning",
+      "artifact.markdown",
+      "file.markdown"
+    ],
+    "inputModes": [
+      "text",
+      "file_reference"
+    ],
+    "outputModes": [
+      "direct_answer",
+      "artifact_spec"
+    ],
+    "finalizers": [
+      "text",
+      "file"
+    ],
+    "intentTags": [
+      "launch",
+      "brief",
+      "positioning",
+      "audience",
+      "marketing",
+      "소개문"
+    ],
+    "execution": {
+      "schema": "hireme.agent_execution_policy.v1",
+      "defaultClass": "local_protected",
+      "operations": [
+        {
+          "id": "standard-launch-brief",
+          "title": "Standard launch brief",
+          "executionClass": "local_protected",
+          "billingKey": "local_protected",
+          "default": true,
+          "priority": 10,
+          "triggers": []
+        },
+        {
+          "id": "confidential-launch-scoring",
+          "title": "Confidential launch scoring",
+          "executionClass": "hosted_secure",
+          "billingKey": "hosted_secure",
+          "priority": 100,
+          "triggers": [
+            "confidential scoring",
+            "private scoring",
+            "민감한 평가",
+            "내부 점수",
+            "비공개 평가"
+          ]
+        }
+      ]
+    },
+    "routing": {
+      "priority": 70,
+      "triggers": [
+        "launch",
+        "brief",
+        "launch brief",
+        "positioning",
+        "audience",
+        "product message",
+        "소개문",
+        "출시",
+        "랜딩",
+        "브리프"
+      ],
+      "negativeTriggers": [
+        "AGENTS.md",
+        "private prompt",
+        "harness",
+        "하네스",
+        "내부 프롬프트"
+      ],
+      "examples": [
+        "HireMe 소개문 만들어줘",
+        "Create a launch brief for builders"
+      ]
+    }
+  },
+  "localRunner": {
+    "kind": "launch-brief-v1"
+  },
+  "protectedPatterns": [
+    "PRIVATE_HARNESS",
+    "SECRET_",
+    "BEGIN_PRIVATE"
+  ]
+}

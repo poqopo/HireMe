@@ -1,4 +1,0 @@
-- hireme_call_agent
-- job_id
-- hireme_get_agent_result
-- PNG returned

@@ -1,4 +1,0 @@
-- memWalStored: true
-- namespace
-- blobId
-- Dokpami context

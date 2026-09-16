@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hireme.dev/schemas/design-project.v1.json",
+  "title": "HireMe Design Project",
+  "type": "object",
+  "required": ["schema", "id", "status", "brief", "workflow", "artifacts", "trace"],
+  "properties": {
+    "schema": { "const": "hireme.design_project.v1" },
+    "id": { "type": "string", "format": "uuid" },
+    "status": { "enum": ["draft", "queued", "running", "evaluating", "awaiting_creator_approval", "revision_requested", "delivered", "blocked", "failed", "canceled", "expired", "approval_expired"] },
+    "brief": {
+      "type": "object",
+      "required": ["objective", "audience", "deliverables"],
+      "properties": {
+        "objective": { "type": "string", "minLength": 8, "maxLength": 1200 },
+        "audience": { "type": "string", "minLength": 2, "maxLength": 500 },
+        "deliverables": { "type": "array", "minItems": 1, "items": { "type": "object", "required": ["kind", "format"], "properties": { "kind": { "enum": ["social_image", "banner", "landing_page", "presentation", "brand_asset"] }, "format": { "type": "string" }, "dimensions": { "type": "string" } } }, "maxItems": 12 },
+        "mustInclude": { "type": "array", "items": { "type": "string" }, "maxItems": 30 },
+        "mustAvoid": { "type": "array", "items": { "type": "string" }, "maxItems": 30 }
+      }
+    },
+    "brandContext": { "type": "object", "required": ["brandId", "assetRefs", "contractRevision"], "properties": { "brandId": { "type": "string" }, "assetRefs": { "type": "array", "minItems": 1, "items": { "type": "string" } }, "contractRevision": { "type": "string" } } },
+    "workflow": { "type": "object", "required": ["id", "revision", "skillRefs"], "properties": { "id": { "type": "string" }, "revision": { "type": "string" }, "skillRefs": { "type": "array", "items": { "type": "string" } } } },
+    "artifacts": { "type": "array", "items": { "type": "object", "required": ["id", "kind", "version", "provenance"], "properties": { "id": { "type": "string" }, "kind": { "enum": ["source", "preview", "export", "reference", "report"] }, "version": { "type": "integer", "minimum": 1 }, "provenance": { "type": "object", "required": ["runId", "toolCallIds"], "properties": { "runId": { "type": "string" }, "toolCallIds": { "type": "array", "items": { "type": "string" } } } } } } },
+    "trace": { "type": "object", "required": ["runIds", "evaluationIds"], "properties": { "runIds": { "type": "array", "items": { "type": "string" } }, "evaluationIds": { "type": "array", "items": { "type": "string" } } } }
+  },
+  "additionalProperties": false
+}

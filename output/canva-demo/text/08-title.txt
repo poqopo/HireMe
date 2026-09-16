@@ -1,2 +1,0 @@
-MemWal Stores Conversation
-Memory

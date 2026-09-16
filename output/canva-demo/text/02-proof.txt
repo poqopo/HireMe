@@ -1,2 +1,0 @@
-- Agent value lives behind the visible UI
-- Do not show raw private prompts
