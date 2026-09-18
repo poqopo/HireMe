@@ -1,4 +1,0 @@
-- Protect prompts, skills, rubrics
-- Protect tools and review habits
-- Publish useful Agents safely
-- Earn without exposing IP

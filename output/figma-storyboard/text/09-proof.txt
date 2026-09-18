@@ -1,3 +1,0 @@
-- Show recall prompt
-- Show new image
-- Do not claim PNG byte editing

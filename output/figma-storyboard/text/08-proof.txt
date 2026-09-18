@@ -1,3 +1,0 @@
-- Show namespace
-- Show blobId
-- Wait before recall call
