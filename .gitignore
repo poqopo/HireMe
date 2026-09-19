@@ -1,0 +1,6 @@
+.DS_Store
+**/.DS_Store
+
+# Local runtime state
+settlement_receipts.jsonl
+web_demo/agent_registry.json

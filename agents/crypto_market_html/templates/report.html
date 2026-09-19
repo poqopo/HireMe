@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23152a25'/%3E%3Ctext x='16' y='23' text-anchor='middle' font-size='22' fill='white'%3EH%3C/text%3E%3C/svg%3E">
+  <title>$page_title · $date</title>
+  <style>
+    :root{color-scheme:light;--ink:#172922;--muted:#617268;--line:#dbe2da;--bg:#f5f6ef;--green:#13654c;--red:#a83343;--btc:#b96919;--eth:#685096;--mint:#e0f2e8}
+    *{box-sizing:border-box}[hidden]{display:none!important}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}button,input{font:inherit}button,a,input,summary{touch-action:manipulation}button{cursor:pointer}a{color:inherit;text-decoration:none}a:hover{text-decoration:underline}button:focus-visible,a:focus-visible,input:focus-visible,summary:focus-visible,svg [role=button]:focus-visible{outline:3px solid #168861;outline-offset:4px}button{color:inherit}button:disabled{cursor:not-allowed;opacity:.45}
+    .wrap{max-width:1200px;margin:auto;padding:0 28px}.topbar{background:#fff;border-bottom:1px solid var(--line)}.nav{display:flex;justify-content:space-between;align-items:center;min-height:72px;gap:16px}.brand{font-size:21px;font-weight:850;letter-spacing:-.7px}.brand span{color:var(--green)}.nav-links{display:flex;gap:24px;color:var(--muted);font-size:12px}.hero{padding:40px 0 26px}.hero-top{display:flex;align-items:center;gap:12px;flex-wrap:wrap}.eyebrow{font-size:10px;font-weight:800;letter-spacing:1.7px;text-transform:uppercase;color:var(--muted)}.badge,.draft-tag{border:1px solid #c4dccd;background:var(--mint);color:#176047;border-radius:5px;padding:4px 8px;font-size:10px;font-weight:750}.draft-tag{background:#f1f1ea;border-color:var(--line);color:var(--muted);white-space:nowrap}h1{font-size:clamp(30px,4vw,45px);line-height:1.2;letter-spacing:-1.8px;margin:16px 0 13px}h2{font-size:23px;letter-spacing:-.8px;margin:0}h3{font-size:17px;line-height:1.55;margin:0}.lead{color:var(--muted);margin:0}.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:0 0 25px}.stat,.coin-card,.panel,.news-card,.insight-card{background:#fff;border:1px solid var(--line);border-radius:13px}.stat{padding:18px 21px}.stat-value{font-size:28px;font-weight:780;letter-spacing:-1px;margin-top:4px}.stat-label{font-size:11px;color:var(--muted)}
+    .dominance-section{display:grid;grid-template-columns:1.5fr 1fr;gap:19px;margin-bottom:25px}.panel{padding:25px}.panel-heading{display:flex;justify-content:space-between;align-items:flex-start;gap:14px}.panel-heading h2{font-size:20px}.panel-heading p{margin:5px 0 0;font-size:11px;color:var(--muted)}.diagram-note{font-size:10px;color:var(--muted)}.dominance-svg{display:block;width:100%;height:auto;margin:5px 0 0;overflow:visible}.dominance-svg text{font-family:inherit;pointer-events:none}.dominance-svg [role=button]{cursor:pointer}.dominance-svg [data-scope] circle{transition:stroke-width .15s,filter .15s}.dominance-svg [data-scope]:hover circle,.dominance-svg [data-scope][aria-pressed=true] circle{stroke-width:3.5;filter:drop-shadow(0 4px 8px #17322220)}.diagram-market{fill:#f7f9f3;stroke:#c3cec3;stroke-dasharray:5 6;stroke-width:1.5}.diagram-btc{fill:#fbebd7;stroke:#d7b283;stroke-width:1.5}.diagram-alts{fill:#e7f1ea;stroke:#8ab9a3;stroke-width:1.5}.diagram-eth{fill:#eee8f7;stroke:#b1a0cb;stroke-width:1.5}.circle-label{font-size:14px;font-weight:750}.circle-value{font-size:33px;font-weight:820;letter-spacing:-1px}.scenario-controls{border-top:1px solid var(--line);padding-top:16px}.scenario-label{display:flex;justify-content:space-between;align-items:center;font-size:12px;gap:12px}.scenario-label strong{font-variant-numeric:tabular-nums;color:var(--btc);font-size:17px}input[type=range]{width:100%;accent-color:#b96919;margin:13px 0 6px}.scenario-bottom{display:flex;justify-content:space-between;gap:15px;align-items:center}.scenario-bottom p{font-size:10px;color:var(--muted);margin:0}.text-button{border:0;background:transparent;padding:4px 0;font-size:10px;color:var(--green);white-space:nowrap}.scenario-status{font-size:10px;color:var(--muted);margin:7px 0 0}.scenario-status.assumed{color:var(--btc);font-weight:750}
+    .research-panel{background:#19332a;color:#f8fbf3;display:flex;flex-direction:column}.research-panel .eyebrow{color:#a5c2b1}.research-panel h2{margin:9px 0 13px;font-size:24px;line-height:1.4;letter-spacing:-.8px}.research-intro{font-size:12px;color:#bbcec2;margin:0 0 20px}.research-check{padding:15px 0;border-top:1px solid #ffffff21;display:grid;grid-template-columns:24px 1fr;gap:10px}.research-check>span{font-size:10px;color:#93baa3;padding-top:3px}.research-check h3{font-size:13px}.research-check p{font-size:11px;color:#aac3b2;margin:4px 0 0}.research-status{margin-top:auto;padding-top:24px;font-size:10px;color:#afc9b9}.research-status b{display:block;color:#e2f6e7;margin-bottom:6px}.research-status p{margin:0}
+    .workspace-toolbar{display:flex;justify-content:space-between;gap:16px;align-items:center;flex-wrap:wrap;padding:16px 0 22px}.filters{display:flex;gap:7px;flex-wrap:wrap}.filter-button,.view-button{background:#fff;border:1px solid var(--line);border-radius:7px;padding:7px 12px;font-size:11px;font-weight:700}.filter-button[aria-pressed=true],.view-button[aria-pressed=true]{background:#1c3b2e;color:#fff;border-color:#1c3b2e}.search-wrap{display:flex;gap:9px;align-items:center}.search-wrap input{width:240px;max-width:100%;border:1px solid var(--line);border-radius:7px;background:#fff;padding:9px 12px;font-size:11px}.export-button{border:1px solid var(--line);border-radius:7px;background:#ecefe5;font-size:10px;padding:9px 12px}.filter-status{color:var(--muted);font-size:10px;margin:0 0 18px}.section-heading{display:flex;align-items:baseline;justify-content:space-between;gap:16px;margin-bottom:16px}.section-heading p{margin:0;color:var(--muted);font-size:11px}.coin-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}.coin-card{padding:22px}.coin-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}.coin-symbol{font-size:11px;font-weight:800;background:#f0f3eb;border-radius:5px;padding:4px 8px;letter-spacing:1px}.change{font-size:11px;font-weight:750}.coin-price{font-size:29px;font-weight:780;letter-spacing:-1px;margin:8px 0}.coin-meta{font-size:10px;color:var(--muted)}.related{border-top:1px solid var(--line);margin-top:18px;padding-top:14px}.related a{display:block;font-size:11px;margin-top:8px;line-height:1.6}.muted{color:var(--muted);font-size:11px}.up{color:var(--green)}.down{color:var(--red)}.neutral{color:var(--muted)}
+    .research-section{margin-top:32px}.insight-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.insight-card{padding:22px}.insight-top{display:flex;justify-content:space-between;gap:10px;align-items:center;margin-bottom:12px}.insight-card h3{font-size:16px;letter-spacing:-.5px;margin-bottom:17px}.insight-step{border-left:2px solid #dce3d8;padding-left:12px;margin:13px 0}.insight-step>span{font-size:10px;color:var(--muted);font-weight:700}.insight-step p{font-size:12px;margin:4px 0;line-height:1.8}.insight-step.interpretation{border-color:#61a387}.insight-card details{font-size:11px;color:var(--muted);margin-top:15px}.insight-card summary{cursor:pointer;font-weight:700;padding:5px 0}.insight-card details p{margin:8px 0}.insight-card ul{padding-left:17px}.evidence-links{border-top:1px solid var(--line);padding-top:14px;margin-top:17px;display:flex;gap:8px;flex-wrap:wrap}.evidence-button{background:#f2f5ec;border:1px solid #d9e2d2;border-radius:5px;padding:5px 9px;font-size:10px;color:#315844}.research-method{font-size:10px;color:var(--muted);margin:12px 0 0}
+    .middle{display:grid;grid-template-columns:1fr;gap:18px;margin:24px 0 32px}.chart-panel{padding:22px}.chart-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:26px}.bar-row{display:grid;grid-template-columns:35px 1fr 63px;gap:10px;align-items:center;font-size:11px;margin-top:16px}.bar-row strong{text-align:right;font-variant-numeric:tabular-nums}.bar-track{height:8px;background:#eef1e8;border-radius:20px;overflow:hidden}.bar{height:100%;border-radius:20px}.bar.up{background:#378d68}.bar.down{background:#c66675}.bar.neutral{background:#9baaa0}.chart-note{font-size:10px;color:var(--muted);margin:13px 0 0}.news-list{display:grid;grid-template-columns:1fr 1fr;gap:15px}.news-list[data-view=list]{grid-template-columns:1fr}.news-card{padding:22px;scroll-margin-top:20px}.news-meta{font-size:9px;color:var(--muted);overflow-wrap:anywhere;margin-bottom:12px}.tag{display:inline-block;padding:2px 5px;border:1px solid var(--line);border-radius:4px;font-size:8px;margin:5px 0 0 6px}.news-card h3{font-size:16px;letter-spacing:-.4px}.news-card p{font-size:11px;color:var(--muted);margin:10px 0 0}.news-actions{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:17px;padding-top:13px;border-top:1px solid var(--line)}.news-actions button{border:0;background:none;padding:4px 0;color:var(--green);font-size:10px;font-weight:750}.body-status{font-size:9px;color:var(--muted)}.view-buttons{display:flex;gap:5px}.view-button{font-size:10px;padding:5px 9px}
+    .table-section{margin-top:32px}.table-wrap{overflow-x:auto;background:#fff;border:1px solid var(--line);border-radius:12px}table{width:100%;border-collapse:collapse;font-size:11px;white-space:nowrap}th,td{text-align:right;padding:15px 17px;border-bottom:1px solid var(--line)}thead th{color:var(--muted);font-size:9px;letter-spacing:.6px;background:#fafbf6}th:first-child{text-align:left}tbody tr:last-child th,tbody tr:last-child td{border-bottom:0}td:last-child{font-size:9px;color:var(--muted)}footer{padding:26px 0 35px;margin-top:30px;border-top:1px solid var(--line);font-size:10px;color:var(--muted);overflow-wrap:anywhere}footer p{margin:6px 0}.footer-head{display:flex;justify-content:space-between;gap:15px;font-weight:700;margin-bottom:12px}.issue{color:var(--red)}.empty{padding:20px;color:var(--muted);font-size:12px}
+    dialog{width:min(1080px,calc(100vw - 40px));max-height:calc(100dvh - 48px);border:1px solid var(--line);border-radius:17px;padding:0;color:var(--ink);background:#f9faf5;box-shadow:0 30px 100px #12282033;overflow:auto}dialog::backdrop{background:#13251bcc;backdrop-filter:blur(4px)}.scroll-lock{overflow:hidden}.dialog-header{padding:23px 26px;border-bottom:1px solid var(--line);background:#fff;display:flex;justify-content:space-between;gap:18px;position:sticky;top:0;z-index:2}.dialog-header h2{font-size:19px;line-height:1.5;margin-top:6px}.dialog-meta{font-size:10px;color:var(--muted);margin:9px 0 0;overflow-wrap:anywhere}.dialog-close{flex:0 0 32px;align-self:flex-start;height:32px;border:1px solid var(--line);border-radius:7px;background:#f7f9f3;font-size:20px;line-height:1}.dialog-grid{display:grid;grid-template-columns:1.35fr 1fr}.article-body{padding:25px 26px;border-right:1px solid var(--line)}.article-body h3,.article-analysis h3{font-size:14px;margin-bottom:14px}.body-paragraph{padding:14px 16px;background:#fff;border:1px solid var(--line);border-radius:8px;margin:13px 0;scroll-margin-top:180px}.body-paragraph.selected{border-color:#c38b39;background:#fff4e1;box-shadow:0 0 0 2px #efdcba}.paragraph-meta{display:flex;justify-content:space-between;gap:14px;align-items:center;font-size:9px;color:var(--muted);margin-bottom:8px}.paragraph-meta a{color:var(--green)}.body-paragraph p{font-size:12px;line-height:1.95;margin:0}.original-link{display:inline-block;padding:7px 11px;background:var(--green);color:#fff;border-radius:6px;font-size:10px;font-weight:700;margin-top:12px}.article-analysis{padding:25px 26px}.analysis-block{padding:15px 0;border-top:1px solid var(--line);font-size:12px}.analysis-block h4{font-size:11px;margin:0 0 7px;color:var(--green)}.analysis-block p{margin:0;line-height:1.8}.analysis-block ul{padding-left:17px;margin:7px 0}.dialog-note{font-size:10px;color:var(--muted);margin-top:16px}.dialog-demo{display:inline-block;font-size:9px;padding:3px 7px;background:#f4e8cc;color:#735415;border-radius:4px;margin-top:10px}
+    @media(max-width:860px){.dominance-section{grid-template-columns:1fr}.research-panel{display:grid;grid-template-columns:1fr 1fr;gap:0 22px}.research-panel>h2,.research-panel>.eyebrow,.research-panel>.research-intro,.research-panel>.research-status{grid-column:1/-1}.chart-grid{grid-template-columns:1fr;gap:0}.dialog-grid{grid-template-columns:1fr}.article-body{border-right:0;border-bottom:1px solid var(--line)}}
+    @media(max-width:640px){.wrap{padding:0 18px}.nav{min-height:62px}.nav-links{gap:12px;font-size:10px}.brand{font-size:17px}.hero{padding-top:28px}.stats{grid-template-columns:repeat(2,1fr);gap:9px}.stat{padding:15px}.stat-value{font-size:25px}.panel{padding:19px}.panel-heading{flex-wrap:wrap}.coin-grid,.insight-grid,.news-list{grid-template-columns:1fr}.section-heading{align-items:flex-start;flex-direction:column;gap:8px}.workspace-toolbar{gap:13px}.search-wrap{width:100%}.search-wrap input{flex:1;width:0;min-width:0}.research-panel{display:flex}.filter-button{font-size:10px;padding:7px 9px}.footer-head{flex-direction:column;gap:4px}.scenario-bottom{align-items:flex-start}.scenario-bottom p{max-width:230px}dialog{width:calc(100vw - 20px);max-height:calc(100dvh - 20px);border-radius:12px}.dialog-header,.article-body,.article-analysis{padding:18px}.dialog-header h2{font-size:17px}.dialog-header{position:relative}.body-paragraph{scroll-margin-top:20px}.insight-top{flex-wrap:wrap}.circle-value{font-size:32px}.diagram-note{font-size:9px}}
+    @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;transition:none!important}}
+    @media print{body{background:white}.nav-links,.workspace-toolbar,.scenario-controls,.view-buttons{display:none}.wrap{max-width:none;padding:0 12px}.news-card,.insight-card,.coin-card{break-inside:avoid}.research-panel{background:white;color:var(--ink)}.research-panel p,.research-panel .eyebrow,.research-status{color:var(--muted)}}
+  </style>
+</head>
+<body>
+  <header class="topbar"><div class="wrap nav"><a class="brand" href="#">HireMe<span> / Research</span></a><nav class="nav-links" aria-label="보고서 메뉴"><a href="#dominance">도미넌스</a><a href="#insights">인사이트</a><a href="#news">뉴스</a></nav></div></header>
+  <main class="wrap">
+    <section class="hero"><div class="hero-top"><span class="eyebrow">DAILY CRYPTO RESEARCH · $date · KST</span><span class="badge">$badge</span></div><h1>$page_title</h1><p class="lead">뉴스를 읽고, 근거를 확인하고, 시장의 구성을 탐색하세요.</p></section>
+    <section class="stats" aria-label="전체 시장 지표"><div class="stat"><div class="stat-label">전체 시가총액 · USD</div><div class="stat-value">$market_cap</div></div><div class="stat"><div class="stat-label">24시간 거래량 · USD</div><div class="stat-value">$volume</div></div><div class="stat"><div class="stat-label">관측 BTC 도미넌스</div><div class="stat-value">$dominance</div></div><div class="stat"><div class="stat-label">본문 기반 인사이트 / 뉴스</div><div class="stat-value">$insight_count / $news_count</div></div></section>
+    <section id="dominance" class="dominance-section">
+      <article class="panel diagram-panel"><div class="panel-heading"><div><h2>시장의 구성, 이야기의 연결</h2><p>원을 클릭해 관련 뉴스와 인사이트를 골라보세요.</p></div><span class="diagram-note">집합 도식 · 면적 비례 아님</span></div>
+        <svg class="dominance-svg" viewBox="0 0 660 390" aria-labelledby="dominance-title dominance-desc">
+          <title id="dominance-title">코인 시장의 BTC·비BTC·ETH 도미넌스 집합 다이어그램</title><desc id="dominance-desc">BTC와 비BTC는 서로 분리된 시장이고 ETH는 비BTC의 부분집합입니다. 원의 면적은 점유율에 비례하지 않습니다.</desc>
+          <g role="button" tabindex="0" data-scope="all" aria-label="전체 시장 보기" aria-pressed="true"><ellipse class="diagram-market" cx="330" cy="200" rx="300" ry="176"/><text x="330" y="56" text-anchor="middle" fill="#647667" style="font-size:11px;font-weight:700;letter-spacing:2px">CRYPTO MARKET · 100%</text></g>
+          <g role="button" tabindex="0" data-scope="bitcoin" aria-label="BTC 관련 뉴스와 인사이트" aria-pressed="false"><circle class="diagram-btc" cx="203" cy="210" r="103"/><text class="circle-label" x="203" y="177" text-anchor="middle" fill="#956024">BITCOIN</text><text id="diagram-btc-value" class="circle-value" x="203" y="219" text-anchor="middle" fill="#9b591c">$dominance</text><text x="203" y="247" text-anchor="middle" fill="#a47441" style="font-size:10px">전체 시장에서 BTC 비중</text></g>
+          <g role="button" tabindex="0" data-scope="altcoins" aria-label="비BTC 관련 뉴스와 인사이트" aria-pressed="false"><circle class="diagram-alts" cx="455" cy="211" r="104"/><text class="circle-label" x="455" y="148" text-anchor="middle" fill="#296547">NON-BTC</text><text id="diagram-alt-value" x="455" y="179" text-anchor="middle" fill="#276b4b" style="font-size:26px;font-weight:800">$alt_dominance</text></g>
+          <g role="button" tabindex="0" data-scope="ethereum" aria-label="ETH 관련 뉴스와 인사이트" aria-pressed="false"><circle class="diagram-eth" cx="455" cy="250" r="48"/><text x="455" y="240" text-anchor="middle" fill="#715592" style="font-size:11px;font-weight:800">ETH</text><text id="diagram-eth-value" x="455" y="262" text-anchor="middle" fill="#684b8d" style="font-size:20px;font-weight:800">$eth_dominance</text></g>
+          <text x="330" y="361" text-anchor="middle" fill="#738273" style="font-size:10px">BTC ∩ 비BTC = ∅ · ETH ⊂ 비BTC</text>
+        </svg>
+        <div class="scenario-controls"><label class="scenario-label" for="dominance-slider"><span>BTC 도미넌스 가정</span><strong id="scenario-value">$dominance</strong></label><input type="range" id="dominance-slider" min="0" max="100" step="0.1" value="$dominance_value" $dominance_disabled><div class="scenario-bottom"><p>시세는 바뀌지 않습니다. 비BTC 내부 ETH 구성비는 기준값에 고정합니다.</p><button id="reset-dominance" class="text-button" type="button" $dominance_disabled>관측값으로 복원 ↺</button></div><p id="scenario-status" class="scenario-status" aria-live="polite">관측 데이터의 구성 비중을 표시하고 있습니다.</p></div>
+      </article>
+      <aside class="panel research-panel"><span class="eyebrow">BEYOND THE HEADLINE</span><h2>요약을 넘어,<br>무엇을 확인해야 할까?</h2><p class="research-intro">본문 관측과 해석을 분리하고, 원문 문단까지 돌아갈 수 있는 리서치 메모입니다.</p>$research_questions<div class="research-status"><b>$research_status</b><p>규칙 기반 해석 초안 · 독립적 사실 검증 / LLM 분석 미수행</p></div></aside>
+    </section>
+    <div class="workspace-toolbar"><div class="filters" role="group" aria-label="코인 필터"><button type="button" class="filter-button" data-scope="all" aria-pressed="true">전체</button><button type="button" class="filter-button" data-scope="bitcoin" aria-pressed="false">BTC</button><button type="button" class="filter-button" data-scope="altcoins" aria-pressed="false">비BTC</button><button type="button" class="filter-button" data-scope="ethereum" aria-pressed="false">ETH</button><button type="button" class="filter-button" data-scope="solana" aria-pressed="false">SOL</button><button type="button" class="filter-button" data-scope="macro" aria-pressed="false">거시경제</button></div><div class="search-wrap"><input id="news-search" type="search" aria-label="뉴스와 인사이트 검색" placeholder="뉴스 · 본문 · 인사이트 검색"><button class="export-button" id="download-research" type="button">리서치 JSON ↓</button></div></div>
+    <p class="filter-status" id="filter-status" aria-live="polite">전체 · 뉴스 $news_count건 · 인사이트 $insight_count개</p>
+    <section id="market"><div class="section-heading"><h2>리서치에 연결된 시장 관측</h2><p>가격의 원인을 추정하지 않고 같은 화면에서 비교합니다.</p></div><div class="coin-grid">$coins</div></section>
+    <section id="insights" class="research-section"><div class="section-heading"><h2>본문에서 출발한 인사이트</h2><p>근거 버튼을 누르면 해당 문단이 열립니다.</p></div><div class="insight-grid">$insights</div><p id="insight-empty" class="empty" hidden>이 조건에서 본문 근거가 연결된 인사이트가 없습니다.</p><p class="research-method">기사에 보고된 내용과 분석기의 해석 초안을 구분했습니다. 검증된 결론이나 매매 신호가 아닙니다.</p></section>
+    <section class="middle"><article class="panel chart-panel"><h3>24시간 가격 변화</h3><div class="chart-grid">$comparison</div><p class="chart-note">각 코인의 등락률 · 막대 길이는 절대 등락률 비교</p></article></section>
+    <section id="news"><div class="section-heading"><h2>기사와 근거 살펴보기</h2><div class="view-buttons" role="group" aria-label="뉴스 보기 방식"><button type="button" class="view-button" data-view="grid" aria-pressed="true">카드</button><button type="button" class="view-button" data-view="list" aria-pressed="false">목록</button></div></div><div class="news-list" id="news-list" data-view="grid">$news</div><p id="news-empty" class="empty" hidden>검색과 필터 조건에 맞는 뉴스가 없습니다.</p></section>
+    <section id="data" class="table-section"><div class="section-heading"><h2>시장 데이터 상세</h2><p>USD · 등락률은 24시간 기준</p></div><div class="table-wrap"><table><thead><tr><th scope="col">코인</th><th scope="col">가격</th><th scope="col">24h 변동</th><th scope="col">시가총액</th><th scope="col">24h 거래량</th><th scope="col">데이터 갱신 시각</th></tr></thead><tbody>$rows</tbody></table></div></section>
+    <footer><div class="footer-head"><span>HireMe · Research → Interactive Design</span><span>$badge</span></div><p>뉴스 수집: $news_time</p><p>시세 조회 / 데모 기준: $market_time · <a href="$market_link" target="_blank" rel="noopener noreferrer">$market_source</a></p><p>뉴스 날짜와 시세 기준 시각은 다를 수 있습니다. 도미넌스 슬라이더는 가정 탐색이며 실제 관측값을 변경하지 않습니다.</p>$issues</footer>
+    <noscript><p class="empty">기본 보고서는 그대로 읽을 수 있습니다. 필터·본문 패널·가정 탐색은 JavaScript를 켜야 사용할 수 있습니다.</p></noscript>
+  </main>
+  <dialog id="article-dialog" aria-labelledby="article-title"><div class="dialog-header"><div><span class="eyebrow">ARTICLE · SOURCE · INSIGHT</span><h2 id="article-title"></h2><p id="article-meta" class="dialog-meta"></p><span id="article-demo" class="dialog-demo" hidden>가상 기사 본문 · 데모 자료</span></div><button type="button" class="dialog-close" id="close-article" aria-label="기사 상세 닫기" autofocus>×</button></div><div class="dialog-grid"><section class="article-body"><h3>출처와 연결된 본문 근거</h3><div id="article-paragraphs"></div><a id="article-original" class="original-link" target="_blank" rel="noopener noreferrer">원문 기사 열기 ↗</a></section><section class="article-analysis"><h3>이 기사에서 얻은 리서치 메모</h3><div id="article-insights"></div><p class="dialog-note">원문에 보고된 내용과 규칙 기반 해석을 분리했습니다. 원문 문단 번호는 분석기가 읽은 순서를 뜻합니다.</p></section></div></dialog>
+  <script type="application/json" id="report-data">$report_data</script>
+  <script>
+    (function () {
+      'use strict';
+      var data = JSON.parse(document.getElementById('report-data').textContent);
+      var scope = 'all';
+      var labels = {all:'전체',bitcoin:'BTC',altcoins:'비BTC',ethereum:'ETH',solana:'SOL',macro:'거시경제'};
+      var search = document.getElementById('news-search');
+      var news = data.news.highlights || [];
+      var insights = data.news.insights || [];
+      var dialog = document.getElementById('article-dialog');
+      var lastTrigger = null;
+      function matches(assets) {
+        if (scope === 'all') return true;
+        if (scope === 'altcoins') return assets.some(function(a){return a !== 'bitcoin' && a !== 'macro';});
+        return assets.indexOf(scope) >= 0;
+      }
+      function searchable(index) {
+        var item = news[index];
+        if (!item) return '';
+        var text = item.headline + ' ' + item.summary;
+        (item.article && item.article.paragraphs || []).forEach(function(p){text += ' ' + p.text;});
+        insights.filter(function(i){return i.articleId === item.id;}).forEach(function(i){text += ' ' + i.title + ' ' + i.interpretation + ' ' + i.counterpoint + ' ' + i.watchMetrics.join(' ');});
+        return text.toLocaleLowerCase();
+      }
+      function applyFilters() {
+        var query = search.value.trim().toLocaleLowerCase();
+        document.querySelectorAll('[data-filter-assets]').forEach(function(element){
+          var visible = matches(element.dataset.filterAssets.split(' '));
+          var index = element.dataset.newsIndex || element.dataset.insightArticle;
+          if (index !== undefined && query) visible = visible && searchable(Number(index)).indexOf(query) >= 0;
+          element.hidden = !visible;
+        });
+        var newsCount = document.querySelectorAll('.news-card:not([hidden])').length;
+        var insightCount = document.querySelectorAll('.insight-card:not([hidden])').length;
+        document.getElementById('filter-status').textContent = labels[scope] + ' · 뉴스 ' + newsCount + '건 · 인사이트 ' + insightCount + '개';
+        document.getElementById('news-empty').hidden = newsCount !== 0 || news.length === 0;
+        document.getElementById('insight-empty').hidden = insightCount !== 0;
+      }
+      function selectScope(next) {
+        scope = next;
+        document.querySelectorAll('[data-scope]').forEach(function(el){el.setAttribute('aria-pressed', String(el.dataset.scope === scope));});
+        applyFilters();
+      }
+      document.querySelectorAll('[data-scope]').forEach(function(el){
+        el.addEventListener('click', function(){selectScope(el.dataset.scope);});
+        if (el.tagName.toLowerCase() === 'g') el.addEventListener('keydown', function(e){if(e.key === 'Enter' || e.key === ' '){e.preventDefault();selectScope(el.dataset.scope);}});
+      });
+      search.addEventListener('input', applyFilters);
+      var slider = document.getElementById('dominance-slider');
+      function updateScenario() {
+        var baseline = data.dominance.btc;
+        var status = document.getElementById('scenario-status');
+        if (baseline === null) {status.textContent='BTC 도미넌스 자료가 없어 가정 탐색을 사용할 수 없습니다.';return;}
+        var value = Number(slider.value);
+        var alt = 100 - value;
+        var eth = data.dominance.eth === null ? null : (100 - baseline > 0 ? alt * data.dominance.eth / (100 - baseline) : 0);
+        document.getElementById('scenario-value').textContent = value.toFixed(1) + '%';
+        document.getElementById('diagram-btc-value').textContent = value.toFixed(1) + '%';
+        document.getElementById('diagram-alt-value').textContent = alt.toFixed(1) + '%';
+        document.getElementById('diagram-eth-value').textContent = eth === null ? '미제공' : eth.toFixed(1) + '%';
+        var assumed = Math.abs(value - baseline) > .05;
+        status.classList.toggle('assumed', assumed);
+        status.textContent = assumed ? '시나리오 · 실시간 관측 아님 · 기준 BTC ' + baseline.toFixed(1) + '%' : '관측 데이터의 구성 비중을 표시하고 있습니다.';
+      }
+      slider.addEventListener('input', updateScenario);
+      document.getElementById('reset-dominance').addEventListener('click', function(){slider.value=data.dominance.btc;updateScenario();});
+      function node(tag, text, className) {var el=document.createElement(tag);if(text!==undefined)el.textContent=text;if(className)el.className=className;return el;}
+      function safeLink(value) {try{var url=new URL(value);return url.protocol==='https:' && !url.username && !url.password ? url.href : '#';}catch(e){return '#';}}
+      function openArticle(index, paragraphId, trigger) {
+        var item = news[index];
+        if (!item) return;
+        lastTrigger=trigger || lastTrigger;
+        document.getElementById('article-title').textContent=item.headline;
+        document.getElementById('article-meta').textContent=item.source + ' · ' + item.publishedAt;
+        document.getElementById('article-demo').hidden=!data.news.demo;
+        var body=document.getElementById('article-paragraphs');
+        body.replaceChildren();
+        var paragraphs=item.article && item.article.paragraphs || [];
+        var target=null;
+        if (!paragraphs.length) body.append(node('p', item.article && item.article.error || '이 기사 본문은 확인되지 않았습니다. RSS 요약만 보존했으며 본문 근거에 연결된 인사이트는 만들지 않았습니다.', 'muted'));
+        paragraphs.forEach(function(p){
+          var section=node('div',undefined,'body-paragraph');
+          var meta=node('div',undefined,'paragraph-meta');
+          meta.append(node('span',p.id + ' · 원문에서 읽은 문단'));
+          var link=node('a','원문 위치 ↗');
+          var base=safeLink(item.url);
+          link.href=base === '#' ? '#' : base.split('#')[0] + '#:~:text=' + encodeURIComponent(p.text.slice(0,80));
+          link.target='_blank';link.rel='noopener noreferrer';meta.append(link);
+          section.append(meta,node('p',p.text));
+          if(p.id===paragraphId){section.classList.add('selected');target=section;}
+          body.append(section);
+        });
+        document.getElementById('article-original').href=safeLink(item.url);
+        var analysis=document.getElementById('article-insights');analysis.replaceChildren();
+        var related=insights.filter(function(i){return i.articleId===item.id;});
+        if(!related.length) analysis.append(node('p','본문 근거가 연결된 리서치 메모가 없습니다.','muted'));
+        related.forEach(function(insight){
+          analysis.append(node('h3',insight.title));
+          [['본문 관측',insight.observation],['해석 초안',insight.interpretation],['반대 설명',insight.counterpoint]].forEach(function(pair){var block=node('div',undefined,'analysis-block');block.append(node('h4',pair[0]),node('p',pair[1]));analysis.append(block);});
+          var metrics=node('div',undefined,'analysis-block');metrics.append(node('h4','다음으로 확인할 지표'));var list=node('ul');insight.watchMetrics.forEach(function(m){list.append(node('li',m));});metrics.append(list);analysis.append(metrics,node('p',insight.limitation,'dialog-note'));
+        });
+        if(!dialog.open)dialog.showModal();document.body.classList.add('scroll-lock');
+        if(target)requestAnimationFrame(function(){target.scrollIntoView({block:'center'});});
+      }
+      document.querySelectorAll('[data-open-article]').forEach(function(el){el.addEventListener('click',function(e){e.preventDefault();openArticle(Number(el.dataset.openArticle),el.dataset.paragraph,el);});});
+      document.getElementById('close-article').addEventListener('click',function(){dialog.close();});
+      dialog.addEventListener('click',function(e){if(e.target===dialog){var rect=dialog.getBoundingClientRect();if(e.clientX<rect.left||e.clientX>rect.right||e.clientY<rect.top||e.clientY>rect.bottom)dialog.close();}});
+      dialog.addEventListener('close',function(){document.body.classList.remove('scroll-lock');if(lastTrigger)lastTrigger.focus();});
+      document.querySelectorAll('[data-view]').forEach(function(button){button.addEventListener('click',function(){document.getElementById('news-list').dataset.view=button.dataset.view;document.querySelectorAll('[data-view].view-button').forEach(function(el){el.setAttribute('aria-pressed',String(el===button));});});});
+      document.getElementById('download-research').addEventListener('click',function(){var blob=new Blob([JSON.stringify(data.news,null,2)],{type:'application/json'});var url=URL.createObjectURL(blob);var link=node('a');link.href=url;link.download='crypto-research-' + data.news.date + '.json';document.body.append(link);link.click();link.remove();setTimeout(function(){URL.revokeObjectURL(url);},1000);});
+      updateScenario();applyFilters();
+    }());
+  </script>
+</body>
+</html>

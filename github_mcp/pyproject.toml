@@ -1,0 +1,17 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "hireme-github-mcp"
+version = "0.1.0"
+description = "Separate GitHub agent content and tool definitions for HireMe"
+requires-python = ">=3.11"
+dependencies = ["mcp>=1.28,<2", "jsonschema>=4.23,<5"]
+
+[project.scripts]
+github-mcp = "github_mcp.cli:main"
+github-mcp-server = "github_mcp.server:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/github_mcp"]

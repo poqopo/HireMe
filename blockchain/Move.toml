@@ -1,0 +1,6 @@
+[package]
+name = "hireme_settlement"
+edition = "2024.beta"
+
+[addresses]
+hireme_settlement = "0x0"

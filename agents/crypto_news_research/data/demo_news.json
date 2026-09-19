@@ -1,0 +1,10 @@
+{
+  "date": "2026-09-19",
+  "timezone": "Asia/Seoul",
+  "items": [
+    {"id": "DEMO-N001", "title": "비트코인 현물 ETF 자금 흐름, 시장의 주요 관찰 지표로 주목", "excerpt": "가상 데모 뉴스: 비트코인 ETF 자금 흐름을 확인하는 리서치 시나리오입니다. 실제 자금 유입 수치를 주장하지 않습니다.", "source": "Demo Crypto Desk", "url": "https://example.org/crypto/bitcoin-etf", "publishedAt": "2026-09-19T08:40:00+09:00"},
+    {"id": "DEMO-N002", "title": "이더리움 네트워크 활동과 수수료 지표를 함께 살펴볼 때", "excerpt": "가상 데모 뉴스: 이더리움 네트워크 사용량과 수수료를 관찰하는 시나리오입니다. 실제 업데이트나 지표 변화를 뜻하지 않습니다.", "source": "Demo Chain Review", "url": "https://example.org/crypto/ethereum-network", "publishedAt": "2026-09-19T08:20:00+09:00"},
+    {"id": "DEMO-N003", "title": "솔라나 생태계 거래 활동, 코인 시장 브리핑의 관찰 항목", "excerpt": "가상 데모 뉴스: 솔라나 생태계 활동을 브리핑에 포함하는 시나리오입니다. 실제 프로젝트 발표를 인용하지 않습니다.", "source": "Demo Chain Review", "url": "https://example.org/crypto/solana-activity", "publishedAt": "2026-09-19T08:00:00+09:00"},
+    {"id": "DEMO-N004", "title": "달러와 금리 환경, 코인 시장 리서치에서 함께 확인할 배경", "excerpt": "가상 데모 뉴스: 거시경제 배경을 함께 점검하는 시나리오입니다. 실제 통화정책 발표나 가격 변동의 원인을 주장하지 않습니다.", "source": "Demo Macro Notes", "url": "https://example.org/crypto/macro", "publishedAt": "2026-09-19T07:40:00+09:00"}
+  ]
+}
